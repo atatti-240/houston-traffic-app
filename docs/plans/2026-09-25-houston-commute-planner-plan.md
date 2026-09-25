@@ -33,7 +33,7 @@ API samples / 接口示例: `docs/contracts/*.json` (copy into the repo, see T0.
 **Done when:** tests pass and both servers start on your machine. / 测试通过、两个服务都能启动。
 
 ### T0.2 Keep the real-data logger running / 数据记录程序持续运行 — Owner: A · 10 min
-1. On one always-on computer (plugged in, sleep off): `cd E:\Ion_Hackathon && spikes\.venv\Scripts\python spikes\logger.py`
+1. On one always-on computer (plugged in, sleep off): from the repo root `spikes\.venv\Scripts\python spikes\logger.py` (create the venv first, see `spikes/README.md`)
 2. Check once tonight: `spikes\.venv\Scripts\python spikes\log_report.py`
 **Done when:** report shows new ticks and 0–few errors. / 报告里有新记录。
 
