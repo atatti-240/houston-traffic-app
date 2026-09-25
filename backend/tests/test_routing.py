@@ -71,3 +71,10 @@ def test_live_blockage_reroutes(trained):
 def test_unknown_node_raises(router):
     with pytest.raises(NoRouteError):
         router.route("downtown", "atlantis", MON(8))
+
+
+def test_safe_path_explains_itself_without_repeating_roads(router):
+    safe, _ = router.route("downtown", "hobby", MON(17, 10), safe_path=True)
+    assert any(r.startswith("Safe Path:") and "less crash exposure" in r for r in safe.reasons)
+    avoided = [r.split(":")[0] for r in safe.reasons if r.startswith("Avoided")]
+    assert len(avoided) == len(set(avoided))

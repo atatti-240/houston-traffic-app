@@ -316,16 +316,23 @@ class Router:
                         f"{c.block_probability:.0%} chance of a train around {_fmt(c.arrive_at)}"
                     )
                     reasons.append(f"Avoided {c.name}: {what}")
+            avoided_roads: set[str] = set()
             for s in naive.segments:
-                if s.id in on_route:
+                if s.id in on_route or s.name in avoided_roads:
                     continue
                 if chosen.safe_path and s.crash_risk >= CRASH_REASON_RISK:
                     reasons.append(f"Avoided {s.name}: crash risk {s.crash_risk:.0%} around {_fmt(s.enter_at)}")
+                    avoided_roads.add(s.name)
                 elif s.congestion >= CONGESTION_REASON_SCORE:
                     reasons.append(f"Avoided {s.name}: heavy congestion expected around {_fmt(s.enter_at)}")
+                    avoided_roads.add(s.name)
             saved = (naive.arrive_at - chosen.arrive_at).total_seconds() / 60
             if saved >= 1:
                 reasons.append(f"About {saved:.0f} min faster than a traffic-only route")
+            if chosen.safe_path and naive.crash_exposure > 0 and chosen.crash_exposure < naive.crash_exposure:
+                drop = 1 - chosen.crash_exposure / naive.crash_exposure
+                extra = f" for +{-saved:.0f} min" if saved <= -1 else ""
+                reasons.append(f"Safe Path: {drop:.0%} less crash exposure than the fastest route{extra}")
 
         # Heads-ups on the chosen route itself.
         for c in chosen.crossings:
@@ -336,9 +343,12 @@ class Router:
                     f"Heads up: {c.block_probability:.0%} chance of a train at {c.name} around "
                     f"{_fmt(c.arrive_at)} (~{c.expected_delay_s / 60:.0f} min expected)"
                 )
+        worst: dict[str, float] = {}
         for s in chosen.segments:
             if s.crash_risk >= CRASH_REASON_RISK and s.road_class == "freeway":
-                reasons.append(f"Heads up: elevated crash risk on {s.name} ({s.crash_risk:.0%})")
+                worst[s.name] = max(worst.get(s.name, 0.0), s.crash_risk)
+        for name, risk in worst.items():
+            reasons.append(f"Heads up: elevated crash risk on {name} ({risk:.0%})")
 
         seen, unique = set(), []
         for r in reasons:
