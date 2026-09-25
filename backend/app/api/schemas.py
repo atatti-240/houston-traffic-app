@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
 from app.recommender import Recommendation, route_summary
@@ -26,7 +28,9 @@ class RouteRequest(BaseModel):
 class RecommendRequest(BaseModel):
     origin: Location
     destination: Location
-    arrive_by: str = Field(..., description="ISO datetime, or HH:MM meaning today (simulated)")
+    arrive_by: str = Field(
+        ..., description="ISO datetime, or HH:MM meaning the next time that clock time comes up (simulated)"
+    )
     safe_path: bool = False
     buffer_min: int = Field(5, ge=0, le=60)
 
@@ -35,8 +39,10 @@ class TripIn(BaseModel):
     name: str = "My commute"
     origin: str
     destination: str
-    arrive_by: str = Field(..., pattern=r"^\d{2}:\d{2}$")
-    days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+    arrive_by: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$", description="24h HH:MM")
+    days: list[Annotated[int, Field(ge=0, le=6)]] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4], min_length=1, description="Weekdays, Mon=0 .. Sun=6"
+    )
     safe_path: bool = False
     device_id: str | None = None
 

@@ -26,6 +26,7 @@ ALT_PENALTY = 1.5  # cost multiplier on the best route's segments when looking f
 TRAIN_REASON_P = 0.25
 CRASH_REASON_RISK = 0.45
 CONGESTION_REASON_SCORE = 0.5
+SAFE_REASON_MIN_DROP = 0.05  # don't brag about a crash-exposure drop smaller than this
 
 
 @dataclass
@@ -303,6 +304,27 @@ class Router:
             if c.live and c.id not in chosen_crossings
         ]
 
+    @staticmethod
+    def _skipped_stretches(naive: Route, on_route: set[str]) -> list[list[SegmentOnRoute]]:
+        """Runs of consecutive traffic-only-route segments on the same road that we skip."""
+        stretches: list[list[SegmentOnRoute]] = []
+        prev_skipped = False
+        for s in naive.segments:
+            skipped = s.id not in on_route
+            if skipped and prev_skipped and stretches[-1][-1].name == s.name:
+                stretches[-1].append(s)
+            elif skipped:
+                stretches.append([s])
+            prev_skipped = skipped
+        # One reason per road: keep the first stretch of each.
+        seen: set[str] = set()
+        return [st for st in stretches if not (st[0].name in seen or seen.add(st[0].name))]
+
+    def _place(self, segment_id: str, end: str) -> str:
+        seg = self.network.segments[segment_id]
+        name = self.network.nodes[seg.from_node if end == "from" else seg.to_node].name
+        return name.removeprefix(f"{seg.name} @ ")
+
     def _reasons(self, chosen: Route, naive: Route) -> list[str]:
         reasons: list[str] = []
         on_route = set(chosen.segment_ids)
@@ -316,23 +338,26 @@ class Router:
                         f"{c.block_probability:.0%} chance of a train around {_fmt(c.arrive_at)}"
                     )
                     reasons.append(f"Avoided {c.name}: {what}")
-            avoided_roads: set[str] = set()
-            for s in naive.segments:
-                if s.id in on_route or s.name in avoided_roads:
-                    continue
-                if chosen.safe_path and s.crash_risk >= CRASH_REASON_RISK:
-                    reasons.append(f"Avoided {s.name}: crash risk {s.crash_risk:.0%} around {_fmt(s.enter_at)}")
-                    avoided_roads.add(s.name)
-                elif s.congestion >= CONGESTION_REASON_SCORE:
-                    reasons.append(f"Avoided {s.name}: heavy congestion expected around {_fmt(s.enter_at)}")
-                    avoided_roads.add(s.name)
+            chosen_roads = {s.name for s in chosen.segments}
+            for stretch in self._skipped_stretches(naive, on_route):
+                first = stretch[0]
+                where = first.name
+                if first.name in chosen_roads:  # we still drive part of it: name the stretch
+                    where = f"{first.name} from {self._place(stretch[0].id, 'from')} to {self._place(stretch[-1].id, 'to')}"
+                risk = max(s.crash_risk for s in stretch)
+                jam = max(s.congestion for s in stretch)
+                if chosen.safe_path and risk >= CRASH_REASON_RISK:
+                    reasons.append(f"Avoided {where}: crash risk {risk:.0%} around {_fmt(first.enter_at)}")
+                elif jam >= CONGESTION_REASON_SCORE:
+                    reasons.append(f"Avoided {where}: heavy congestion expected around {_fmt(first.enter_at)}")
             saved = (naive.arrive_at - chosen.arrive_at).total_seconds() / 60
             if saved >= 1:
                 reasons.append(f"About {saved:.0f} min faster than a traffic-only route")
-            if chosen.safe_path and naive.crash_exposure > 0 and chosen.crash_exposure < naive.crash_exposure:
+            if chosen.safe_path and naive.crash_exposure > 0:
                 drop = 1 - chosen.crash_exposure / naive.crash_exposure
-                extra = f" for +{-saved:.0f} min" if saved <= -1 else ""
-                reasons.append(f"Safe Path: {drop:.0%} less crash exposure than the fastest route{extra}")
+                if drop >= SAFE_REASON_MIN_DROP:
+                    extra = f" for +{-saved:.0f} min" if saved <= -1 else ""
+                    reasons.append(f"Safe Path: {drop:.0%} less crash exposure than the traffic-only route{extra}")
 
         # Heads-ups on the chosen route itself.
         for c in chosen.crossings:

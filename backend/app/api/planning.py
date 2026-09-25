@@ -1,9 +1,11 @@
 """Routing, departure recommendations, saved trips and notifications."""
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 
-from app.api.deps import get_services, resolve_location, resolve_time
+from app.api.deps import get_services, is_clock_time, resolve_location, resolve_time
 from app.api.schemas import RecommendRequest, RouteRequest, TripIn, recommendation_json, route_json
 from app.models import Notification, Trip, TripState
 from app.recommender import recommend_departure
@@ -28,9 +30,12 @@ def recommend(req: RecommendRequest, svc: Services = Depends(get_services)):
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     arrive_by = resolve_time(svc, req.arrive_by)
     now = svc.clock.now()
-    earliest = now if arrive_by.date() == now.date() and arrive_by > now else None
+    if is_clock_time(req.arrive_by) and arrive_by <= now:
+        arrive_by += timedelta(days=1)  # "08:30" at 5 PM means tomorrow morning
     try:
-        rec = recommend_departure(svc.router, o, d, arrive_by, req.safe_path, req.buffer_min, earliest)
+        # earliest=now: never suggest leaving in the past. A deadline that already passed
+        # comes back as "leave now" with on_time=False.
+        rec = recommend_departure(svc.router, o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
     return recommendation_json(rec)

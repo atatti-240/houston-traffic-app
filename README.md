@@ -30,7 +30,7 @@ API docs: http://localhost:8000/docs
 | Command | What |
 |---|---|
 | `make backend` / `make frontend` | run one side |
-| `make seed` | rebuild network + replay history into `backend/data/app.db` |
+| `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make test` | backend pytest + frontend typecheck |
 
 Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
@@ -45,7 +45,7 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 4. **Live train on Old Spanish Trail.** A *"New route"* alert: *"Rerouted around Old Spanish Trail @ Almeda: blocked by a train right now"*.
 5. **7:35 AM.** *"Leave now"* alert with the route.
 6. **Evening: Downtown → Hobby.** The fastest route is the crash-prone I-45 Gulf Freeway.
-7. **Safe Path on.** The route moves off the Gulf Freeway: *"35% less crash exposure for +6 min"*.
+7. **Safe Path on.** The route skips the crash-prone stretch of the Gulf Freeway from downtown to 610: *"Safe Path: 35% less crash exposure than the traffic-only route for +6 min"*.
 
 You can also use the app yourself: pick places or click the map (📍), scrub the time slider to watch rush hour build, toggle crash-risk / crossing / camera layers, and use **+15m / +1h** to move the simulated clock.
 

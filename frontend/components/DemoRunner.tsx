@@ -69,7 +69,7 @@ const STEPS: Step[] = [
   },
   {
     title: "Flip on Safe Path 🛡️",
-    narration: "Safe Path trades a few minutes for a route that stays off the crash-prone freeway.",
+    narration: "Safe Path trades a few minutes for a route that skips the crash-prone stretch of the Gulf Freeway.",
     run: (a) => a.plan("downtown", "hobby", "17:45", true),
   },
   {
