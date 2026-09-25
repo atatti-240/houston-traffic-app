@@ -49,3 +49,24 @@ def trained():
     sources = build_sources("mock", factory, 42)
     replay_history(models, sources, date(2026, 9, 28), 56)
     return network, models, sources, factory
+
+
+@pytest.fixture
+def services(trained):
+    """Fresh DB with the trained scores, a frozen clock and mock sources."""
+    from datetime import datetime
+
+    from app.clock import SimClock
+    from app.services import Services
+
+    _, models, sources, _ = trained
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    init_db(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as s:
+        seed_network(s)
+        models.store.save(s)
+    sources.trains.clear_injected()
+    svc = Services(factory, clock=SimClock(datetime(2026, 9, 28, 6, 0), speed=0), sources=sources)
+    yield svc
+    sources.trains.clear_injected()
