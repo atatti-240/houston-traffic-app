@@ -145,7 +145,10 @@ export default function MapView(p: MapViewProps) {
       {p.layers.trains &&
         p.crossings.map((c) => (
           <CircleMarker
-            key={c.id}
+            // Leaflet only reads className when the layer is created, so remount when the
+            // blocked state flips.
+            key={`${c.id}-${c.live_blocked_until ? "blocked" : "open"}`}
+            className={c.live_blocked_until ? "pulse" : undefined}
             center={[c.lat, c.lng]}
             radius={c.live_blocked_until ? 11 : 7 + 6 * c.block_probability}
             pathOptions={{
@@ -153,7 +156,6 @@ export default function MapView(p: MapViewProps) {
               weight: c.live_blocked_until ? 3 : 1.5,
               fillColor: crossingColor(c),
               fillOpacity: 0.9,
-              className: c.live_blocked_until ? "pulse" : undefined,
             }}
           >
             <Tooltip direction="top">
@@ -179,6 +181,7 @@ export default function MapView(p: MapViewProps) {
             key={cam.id}
             center={cam.kind === "train" ? [cam.lat + 0.0012, cam.lng + 0.0012] : [cam.lat, cam.lng]}
             radius={5}
+            bubblingMouseEvents={false}
             pathOptions={{ color: "#0f172a", weight: 1, fillColor: cam.kind === "train" ? "#f59e0b" : "#0ea5e9", fillOpacity: 1 }}
             eventHandlers={{ click: () => p.onCameraClick?.(cam) }}
           >
@@ -194,6 +197,7 @@ export default function MapView(p: MapViewProps) {
           key={pl.id}
           center={[pl.lat, pl.lng]}
           radius={4}
+          bubblingMouseEvents={false}
           pathOptions={{ color: "#0f172a", weight: 1, fillColor: "#ffffff", fillOpacity: 1 }}
           eventHandlers={{ click: () => p.onPlaceClick?.(pl) }}
         >

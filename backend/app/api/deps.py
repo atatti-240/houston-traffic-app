@@ -18,6 +18,10 @@ def resolve_location(svc: Services, loc: Location) -> str:
     return loc
 
 
+def is_clock_time(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 5 and value[2] == ":"
+
+
 def resolve_time(svc: Services, value: datetime | str | None) -> datetime:
     """None -> simulated now; 'HH:MM' -> today at that time (simulated date); else ISO."""
     now = svc.clock.now()
@@ -26,7 +30,7 @@ def resolve_time(svc: Services, value: datetime | str | None) -> datetime:
     if isinstance(value, datetime):
         return value.replace(tzinfo=None)
     try:
-        if len(value) == 5 and value[2] == ":":
+        if is_clock_time(value):
             hh, mm = map(int, value.split(":"))
             return datetime.combine(now.date(), time(hh, mm))
         return datetime.fromisoformat(value).replace(tzinfo=None)

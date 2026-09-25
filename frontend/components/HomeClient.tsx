@@ -64,10 +64,14 @@ export default function HomeClient() {
   const lastNoteId = useRef(0);
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
 
+  // Latest simulated time, readable synchronously by demo steps that run back to back.
   const clockRef = useRef<string | null>(null);
-  useEffect(() => {
-    clockRef.current = clock?.now ?? null;
-  }, [clock]);
+  const applyClock = useCallback((c: ClockState) => {
+    clockRef.current = c.now;
+    setClock(c);
+  }, []);
+  const initialized = useRef(false);
+  const toastTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const [camera, setCamera] = useState<Camera | null>(null);
   const [demo, setDemo] = useState(false);
@@ -80,11 +84,11 @@ export default function HomeClient() {
         setPlaces(p);
         setSegments(s);
         setCameras(c);
-        setClock(clk);
+        applyClock(clk);
         setBackendDown(false);
       })
       .catch(() => setBackendDown(true));
-  }, [refresh]);
+  }, [refresh, applyClock]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) return;
@@ -97,9 +101,9 @@ export default function HomeClient() {
 
   // Clock poll (the simulated clock runs in real time on the backend)
   useEffect(() => {
-    const id = setInterval(() => api.clock().then(setClock).catch(() => {}), 5000);
+    const id = setInterval(() => api.clock().then(applyClock).catch(() => {}), 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [applyClock]);
 
   // Layers for the shown time. Following live time: refetch when the clock's minute changes.
   const clockMinute = clock?.now.slice(0, 16);
@@ -130,7 +134,13 @@ export default function HomeClient() {
     if (!brandNew.length) return;
     setToasts((t) => [...brandNew, ...t].slice(0, 3));
     for (const n of brandNew) {
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== n.id)), 9000);
+      toastTimers.current.set(
+        n.id,
+        setTimeout(() => {
+          toastTimers.current.delete(n.id);
+          setToasts((t) => t.filter((x) => x.id !== n.id));
+        }, 9000),
+      );
       if (typeof Notification !== "undefined" && Notification.permission === "granted" && swReg.current) {
         swReg.current.showNotification(n.title, { body: n.body, icon: "/icon-192.png", tag: `n-${n.id}` }).catch(() => {});
       }
@@ -138,15 +148,23 @@ export default function HomeClient() {
   }, []);
 
   useEffect(() => {
-    // First load: fill the drawer quietly; only alerts that arrive after that get toasts.
-    api
-      .notifications(0)
-      .then((existing) => {
-        setNotes(existing);
-        lastNoteId.current = Math.max(lastNoteId.current, 0, ...existing.map((n) => n.id));
-      })
-      .catch(() => {});
-    const poll = () => api.notifications(lastNoteId.current).then(pushOut).catch(() => {});
+    // First successful load fills the drawer quietly; only alerts that arrive after that
+    // get toasts. If it fails, keep retrying the quiet fill instead of toasting old alerts.
+    const poll = () => {
+      if (!initialized.current) {
+        api
+          .notifications(0)
+          .then((existing) => {
+            initialized.current = true;
+            setNotes(existing);
+            lastNoteId.current = Math.max(lastNoteId.current, 0, ...existing.map((n) => n.id));
+          })
+          .catch(() => {});
+        return;
+      }
+      api.notifications(lastNoteId.current).then(pushOut).catch(() => {});
+    };
+    poll();
     const id = setInterval(poll, 3000);
     return () => clearInterval(id);
   }, [pushOut]);
@@ -183,9 +201,9 @@ export default function HomeClient() {
     await api.createTrip({ name, origin, destination, arrive_by: arriveBy, days: [0, 1, 2, 3, 4], safe_path: safe });
     setSavedKey(tripKey);
     const res = await api.advanceClock({ minutes: 0 }); // run the scheduler now
-    setClock(res);
+    applyClock(res);
     pushOut(res.notifications ?? []);
-  }, [origin, destination, arriveBy, safe, places, tripKey, pushOut]);
+  }, [origin, destination, arriveBy, safe, places, tripKey, pushOut, applyClock]);
 
   function onMapClick(lat: number, lng: number) {
     if (!pickMode) return;
@@ -203,20 +221,20 @@ export default function HomeClient() {
   // ---- demo + clock controls ----------------------------------------------------------
   const jumpTo = useCallback(
     async (hhmm: string) => {
-      const base = parseSim(clock?.now ?? toSimIso(new Date()));
+      const base = parseSim(clockRef.current ?? toSimIso(new Date()));
       const [h, m] = hhmm.split(":").map(Number);
       base.setHours(h, m, 0, 0);
       const res = await api.advanceClock({ to: toSimIso(base) });
-      setClock(res);
+      applyClock(res);
       setMapTime(null);
       pushOut(res.notifications ?? []);
     },
-    [clock, pushOut],
+    [pushOut, applyClock],
   );
 
   async function advance(minutes: number) {
     const res = await api.advanceClock({ minutes });
-    setClock(res);
+    applyClock(res);
     setMapTime(null);
     pushOut(res.notifications ?? []);
   }
@@ -225,7 +243,12 @@ export default function HomeClient() {
     () => ({
       reset: async () => {
         const c = await api.reset();
-        setClock(c);
+        applyClock(c);
+        // The backend just deleted every alert; start counting from scratch.
+        lastNoteId.current = 0;
+        initialized.current = true;
+        toastTimers.current.forEach(clearTimeout);
+        toastTimers.current.clear();
         setNotes([]);
         setToasts([]);
         setRec(null);
@@ -262,7 +285,7 @@ export default function HomeClient() {
         setRefresh((r) => r + 1);
       },
     }),
-    [jumpTo, plan, saveTrip, pushOut],
+    [jumpTo, plan, saveTrip, pushOut, applyClock],
   );
 
   // ---- derived map props ----------------------------------------------------------------
@@ -369,6 +392,7 @@ export default function HomeClient() {
           layers={layers}
           setLayers={setLayers}
           saved={savedKey === tripKey}
+          clockNow={clock?.now ?? null}
         />
       </aside>
 

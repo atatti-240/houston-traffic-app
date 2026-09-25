@@ -48,22 +48,30 @@ def recommend_departure(
     earliest: datetime | None = None,
 ) -> Recommendation:
     """Try departures every STEP_MIN minutes, latest first, back to WINDOW_MIN before arrive_by
-    (or `earliest`, e.g. now). Pick the latest one whose ETA + buffer <= arrive_by."""
+    (or `earliest`, e.g. now). Pick the latest one whose ETA + buffer <= arrive_by.
+
+    `earliest` itself is always tried last, so "leave right now" is considered even when it
+    falls between two grid times. If nothing fits, the answer is to leave as early as allowed
+    and `on_time` is False."""
     start = arrive_by - timedelta(minutes=WINDOW_MIN)
     if earliest is not None:
         start = max(start, earliest)
     buffer = timedelta(minutes=buffer_min)
 
+    candidates = []
     t = arrive_by
-    chosen, on_time = None, False
     while t >= start:
+        candidates.append(t)
+        t -= timedelta(minutes=STEP_MIN)
+    if not candidates or candidates[-1] != start:
+        candidates.append(start)
+
+    chosen = start  # fallback: can't make it, leave as early as allowed
+    for t in candidates:
         r = router.best_route(origin, destination, t, safe_path)
         if r.arrive_at + buffer <= arrive_by:
-            chosen, on_time = t, True
+            chosen = t
             break
-        t -= timedelta(minutes=STEP_MIN)
-    if chosen is None:
-        chosen = start  # can't make it: leave as early as allowed
 
     best, alt = router.route(origin, destination, chosen, safe_path)
     return Recommendation(
@@ -71,7 +79,7 @@ def recommend_departure(
         arrive_by=arrive_by,
         route=best,
         alternative=alt,
-        on_time=on_time,
+        on_time=best.arrive_at + buffer <= arrive_by,
         confidence=route_confidence(best),
         buffer_min=buffer_min,
     )

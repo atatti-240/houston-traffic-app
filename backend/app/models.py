@@ -90,6 +90,7 @@ class Trip(Base):
     """A saved commute the scheduler watches."""
 
     __tablename__ = "trips"
+    __table_args__ = {"sqlite_autoincrement": True}  # never reuse ids after a demo reset
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String)
@@ -121,6 +122,7 @@ class TripState(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = {"sqlite_autoincrement": True}  # never reuse ids after a demo reset
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     trip_id: Mapped[int | None] = mapped_column(ForeignKey("trips.id"), nullable=True)

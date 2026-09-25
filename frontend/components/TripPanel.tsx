@@ -1,6 +1,6 @@
 "use client";
 
-import { fmtTime, pct } from "@/lib/format";
+import { fmtDayTime, fmtTime, pct } from "@/lib/format";
 import type { Location, Place, Recommendation } from "@/lib/types";
 
 import type { Layers } from "./MapView";
@@ -29,6 +29,7 @@ interface Props {
   layers: Layers;
   setLayers: (l: Layers) => void;
   saved: boolean;
+  clockNow: string | null;
 }
 
 function locLabel(loc: Location | null, places: Place[]): string {
@@ -139,7 +140,9 @@ export default function TripPanel(p: Props) {
       {r && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div className="text-xs uppercase tracking-wide text-slate-500">{r.on_time ? "Leave at" : "Leave now, you'll be late"}</div>
-          <div className="text-4xl font-bold text-slate-900">{fmtTime(r.depart_at)}</div>
+          <div className="text-4xl font-bold text-slate-900">
+            {p.clockNow && r.depart_at.slice(0, 10) !== p.clockNow.slice(0, 10) ? fmtDayTime(r.depart_at) : fmtTime(r.depart_at)}
+          </div>
           <div className="mt-1 text-sm text-slate-600">
             Arrive {fmtTime(r.eta)} · {r.route.total_min} min ·{" "}
             <span

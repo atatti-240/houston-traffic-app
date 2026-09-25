@@ -28,19 +28,27 @@ class Services:
         self.reload()
 
     def reload(self) -> None:
-        """(Re)load the network and scores from the DB, e.g. after a replay."""
+        """(Re)load the network and scores from the DB."""
         with self.session_factory() as s:
             self.network: Network = load_network(s)
-            self.models: Models = build_models(self.network, ScoreStore().load(s))
-        self.router = Router(self.network, self.models, lambda: self.sources.trains.active_blockages(self.clock.now()))
-        self.scheduler = TripScheduler(self.session_factory, self.router, self.notifier)
+            models = build_models(self.network, ScoreStore().load(s))
+        self._install(models)
+
+    def _install(self, models: Models) -> None:
+        # Build the new router/scheduler first, then swap: requests and scheduler ticks
+        # running meanwhile keep using the old, complete set of scores.
+        router = Router(self.network, models, lambda: self.sources.trains.active_blockages(self.clock.now()))
+        scheduler = TripScheduler(self.session_factory, router, self.notifier)
+        self.models, self.router, self.scheduler = models, router, scheduler
 
     def replay(self, days: int | None = None) -> int:
+        """Retrain from scratch on `days` of history into a fresh store, then swap it in."""
         days = days or settings.history_weeks * 7
-        self.models.store.clear()
-        replay_history(self.models, self.sources, self.clock.now().date(), days)
+        models = build_models(self.network)
+        replay_history(models, self.sources, self.clock.now().date(), days)
         with self.session_factory() as s:
-            self.models.store.save(s)
+            models.store.save(s)
+        self._install(models)
         return days
 
     def tick(self):
