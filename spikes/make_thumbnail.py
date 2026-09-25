@@ -1,5 +1,7 @@
 import json, math, sys
-sys.path.insert(0, r"E:\Ion_Hackathon\spikes")
+from pathlib import Path
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 import must_have_test as m
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -7,7 +9,7 @@ W, H = 1500, 1000
 BG, BLUE, YEL, RED, ICE = (2, 6, 15), (46, 150, 245), (234, 254, 7), (228, 55, 0), (207, 228, 255)
 cams = m.pull_cameras()
 cross = m.pull_crossings()
-hin = json.load(open(r"E:\Ion_Hackathon\spikes\hin2025_segments.json"))
+hin = json.load(open(HERE / "hin2025_segments.json"))
 
 # map area: right side
 lat0, lat1, lng0, lng1 = 29.52, 30.10, -95.80, -95.05
@@ -71,5 +73,5 @@ for i, (label, col, kind) in enumerate([("Rail crossing", YEL, "x"), ("Traffic c
     else:
         d.ellipse((x, ly - 9, x + 18, ly + 9), fill=col)
     d.text((x + 30, ly - 18), label, font=small, fill=(255, 255, 255, 200))
-img.convert("RGB").save(r"E:\Ion_Hackathon\houston-traffic-app\docs\assets\thumbnail.png", optimize=True)
+img.convert("RGB").save(HERE.parent / "docs" / "assets" / "thumbnail.png", optimize=True)
 print("saved", len(cams), "cams", len(cross), "crossings", len(hin), "hin")
