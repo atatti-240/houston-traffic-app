@@ -1,0 +1,75 @@
+{
+  "_comment": "GET /live (data -> website). Real IDs/coords from 2026-09-25 tests. confidence: high = sensor UP & fresh; low = sensor DOWN or stale.",
+  "generated_at": "2026-09-25T16:55:00-05:00",
+  "crossings": [
+    {
+      "id": "288129A",
+      "street": "COMMERCE STREET",
+      "lat": 29.75751,
+      "lng": -95.34925,
+      "status": "blocked",
+      "time_to_clear_min": 6,
+      "sensor": "DOWN",
+      "confidence": "low",
+      "p_block_now": null,
+      "updated_at": "2026-09-25T16:54:35-05:00",
+      "nearest_camera_id": null
+    },
+    {
+      "id": "LOCKWOOD",
+      "street": "LOCKWOOD STREET",
+      "lat": 29.74217,
+      "lng": -95.32973,
+      "status": "clear",
+      "time_to_clear_min": null,
+      "sensor": "DOWN",
+      "confidence": "low",
+      "p_block_now": 0.35,
+      "updated_at": "2026-09-25T16:54:35-05:00",
+      "nearest_camera_id": null
+    }
+  ],
+  "cameras": [
+    {
+      "id": "504",
+      "name": "69 Southwest @ SH 288 (S)",
+      "lat": 29.73316,
+      "lng": -95.37439,
+      "snapshot_url": "https://www.houstontranstar.org/snapshots/cctv/504.jpg",
+      "vehicles": 29,
+      "baseline_vehicles": 18,
+      "congestion": "slow",
+      "valid": true,
+      "stale": false,
+      "refresh_sec_median": 121,
+      "updated_at": "2026-09-25T16:54:00-05:00"
+    },
+    {
+      "id": "8031",
+      "name": "Cullen@Leeland",
+      "lat": 29.7376,
+      "lng": -95.3399,
+      "snapshot_url": "https://www.houstontranstar.org/snapshots/cctv/8031.jpg",
+      "vehicles": null,
+      "baseline_vehicles": null,
+      "congestion": "unknown",
+      "valid": true,
+      "stale": true,
+      "stale_reason": "image frozen since 2021-07-14",
+      "refresh_sec_median": null,
+      "updated_at": null
+    }
+  ],
+  "incidents": [
+    {
+      "title": "IH-10 East Eastbound Before Mercury Dr - Stall",
+      "detail": "Status: Verified at 4:23 PM - Lanes Affected: 1 Shoulder Lane(s)",
+      "source": "transtar_rss",
+      "updated_at": "2026-09-25T16:24:15-05:00"
+    }
+  ],
+  "travel_times": [
+    { "segment": "IH-69 Southwest Northbound from IH-610 West Loop to Downtown", "minutes": 29, "historical_minutes": 6, "source": "transtar_rss" }
+  ],
+  "high_injury_segments_url": "/hazards/high-injury?bbox=-95.45,29.70,-95.30,29.78"
+}

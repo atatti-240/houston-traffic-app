@@ -1,0 +1,30 @@
+{
+  "_comment": "POST /plan  (website -> planner). Multi-stop extension of the repo's POST /recommend. Times are local Houston time, ISO 8601.",
+  "device_id": "demo-phone-1",
+  "start": { "name": "UH Sugar Land", "lat": 29.5747, "lng": -95.6480 },
+  "depart_after": "2026-09-28T15:00:00-05:00",
+  "stops": [
+    {
+      "name": "UH main campus",
+      "lat": 29.7199,
+      "lng": -95.3422,
+      "window_start": "2026-09-28T16:30:00-05:00",
+      "window_end": "2026-09-28T17:00:00-05:00",
+      "dwell_min": 30,
+      "fixed_order": false
+    },
+    {
+      "name": "Ion District",
+      "lat": 29.7336,
+      "lng": -95.3790,
+      "window_start": "2026-09-28T17:30:00-05:00",
+      "window_end": "2026-09-28T18:00:00-05:00",
+      "dwell_min": 0,
+      "fixed_order": false
+    }
+  ],
+  "safe_path": false,
+  "safety_weight": 0.3,
+  "buffer_min": 5,
+  "watch": true
+}
