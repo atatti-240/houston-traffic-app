@@ -141,3 +141,17 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Backend runtime data
+backend/data/*.db
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
