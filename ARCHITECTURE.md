@@ -31,7 +31,8 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Routing engine | `backend/app/routing/` | Time-dependent Dijkstra over the road graph with a blended cost and a Safe Path toggle. |
 | Departure recommender | `backend/app/recommender.py` | Tries departures every 5 minutes and picks the latest one that still arrives on time. |
 | Notifications | `backend/app/notifications/` | `NotificationService` interface (mock = stored in DB, WebPush = stub) + a scheduler that re-checks saved trips on each clock tick. |
-| Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here, so the demo can jump time. |
+| Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here. It runs at `CLOCK_SPEED` × real time from `SIM_START` (a Monday 7:15 AM), and the demo can jump it. |
+| Services | `backend/app/services.py` | Wires network + models + router + scheduler + clock together for the API. |
 | REST API | `backend/app/api/` | FastAPI routers. |
 | Frontend | `frontend/` | Next.js PWA with a Leaflet map, trip panel, time slider, notification drawer and demo mode. |
 
@@ -64,18 +65,25 @@ The graph has nodes (interchanges and places) and directed `RoadSegment` edges. 
 
 ```
 edge_cost = travel_time(seg, t_seg)                     # from congestion score
-          + sum(expected_delay(crossing, t_seg))         # train model (or live block)
-          + lambda_crash * crash_risk(seg, t_seg) * seg_miles * 60
-lambda_crash = 20 normally, 400 with safe_path=True
+          + sum(expected_delay(crossing, t_crossing))    # train model (or live block)
+          + lambda_crash * crash_risk(seg, t_seg) * seg_miles
+lambda_crash = 30 s/mile normally, 600 s/mile with safe_path=True
 ```
 
-It returns the best route, one alternative (found by penalizing edges of the best route), a breakdown (base travel, train delay, crash exposure) and human-readable "why" reasons. The reasons include hazards on a naive fastest-at-free-flow route that the chosen route avoided.
+It returns the best route, one alternative (found by penalizing edges of the best route), a breakdown (base travel, train delay, crash exposure) and human-readable "why" reasons. To explain its choice, it also computes:
+- a **traffic-only route** (congestion-aware but blind to trains and crash risk, roughly what a typical nav app picks). Hazards on it that the chosen route skips become "Avoided X: 72% chance of a train around 7:38 AM".
+- when a crossing is blocked live, the route it *would* have picked without the blockage, which becomes "Rerouted around X: blocked by a train right now".
 
 ## Request flow
 
 1. The user saves a trip: origin, destination, arrive-by time, days of week, Safe Path preference.
 2. `recommend_departure` tries departures from `arrive_by - 2h` to `arrive_by` in 5-minute steps, routes each one, and picks the latest one where `eta + buffer <= arrive_by`.
-3. The scheduler runs on every clock tick (a background loop every 30 s, plus every `/demo/advance-clock`). If a trip's recommended departure moved ≥5 minutes earlier, it sends "Leave N min earlier: <reason>". When `now >= departure` it sends "Leave now".
+3. The scheduler runs on every clock tick (a background loop every 30 s, plus every `/demo/advance-clock`), starting 3 h before a trip's arrive-by time. It sends:
+   - `plan` on the first check of the day ("leave at 7:35 AM via ...")
+   - `leave_earlier` if the recommended departure moved ≥5 minutes earlier
+   - `leave_later` if it moved ≥10 minutes later
+   - `reroute` if the departure time held but the route changed (e.g. a live train)
+   - `leave_now` once, when `now >= departure`
 4. The frontend polls `/notifications`, shows toasts, and uses web push when available.
 
 ## Data model (SQLite via SQLAlchemy)
@@ -86,7 +94,7 @@ It returns the best route, one alternative (found by penalizing edges of the bes
 - `Camera`: id, kind (`highway`/`train`), name, lat, lng, url, segment_id, crossing_id
 - `ScoreEntry`: model, entity_id, bucket, value, aux, n_obs (aux = avg blocked minutes for trains)
 - `Trip`: id, name, origin, destination, arrive_by (HH:MM), days (e.g. `0,1,2,3,4`), safe_path, device_id
-- `TripState`: trip_id, date, last_departure, leave_now_sent
+- `TripState`: trip_id, day, last_departure, last_route, leave_now_sent
 - `Notification`: id, trip_id, created_at (sim time), title, body, kind
 
 ## Folder layout

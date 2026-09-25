@@ -26,6 +26,8 @@ class Settings:
             os.environ.get("SIM_START", "2026-09-28T07:15:00")
         )
     )
+    # Simulated clock runs at this multiple of real time (0 = frozen).
+    clock_speed: float = field(default_factory=lambda: float(os.environ.get("CLOCK_SPEED", "1")))
     # Nudge factors (EMA alpha) per model.
     congestion_alpha: float = 0.2
     crash_alpha: float = 0.1
