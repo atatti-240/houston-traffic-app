@@ -1,6 +1,6 @@
-# Claude Code Build Prompts: Houston Traffic App
+# Build Prompts: Houston Traffic App
 
-Paste these into Claude Code **in order**, one per turn. Each one builds on the last. Start a fresh session only if context gets heavy. Every prompt tells Claude Code to read `ARCHITECTURE.md` first, so each one stands alone.
+Paste these into your coding agent **in order**, one per turn. Each one builds on the last. Start a fresh session only if context gets heavy. Every prompt tells the agent to read `ARCHITECTURE.md` first, so each one stands alone.
 
 **Stack assumption:** Python FastAPI + SQLite (SQLAlchemy) backend, Next.js PWA frontend with Leaflet. If your team knows something else, change it in Prompt 1 and the rest will follow `ARCHITECTURE.md`.
 
@@ -254,6 +254,6 @@ Read ARCHITECTURE.md first. We demo in front of judges soon. Add:
 
 ### Tips
 
-- If Claude Code starts drifting, tell it: "re-read ARCHITECTURE.md and stick to it."
+- If the agent starts drifting, tell it: "re-read ARCHITECTURE.md and stick to it."
 - If you're short on time, cut in this order: Prompt 4's crash risk, then the time slider in Prompt 8, then the WebPush stub. **Don't cut the train blockage model.** It's your differentiator.
 - You've got BMAD installed. `/bmad-architecture` can do Prompt 1 more rigorously if you have the time, but for a 48-hour build the plain prompt is faster.
