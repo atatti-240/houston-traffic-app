@@ -1,9 +1,5 @@
-import ClientMap from "@/components/ClientMap";
+import HomeClient from "@/components/HomeClient";
 
 export default function Home() {
-  return (
-    <main className="h-dvh w-full">
-      <ClientMap />
-    </main>
-  );
+  return <HomeClient />;
 }
