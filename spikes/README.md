@@ -11,10 +11,18 @@ Research scripts from 2026-09-25 that checked the real data sources. **Not produ
 | `refresh_probe.py` | Camera snapshot refresh rate (~2 min on freeways) |
 | `logger.py` / `log_report.py` | Weekend logger for Train Watch, cameras + YOLO, TranStar RSS |
 
-Setup (separate from the backend's uv env):
+Setup (separate from the backend's uv env), from the repo root in Windows PowerShell:
 
-    python -m venv spikes/.venv
-    spikes/.venv/Scripts/python -m pip install ultralytics requests   # Windows
-    spikes/.venv/Scripts/python spikes/must_have_test.py
+    python -m venv spikes\.venv
+    .\spikes\.venv\Scripts\python.exe -m pip install ultralytics requests
+    .\spikes\.venv\Scripts\python.exe .\spikes\must_have_test.py
+
+Run the weekend logger (leave the window open; Ctrl+C to stop):
+
+    .\spikes\.venv\Scripts\python.exe .\spikes\logger.py
+    .\spikes\.venv\Scripts\python.exe .\spikes\log_report.py    # in a second window
+
+PowerShell 5.1 has no `&&` — run commands on separate lines or join with `;`.
+On macOS/Linux use `spikes/.venv/bin/python`.
 
 `snapshots/` holds a few TranStar camera frames for YOLO tests.
