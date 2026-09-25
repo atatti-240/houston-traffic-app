@@ -132,7 +132,7 @@ LINKS: list[LinkDef] = [
             crossings=_x("x_telephone", "Telephone Rd @ BNSF", 29.7340, -95.3220, "BNSF")),
     LinkDef("WAYS", "Wayside", "Wayside Dr / Clinton Dr", "eastend", "i10_610e", "arterial", congestion_mult=0.7,
             crossings=_x("x_wayside", "Wayside Dr @ Port Terminal RR", 29.7600, -95.2900, "PTRA")),
-    LinkDef("CULL", "Cullen", "Lawndale / Cullen Blvd", "eastend", "ost_cullen", "arterial", congestion_mult=0.8,
+    LinkDef("CULL", "Cullen", "Lawndale / Cullen Blvd", "eastend", "ost_cullen", "arterial", congestion_mult=0.5,
             crossings=_x("x_cullen", "Cullen Blvd @ UP", 29.7250, -95.3400)),
     LinkDef("OST", "Old Spanish Trail", "Old Spanish Trail", "ost_cullen", "tmc_288", "arterial",
             congestion_mult=0.9, crossings=_x("x_ost", "Old Spanish Trail @ Almeda", 29.7120, -95.3700)),

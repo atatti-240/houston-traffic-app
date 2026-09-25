@@ -1,7 +1,8 @@
 """Crash risk: per (segment, weekday|weekend x hour), EMA of crashes per mile.
 
 Crashes are sparse, so each daily observation pools both directions of the road and the
-neighbouring hours (h-1..h+1). Risk is squashed into [0, 1] with 1 - exp(-rate / scale).
+neighbouring hours (h-1..h+1), and short segments count as at least MIN_POOL_MILES so one
+fender-bender on a one-mile street doesn't make it look like the West Loop. Risk is squashed into [0, 1] with 1 - exp(-rate / scale).
 """
 
 import math
@@ -16,6 +17,7 @@ from app.timebuckets import crash_bucket, crash_bucket_key
 MODEL = "crash"
 PRIOR_RATE = 0.002  # crashes / mile / hour before we have any history
 RATE_SCALE = 0.015  # rate at which risk reaches ~63%
+MIN_POOL_MILES = 1.5
 
 
 class CrashRiskModel:
@@ -28,7 +30,7 @@ class CrashRiskModel:
         weekend = day.weekday() >= 5
         counts: Counter[tuple[str, int]] = Counter((c.segment_id, c.at.hour) for c in crashes)
         for seg in self.network.segments.values():
-            miles = seg.length_miles
+            miles = max(seg.length_miles, MIN_POOL_MILES)
             for hour in range(24):
                 hours = [(hour + d) % 24 for d in (-1, 0, 1)]
                 n = sum(counts[(sid, h)] for sid in (seg.id, seg.reverse_id) for h in hours)

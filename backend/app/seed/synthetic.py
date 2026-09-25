@@ -59,6 +59,7 @@ RECURRING_TRAINS: dict[str, list[tuple[frozenset[int], int, int, float]]] = {
 RANDOM_TRAINS_PER_DAY = 1.2
 
 CRASHES_PER_MILE_HOUR = 0.0025
+ARTERIAL_CRASH_MULT = 0.5  # far less traffic volume than the freeways
 
 
 def _bump(h: float, mu: float, sigma: float) -> float:
@@ -118,8 +119,9 @@ class SyntheticWorld:
         dow = day.weekday()
         for p in self.profiles:
             miles = p.length_m / 1609.344
+            class_mult = ARTERIAL_CRASH_MULT if p.road_class == "arterial" else 1.0
             for hour in range(24):
-                lam = CRASHES_PER_MILE_HOUR * miles * p.crash_mult * _crash_time_mult(dow, hour)
+                lam = CRASHES_PER_MILE_HOUR * miles * p.crash_mult * class_mult * _crash_time_mult(dow, hour)
                 for _ in range(_poisson(rng, lam)):
                     at = datetime.combine(day, time(hour, rng.randrange(60)))
                     out.append(CrashRecord(p.segment_id, at))
