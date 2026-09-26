@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from app.routing.router import NoRouteError, Router
-from app.seed.synthetic import TrainEvent
+from app.conditions.provider import ConditionsProvider
 
 MON = lambda h, m=0: datetime(2026, 9, 28, h, m)  # noqa: E731
 
@@ -57,12 +57,17 @@ def test_alternative_route_differs(router):
 
 
 def test_live_blockage_reroutes(trained):
-    network, models, _, _ = trained
-    live = [TrainEvent("x_navigation", MON(12), MON(12, 30))]
+    network, models, sources, _ = trained
+    sources.clear_demo_live()
+    sources.trains.inject("x_navigation", MON(12), 30)
+    now = lambda: MON(12, 5)  # noqa: E731
     free = Router(network, models)
-    blocked = Router(network, models, live_blockages=lambda: live)
-    before, _ = free.route("eastend", "downtown", MON(12, 5), safe_path=True)
-    after, _ = blocked.route("eastend", "downtown", MON(12, 5), safe_path=True)
+    blocked = Router(network, models, ConditionsProvider(network, models, sources, now))
+    try:
+        before, _ = free.route("eastend", "downtown", MON(12, 5), safe_path=True)
+        after, _ = blocked.route("eastend", "downtown", MON(12, 5), safe_path=True)
+    finally:
+        sources.clear_demo_live()
     assert "x_navigation" in {c.id for c in before.crossings}
     assert "x_navigation" not in {c.id for c in after.crossings}
     assert any(r.startswith("Rerouted around Navigation") for r in after.reasons)
