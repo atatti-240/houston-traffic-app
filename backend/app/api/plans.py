@@ -21,32 +21,58 @@ START_ONLY_ROLL = timedelta(hours=12)
 
 
 def _windows(svc: Services, stops: list[StopIn], depart_after: datetime) -> list[tuple[datetime | None, datetime | None]]:
-    """Resolve window times. ISO times are taken as given. HH:MM times in one request all
-    refer to the same day: depart_after's, or the next day if any of them already ended by
-    depart_after (or a start-only one is more than 12 h before it, like "08:00" asked at
-    10 PM). An HH:MM end at or before its start is overnight (23:30-00:30): the window you're
-    inside right now, else tonight's."""
-
-    def resolve(day) -> list[tuple[datetime | None, datetime | None]]:
-        out = []
-        for s in stops:
-            ws = resolve_time(svc, s.window_start, day) if s.window_start else None
-            we = resolve_time(svc, s.window_end, day) if s.window_end else None
-            if ws and we and is_clock_time(s.window_start) and is_clock_time(s.window_end) and we <= ws:
-                if day == depart_after.date() and depart_after < we:
-                    ws -= DAY  # still inside last night's window
-                else:
-                    we += DAY
-            out.append((ws, we))
-        return out
-
-    windows = resolve(depart_after.date())
-    passed = any(
-        (we is not None and is_clock_time(s.window_end) and we < depart_after)
-        or (we is None and ws is not None and is_clock_time(s.window_start) and ws < depart_after - START_ONLY_ROLL)
-        for s, (ws, we) in zip(stops, windows)
-    )
-    return resolve(depart_after.date() + DAY) if passed else windows
+    """Resolve window times. ISO times are taken as given. HH:MM times start on
+    depart_after's day, and each window moves to the next day on its own when:
+      - its end has already passed ("08:00"-"08:30" asked at 10 PM), or
+      - it only has a start, and that start is more than 12 h ago ("08:00" asked at 10 PM),
+        or it's already past while another window in the request moved (so "08:00"-"08:30"
+        then "09:00" asked at 10 PM are both tomorrow).
+    A window still ahead today never moves, so "23:00"-"23:30" then "00:15"-"00:45" is
+    tonight then after midnight, unless it's a fixed-order stop whose window would close
+    before the previous fixed stop's opens. An end at or before its start is overnight
+    (23:30-00:30): the window you're inside right now, else tonight's."""
+    day = depart_after.date()
+    windows, rolled, passed_starts = [], False, []
+    for i, s in enumerate(stops):
+        clock_start, clock_end = is_clock_time(s.window_start), is_clock_time(s.window_end)
+        ws = resolve_time(svc, s.window_start, day) if s.window_start else None
+        we = resolve_time(svc, s.window_end, day) if s.window_end else None
+        if ws and we and clock_start and clock_end and we <= ws:
+            if depart_after < we:
+                ws -= DAY  # still inside last night's window
+            else:
+                we += DAY
+        if we and clock_end and we < depart_after:
+            we += DAY
+            ws = ws + DAY if ws and clock_start else ws
+            rolled = True
+        elif ws and not we and clock_start and ws < depart_after:
+            if ws < depart_after - START_ONLY_ROLL:
+                ws += DAY
+                rolled = True
+            else:
+                passed_starts.append(i)
+        windows.append((ws, we))
+    if rolled:  # already-open start-only windows follow the ones that moved to tomorrow
+        for i in passed_starts:
+            ws, we = windows[i]
+            windows[i] = (ws + DAY, we)
+    # Fixed-order stops are visited in typed order: an all-HH:MM window that would close
+    # before the previous fixed stop's window even opens is the next day's. (Only windows
+    # that close can be "before"; only windows that open set the floor; an ISO time pins
+    # the date.)
+    prev_open = None
+    for i, s in enumerate(stops):
+        if not s.fixed_order:
+            continue
+        ws, we = windows[i]
+        all_clock = all(is_clock_time(t) for t in (s.window_start, s.window_end) if t)
+        if prev_open is not None and we is not None and we < prev_open and all_clock:
+            ws, we = (ws + DAY if ws else ws), we + DAY
+            windows[i] = (ws, we)
+        if ws is not None:
+            prev_open = ws
+    return windows
 
 
 def _summary(sp: SavedPlan) -> dict:

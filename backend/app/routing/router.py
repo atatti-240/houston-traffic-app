@@ -314,8 +314,13 @@ class Router:
                 s = self._eval_segment(seg, now, view)
                 if s.closed:
                     continue
-                step_time = self._time(s)
-                step_cost = (s.closure_wait_s + s.travel_s) if blind else self._cost(s, lam)
+                if blind:
+                    # A traffic-only app doesn't know about trains: its clock and its cost are
+                    # both just traffic (+ closures), so it never "uses up" a closure wait on a
+                    # train. evaluate() charges the real train delay afterwards.
+                    step_time = step_cost = s.closure_wait_s + s.travel_s
+                else:
+                    step_time, step_cost = self._time(s), self._cost(s, lam)
                 step_cost *= penalties.get(seg.id, 1.0)
                 new_elapsed, new_cost = elapsed + step_time, cost + step_cost
                 new_penalty = new_cost - new_elapsed
