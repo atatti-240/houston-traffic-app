@@ -89,12 +89,16 @@ def recommend_departure(
     if not candidates or candidates[-1] != start:
         candidates.append(start)
 
-    chosen = start  # fallback: can't make it, leave as early as allowed
+    chosen = None
     for t in candidates:
         r = router.best_route(origin, destination, t, safety_weight=w, view=view)
         if r.arrive_at + buffer <= arrive_by:
             chosen = t
             break
+    if chosen is None:
+        # Can't make it: leave as early as allowed, unless that only means sitting at a
+        # closed road, in which case leave later and arrive just as soon.
+        chosen = latest_same_arrival(router, origin, destination, start, w, view)
 
     best, alt = router.route(origin, destination, chosen, safety_weight=w, view=view)
     return Recommendation(
@@ -107,6 +111,27 @@ def recommend_departure(
         buffer_min=buffer_min,
         earliest=earliest,
     )
+
+
+def latest_same_arrival(
+    router: Router,
+    origin: str,
+    destination: str,
+    depart_at: datetime,
+    safety_weight: float,
+    view: ConditionsView | None,
+    step: timedelta = timedelta(minutes=STEP_MIN),
+    slack: timedelta = timedelta(minutes=1),
+) -> datetime:
+    """If leaving at depart_at means waiting at a closed road, the latest departure (in
+    `step`s) that still arrives within `slack` of that arrival; otherwise depart_at."""
+    r0 = router.best_route(origin, destination, depart_at, safety_weight=safety_weight, view=view)
+    best = depart_at
+    for k in range(1, int(r0.closure_wait_s // step.total_seconds()) + 1):
+        t = depart_at + step * k
+        if router.best_route(origin, destination, t, safety_weight=safety_weight, view=view).arrive_at <= r0.arrive_at + slack:
+            best = t
+    return best
 
 
 def route_summary(route: Route) -> str:

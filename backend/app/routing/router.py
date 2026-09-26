@@ -16,6 +16,7 @@ counts real time.
 """
 
 import heapq
+import itertools
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -294,42 +295,39 @@ class Router:
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
-        best: dict[str, float] = {origin: 0.0}
-        prev: dict[str, tuple[str, str]] = {}
-        heap = [(0.0, 0.0, origin)]
-        done: set[str] = set()
+        # Label-setting search over (time so far, penalty so far), penalty = cost - time
+        # (crash penalty, alternative-route multipliers). One label per node isn't enough
+        # once roads can be waited on: reaching a closed road later means waiting less, so
+        # a path that looks worse halfway can be the better one. A label is dropped only
+        # when another reached the same node no later and with no more penalty.
+        fronts: dict[str, list[tuple[float, float]]] = {origin: [(0.0, 0.0)]}
+        tie = itertools.count()
+        heap: list = [(0.0, 0.0, next(tie), origin, (), frozenset((origin,)))]
         while heap:
-            cost, elapsed, node = heapq.heappop(heap)
-            if node in done:
-                continue
-            done.add(node)
+            cost, elapsed, _, node, path, visited = heapq.heappop(heap)
             if node == destination:
-                break
+                return list(path)
             now = depart_at + timedelta(seconds=elapsed)
             for seg in self.network.out_edges.get(node, []):
-                if seg.to_node in done:
+                if seg.to_node in visited:
                     continue
                 s = self._eval_segment(seg, now, view)
                 if s.closed:
                     continue
                 step_time = self._time(s)
-                if blind:
-                    step_cost = s.closure_wait_s + s.travel_s
-                else:
-                    step_cost = self._cost(s, lam)
+                step_cost = (s.closure_wait_s + s.travel_s) if blind else self._cost(s, lam)
                 step_cost *= penalties.get(seg.id, 1.0)
-                new_cost = cost + step_cost
-                if new_cost < best.get(seg.to_node, float("inf")):
-                    best[seg.to_node] = new_cost
-                    prev[seg.to_node] = (node, seg.id)
-                    heapq.heappush(heap, (new_cost, elapsed + step_time, seg.to_node))
-        if destination not in prev and origin != destination:
-            raise NoRouteError(f"no open route from {origin} to {destination}")
-        path, node = [], destination
-        while node != origin:
-            node, sid = prev[node]
-            path.append(sid)
-        return path[::-1]
+                new_elapsed, new_cost = elapsed + step_time, cost + step_cost
+                new_penalty = new_cost - new_elapsed
+                front = fronts.setdefault(seg.to_node, [])
+                if any(e <= new_elapsed + 1e-6 and p <= new_penalty + 1e-6 for e, p in front):
+                    continue
+                front[:] = [(e, p) for e, p in front if not (new_elapsed <= e and new_penalty <= p)]
+                front.append((new_elapsed, new_penalty))
+                heapq.heappush(
+                    heap, (new_cost, new_elapsed, next(tie), seg.to_node, (*path, seg.id), visited | {seg.to_node})
+                )
+        raise NoRouteError(f"no open route from {origin} to {destination}")
 
     def evaluate(
         self,

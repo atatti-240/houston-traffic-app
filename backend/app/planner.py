@@ -3,18 +3,21 @@
 Search
   - Every stop order (at most 3 stops -> 6 orders; stops marked fixed_order keep their place)
   - x first departures every 15 min for the next 2 h, plus every 15 min in the 2 h before
-    the first stop's target time (so a window later in the day gets a departure near it),
-    then the best one refined to 5 min.
+    each stop's target time (so a window later in the day gets a departure near it), then
+    the best one refined to 5 min.
   - The first departure aims to arrive at the first stop's window start (or its end minus
     the buffer when only an end is given): time at home beats time waiting at a stop.
   - Later legs leave when you're ready (arrival + dwell), later only to avoid arriving
-    before a stop's window opens. Arriving early for an end-only window costs nothing, so
-    waiting it out at the previous stop would only risk the stops after it.
+    before a stop's window opens (never so late that you'd arrive after it opened), or to
+    avoid sitting at a closed road when leaving later arrives just as soon. Arriving early
+    for an end-only window costs nothing, so waiting it out at the previous stop would only
+    risk the stops after it.
   - Each leg is routed by the router on ONE snapshot of live conditions.
 
 Cost (minutes, lower is better)
     sum(route cost: drive + closure wait + train delay + crash penalty) + 0.5 x wait
-    (first stop: early arrival before its target; later stops: waiting for a window to open)
+    (first stop: early arrival before its target; later stops: waiting for a window to open,
+    or idling at the previous stop before leaving for it)
     + 0.3 x minutes the first departure is later than the earliest possible one
 
 Ranking: fewest stops missed (arrive after window end), then fewest "tight" stops (inside
@@ -41,6 +44,7 @@ LEG_STEP = timedelta(minutes=5)
 WAIT_WEIGHT = 0.5
 DELAY_WEIGHT = 0.3
 FAR_SNAP_KM = 1.0
+CLOSURE_SLACK = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -177,7 +181,11 @@ class _Planner:
         return self._cache[key]
 
     def leg_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
-        """For a later leg: leave when ready, or later to arrive as the stop's window opens."""
+        """For a later leg: leave when ready, or later to arrive as the stop's window opens,
+        or later still if leaving now would only mean sitting at a closed road."""
+        return self.skip_closure_wait(frm, stop, self._window_departure(frm, stop, ready))
+
+    def _window_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
         target = stop.window_start
         if target is None:
             return ready
@@ -188,10 +196,21 @@ class _Planner:
         while dep > ready:
             r = self.best(frm.node, stop.place.node, dep)
             fits_end = stop.window_end is None or r.arrive_at + self.buffer <= stop.window_end
-            if r.arrive_at <= target + LEG_STEP and fits_end:
+            if r.arrive_at <= target and fits_end:  # never later than leaving when ready
                 return dep
             dep -= LEG_STEP
         return ready
+
+    def skip_closure_wait(self, frm: Place, stop: StopRequest, dep: datetime) -> datetime:
+        """If leaving at dep means waiting at a closed road, the latest departure (5-min
+        steps) that still arrives within a minute of it."""
+        r0 = self.best(frm.node, stop.place.node, dep)
+        best = dep
+        for k in range(1, int(r0.closure_wait_s // LEG_STEP.total_seconds()) + 1):
+            t = dep + LEG_STEP * k
+            if self.best(frm.node, stop.place.node, t).arrive_at <= r0.arrive_at + CLOSURE_SLACK:
+                best = t
+        return best
 
     def simulate(self, start: Place, order: tuple[StopRequest, ...], d0: datetime, earliest: datetime) -> _Sim:
         loc, ready = start, d0
@@ -211,7 +230,8 @@ class _Planner:
                     late_min += over
                 elif arrive + self.buffer > stop.window_end:
                     tight += 1
-            cost += r.cost / 60 + WAIT_WEIGHT * wait
+            idle = (leave - ready).total_seconds() / 60 if i else 0.0  # sitting at the previous stop
+            cost += r.cost / 60 + WAIT_WEIGHT * (wait + idle)
             legs.append((loc, stop, ready if i else earliest, leave, r))
             service = max(arrive, stop.window_start) if stop.window_start else arrive
             ready = service + timedelta(minutes=stop.dwell_min)
@@ -222,12 +242,13 @@ class _Planner:
 
 def _first_departures(order: tuple[StopRequest, ...], earliest: datetime, buffer: timedelta) -> list[datetime]:
     """Every 15 min for 2 h from the earliest departure, and every 15 min in the 2 h before
-    the first stop's target, so a window hours away still gets a departure close to it."""
+    each stop's target, so a window hours away still gets a departure close to it."""
     n = int(FIRST_HORIZON / FIRST_STEP)
     times = {earliest + FIRST_STEP * k for k in range(n + 1)}
-    target = order[0].target(buffer)
-    if target is not None and target > earliest + FIRST_HORIZON:
-        times |= {target - FIRST_STEP * k for k in range(n + 1) if target - FIRST_STEP * k >= earliest}
+    for stop in order:
+        target = stop.target(buffer)
+        if target is not None and target > earliest + FIRST_HORIZON:
+            times |= {target - FIRST_STEP * k for k in range(n + 1) if target - FIRST_STEP * k >= earliest}
     return sorted(times)
 
 

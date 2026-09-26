@@ -98,7 +98,8 @@ def live_traffic(req: LiveTrafficRequest, svc: Services = Depends(get_services))
 
 @router.post("/demo/incident")
 def incident(req: IncidentRequest, svc: Services = Depends(get_services)):
-    """Report a crash / stall / roadwork / closure on a segment. Closures remove the road."""
+    """Report a crash / stall / roadwork / closure on a segment. A closure shuts the road until
+    it clears: routes wait for it or go around."""
     seg = svc.network.segments.get(req.segment_id)
     if seg is None:
         raise HTTPException(404, f"unknown segment {req.segment_id!r}")

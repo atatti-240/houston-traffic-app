@@ -33,7 +33,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Road-conditions layer | `backend/app/conditions/` | The only thing the router reads. For a segment or crossing at time T it combines the model predictions with live data by fixed priority rules, and records the confidence and source of every input. See [docs/routing-wiring.md](docs/routing-wiring.md). |
 | Scoring models | `backend/app/scoring/` | Three models with the same shape: key = (entity, time bucket), value updated by an exponential moving average. |
 | Score store | `backend/app/scoring/store.py` | Persists scores in the `score_entries` table and caches them in memory for fast routing. |
-| Routing engine | `backend/app/routing/` | Time-dependent Dijkstra over the road graph with a blended cost and a 0-1 safety weight (the Faster ↔ Safer slider). |
+| Routing engine | `backend/app/routing/` | Time-dependent Dijkstra-style search over the road graph with a blended cost and a 0-1 safety weight (the Faster ↔ Safer slider). It keeps several labels per node (time so far vs. penalty so far), because once roads can be waited on, reaching one later can be the better choice. |
 | Departure recommender | `backend/app/recommender.py` | Tries departures every 5 minutes and picks the latest one that still arrives on time. Also returns a `leave_at_safe` with a margin that grows as confidence drops. |
 | Multi-stop planner | `backend/app/planner.py`, `plan_io.py` | Up to 3 stops with time windows, dwell and fixed-order stops. Picks the stop order and every departure time, and compares the result against a leave-now baseline in the typed order. |
 | Notifications | `backend/app/notifications/` | `NotificationService` interface (mock = stored in DB, WebPush = stub) + a scheduler that re-checks saved trips and watched plans on each clock tick. |
@@ -73,7 +73,7 @@ The team's first idea was `score += today * factor`, which grows without bound. 
 | Live congestion reading | Only while fresh (10 min freeway, 30 min street). Blend weight `0.8 × (1 − minutes_ahead/30) × confidence factor` |
 | Incident | A closure shuts the road until it clears (the router waits or goes around). Crash ×1.6, roadwork ×1.3, stall or hazard ×1.2, +0.25 per extra lane, max ×3, until it clears (default 45 min) |
 | Feed down | Predictions only, low confidence for the next 30 min (every road when the traffic or incident feed is down, crossings when the train feed is), and the route says so |
-| Time more than 15 min before now | Predictions only (live data describes the present) |
+| Time more than 15 min before now | Live traffic and crossing status ignored; incidents count only if they had started by then (live data describes the present) |
 
 Every road and crossing on a route carries its `confidence` (high / medium / low), its `source` and when that was last updated. A route is **low** if any input that matters (live data, an incident or closure, a likely crossing, or anything already low) is low. It is **high** when at least half the drive time rests on strong live readings (blend weight ≥ 0.4) and no predicted crossing has a ≥10% chance of a train. Otherwise it is **medium**.
 
@@ -105,7 +105,7 @@ It returns the best route, one alternative (found by penalizing edges of the bes
    - `leave_later` if it moved ≥10 minutes later
    - `reroute` if the departure time held but the route changed (e.g. a live train)
    - `leave_now` once, when `now >= departure`
-4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, and immediately when a demo endpoint changes live data. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later`, then `leave_now` for each leg. The plan is marked done after the last arrival.
+4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. A plan is marked done after the last arrival. A plan you never started whose windows have all closed gets one `info` "Missed" alert instead.
 5. The frontend polls `/notifications`, shows toasts, and uses web push when available.
 
 ## Data model (SQLite via SQLAlchemy)

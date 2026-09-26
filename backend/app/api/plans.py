@@ -17,23 +17,36 @@ from app.services import Services
 
 router = APIRouter(tags=["plans"])
 DAY = timedelta(days=1)
+START_ONLY_ROLL = timedelta(hours=12)
 
 
-def _window(svc: Services, s: StopIn, depart_after: datetime) -> tuple[datetime | None, datetime | None]:
-    """HH:MM window times are on depart_after's day; an HH:MM end at or before its start is
-    the next day (23:30-00:30), and an HH:MM window that ended before depart_after is
-    tomorrow's. ISO times are taken as given."""
-    day = depart_after.date()
-    ws = resolve_time(svc, s.window_start, day) if s.window_start else None
-    we = resolve_time(svc, s.window_end, day) if s.window_end else None
-    clock_start, clock_end = is_clock_time(s.window_start), is_clock_time(s.window_end)
-    if ws and we and clock_end and we <= ws:
-        we += DAY
-    if we and clock_end and we < depart_after:
-        we += DAY
-        if ws and clock_start:
-            ws += DAY
-    return ws, we
+def _windows(svc: Services, stops: list[StopIn], depart_after: datetime) -> list[tuple[datetime | None, datetime | None]]:
+    """Resolve window times. ISO times are taken as given. HH:MM times in one request all
+    refer to the same day: depart_after's, or the next day if any of them already ended by
+    depart_after (or a start-only one is more than 12 h before it, like "08:00" asked at
+    10 PM). An HH:MM end at or before its start is overnight (23:30-00:30): the window you're
+    inside right now, else tonight's."""
+
+    def resolve(day) -> list[tuple[datetime | None, datetime | None]]:
+        out = []
+        for s in stops:
+            ws = resolve_time(svc, s.window_start, day) if s.window_start else None
+            we = resolve_time(svc, s.window_end, day) if s.window_end else None
+            if ws and we and is_clock_time(s.window_start) and is_clock_time(s.window_end) and we <= ws:
+                if day == depart_after.date() and depart_after < we:
+                    ws -= DAY  # still inside last night's window
+                else:
+                    we += DAY
+            out.append((ws, we))
+        return out
+
+    windows = resolve(depart_after.date())
+    passed = any(
+        (we is not None and is_clock_time(s.window_end) and we < depart_after)
+        or (we is None and ws is not None and is_clock_time(s.window_start) and ws < depart_after - START_ONLY_ROLL)
+        for s, (ws, we) in zip(stops, windows)
+    )
+    return resolve(depart_after.date() + DAY) if passed else windows
 
 
 def _summary(sp: SavedPlan) -> dict:
@@ -58,12 +71,11 @@ def create_plan(req: TripPlanRequest, svc: Services = Depends(get_services)):
     leave now per leg)."""
     now = svc.clock.now()
     depart_after = resolve_time(svc, req.depart_after)
-    if is_clock_time(req.depart_after) and depart_after < now:
-        depart_after += DAY  # "07:30" at 10 PM means tomorrow morning
+    if is_clock_time(req.depart_after) and depart_after < now.replace(second=0, microsecond=0):
+        depart_after += DAY  # "07:30" at 10 PM means tomorrow morning; "12:20" at 12:20:30 is now
     start = resolve_place(svc, req.start)
     stops = []
-    for s in req.stops:
-        ws, we = _window(svc, s, depart_after)
+    for s, (ws, we) in zip(req.stops, _windows(svc, req.stops, depart_after)):
         if ws and we and we <= ws:
             raise HTTPException(422, f"{s.name or s.place or 'stop'}: window_end must be after window_start")
         stops.append(StopRequest(resolve_place(svc, s), ws, we, s.dwell_min, s.fixed_order))
