@@ -10,10 +10,12 @@ import type {
   ClockState,
   Crossing,
   LatLngTuple,
+  LiveIncident,
   Location,
   Place,
   Recommendation,
   Segment,
+  SegmentIncident,
 } from "@/lib/types";
 
 import CameraModal from "./CameraModal";
@@ -25,6 +27,8 @@ import TimeSlider from "./TimeSlider";
 import TripPanel, { type PickMode } from "./TripPanel";
 
 type PushState = NotificationPermission | "unsupported";
+
+const DEFAULT_LAYERS: Layers = { congestion: true, crash: false, trains: true, incidents: true, cameras: false };
 
 export default function HomeClient() {
   // Static map data
@@ -42,13 +46,15 @@ export default function HomeClient() {
   const [congestion, setCongestion] = useState<Record<string, number>>({});
   const [crashRisk, setCrashRisk] = useState<Record<string, number>>({});
   const [crossings, setCrossings] = useState<Crossing[]>([]);
-  const [layers, setLayers] = useState<Layers>({ congestion: true, crash: false, trains: true, cameras: false });
+  const [incidents, setIncidents] = useState<LiveIncident[]>([]);
+  const [incidentSegments, setIncidentSegments] = useState<Record<string, SegmentIncident>>({});
+  const [layers, setLayers] = useState<Layers>(DEFAULT_LAYERS);
 
   // Trip planning
   const [origin, setOrigin] = useState<Location | null>("eastend");
   const [destination, setDestination] = useState<Location | null>("medcenter");
   const [arriveBy, setArriveBy] = useState("08:30");
-  const [safe, setSafe] = useState(false);
+  const [safety, setSafety] = useState(0);
   const [pickMode, setPickMode] = useState<PickMode>(null);
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [showAlt, setShowAlt] = useState(false);
@@ -111,11 +117,14 @@ export default function HomeClient() {
   useEffect(() => {
     if (!layerTime) return;
     const when = mapTime ?? undefined;
-    Promise.all([api.congestion(when), api.crashRisk(when), api.crossings(when)])
-      .then(([c, x, cr]) => {
+    Promise.all([api.congestion(when), api.crashRisk(when), api.crossings(when), api.live()])
+      .then(([c, x, cr, live]) => {
         setCongestion(c.scores);
         setCrashRisk(x.scores);
         setCrossings(cr.crossings);
+        setIncidentSegments(c.incidents ?? {});
+        // Incidents are what's happening now; hide them when the map shows another time.
+        setIncidents(mapTime ? [] : live.incidents);
       })
       .catch(() => {});
   }, [layerTime, mapTime, refresh]);
@@ -175,11 +184,11 @@ export default function HomeClient() {
   }
 
   // ---- planning -----------------------------------------------------------------------
-  const plan = useCallback(async (o: Location, d: Location, by: string, s: boolean) => {
+  const plan = useCallback(async (o: Location, d: Location, by: string, w: number) => {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.recommend({ origin: o, destination: d, arrive_by: by, safe_path: s });
+      const r = await api.recommend({ origin: o, destination: d, arrive_by: by, safety_weight: w });
       setRec(r);
       setShowAlt(false);
     } catch (e) {
@@ -190,7 +199,7 @@ export default function HomeClient() {
     }
   }, []);
 
-  const tripKey = `${JSON.stringify(origin)}|${JSON.stringify(destination)}|${arriveBy}|${safe}`;
+  const tripKey = `${JSON.stringify(origin)}|${JSON.stringify(destination)}|${arriveBy}|${safety}`;
 
   const saveTrip = useCallback(async () => {
     if (typeof origin !== "string" || typeof destination !== "string") {
@@ -198,12 +207,20 @@ export default function HomeClient() {
       return;
     }
     const name = `${places.find((p) => p.id === origin)?.name ?? origin} → ${places.find((p) => p.id === destination)?.name ?? destination}`;
-    await api.createTrip({ name, origin, destination, arrive_by: arriveBy, days: [0, 1, 2, 3, 4], safe_path: safe });
+    await api.createTrip({
+      name,
+      origin,
+      destination,
+      arrive_by: arriveBy,
+      days: [0, 1, 2, 3, 4],
+      safe_path: safety >= 1,
+      safety_weight: safety,
+    });
     setSavedKey(tripKey);
     const res = await api.advanceClock({ minutes: 0 }); // run the scheduler now
     applyClock(res);
     pushOut(res.notifications ?? []);
-  }, [origin, destination, arriveBy, safe, places, tripKey, pushOut, applyClock]);
+  }, [origin, destination, arriveBy, safety, places, tripKey, pushOut, applyClock]);
 
   function onMapClick(lat: number, lng: number) {
     if (!pickMode) return;
@@ -254,7 +271,8 @@ export default function HomeClient() {
         setRec(null);
         setSavedKey(null);
         setMapTime(null);
-        setLayers({ congestion: true, crash: false, trains: true, cameras: false });
+        setSafety(0);
+        setLayers(DEFAULT_LAYERS);
       },
       setClock: jumpTo,
       showMapAt: async (hhmm) => {
@@ -264,13 +282,13 @@ export default function HomeClient() {
         base.setHours(h, m, 0, 0);
         setMapTime(toSimIso(base));
       },
-      plan: async (o, d, by, s) => {
+      plan: async (o, d, by, w) => {
         setOrigin(o);
         setDestination(d);
         setArriveBy(by);
-        setSafe(s);
-        if (s) setLayers((l) => ({ ...l, crash: true }));
-        await plan(o, d, by, s);
+        setSafety(w);
+        if (w > 0) setLayers((l) => ({ ...l, crash: true }));
+        await plan(o, d, by, w);
       },
       saveTrip: async () => {
         await saveTrip();
@@ -282,6 +300,16 @@ export default function HomeClient() {
       },
       clearBlockages: async () => {
         await api.clearBlockages();
+        setRefresh((r) => r + 1);
+      },
+      incident: async (segmentId, kind, title) => {
+        const res = await api.incident({ segment_id: segmentId, kind, title, minutes: 60, lanes_blocked: 2 });
+        pushOut(res.notifications);
+        setLayers((l) => ({ ...l, incidents: true }));
+        setRefresh((r) => r + 1);
+      },
+      clearLive: async () => {
+        await api.clearLive();
         setRefresh((r) => r + 1);
       },
     }),
@@ -306,6 +334,8 @@ export default function HomeClient() {
           congestion={congestion}
           crashRisk={crashRisk}
           crossings={crossings}
+          incidents={incidents}
+          incidentSegments={incidentSegments}
           cameras={cameras}
           places={places}
           route={rec?.route ?? null}
@@ -378,11 +408,11 @@ export default function HomeClient() {
           setDestination={setDestination}
           arriveBy={arriveBy}
           setArriveBy={setArriveBy}
-          safe={safe}
-          setSafe={setSafe}
+          safety={safety}
+          setSafety={setSafety}
           pickMode={pickMode}
           setPickMode={setPickMode}
-          onPlan={() => origin && destination && plan(origin, destination, arriveBy, safe)}
+          onPlan={() => origin && destination && plan(origin, destination, arriveBy, safety)}
           onSave={() => saveTrip().catch((e) => setError(String(e)))}
           loading={loading}
           error={error}
@@ -403,7 +433,7 @@ export default function HomeClient() {
 
       {/* Legend */}
       <div className="absolute bottom-20 right-3 z-[999] hidden rounded-xl bg-white/95 p-2 text-[11px] shadow md:block">
-        <div className="mb-1 font-semibold">Predicted congestion</div>
+        <div className="mb-1 font-semibold">Congestion (predicted + live)</div>
         <div className="h-2 w-40 rounded" style={{ background: "linear-gradient(90deg, rgb(34,197,94), rgb(234,179,8), rgb(249,115,22), rgb(220,38,38))" }} />
         <div className="flex justify-between text-slate-500">
           <span>free flow</span>
@@ -414,6 +444,9 @@ export default function HomeClient() {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-full border-2 border-red-600 bg-slate-900" /> blocked right now
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-orange-600" /> incident (black = closed)
         </div>
       </div>
 
