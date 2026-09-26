@@ -499,3 +499,76 @@ def test_watched_plan_order_is_stable_without_changes(client):
     for _ in range(24):  # two hours, 5 min at a time
         notes += client.post("/demo/advance-clock", json={"minutes": 5}).json()["notifications"]
     assert kinds(notes).count("order_changed") == 0
+
+
+# --- fourth review round ------------------------------------------------------------------------
+
+
+def test_skipping_a_closure_wait_never_makes_an_on_time_stop_late(client):
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": 25, "start": "2026-09-28T11:59:00"})
+    req = {
+        "start": {"place": "downtown"},
+        "stops": [{"place": "galleria", "fixed_order": True}, {"place": "hobby", "fixed_order": True, "window_end": "2026-09-28T12:28:04"}],
+    }
+    plan = client.post("/plan", json=req).json()
+    assert plan["status"] == "ok" and plan["legs"][1]["arrive_at"] <= "2026-09-28T12:28:04"
+
+
+def test_duplicate_stop_names_keep_the_better_order(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T11:30:00"})
+    req = {
+        "start": {"place": "downtown"},
+        "depart_after": "12:00",
+        "stops": [{"name": "Store", "place": "galleria"}, {"name": "Store", "place": "medcenter"}],
+        "watch": True,
+    }
+    plan = client.post("/plan", json=req).json()
+    for _ in range(4):
+        client.post("/demo/advance-clock", json={"minutes": 5})
+    now = client.get(f"/plan/{plan['plan_id']}").json()
+    assert now["order_index"] == plan["order_index"]
+    assert now["legs"][-1]["arrive_at"] == plan["legs"][-1]["arrive_at"]
+
+
+@pytest.mark.parametrize("closure_min", [63, 300])
+def test_deferred_trip_gets_leave_now_even_at_or_long_after_arrive_by(client, closure_min):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T11:50:00"})
+    client.post("/trips", json={"name": "Airport run", "origin": "downtown", "destination": "hobby", "arrive_by": "12:45", "days": [0]})
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": closure_min, "start": "2026-09-28T11:50:00"})
+    notes = []
+    for _ in range(6 * 12):  # six hours, 5 min at a time
+        notes += client.post("/demo/advance-clock", json={"minutes": 5}).json()["notifications"]
+    assert kinds(notes).count("leave_now") == 1
+
+
+def test_unknown_end_closure_does_not_keep_a_plan_watched_forever(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T08:30:00"})
+    plan = client.post("/plan", json={"name": "To work", "start": {"place": "greenspoint"}, "depart_after": "09:00", "stops": [{"place": "downtown", "window_start": "09:30", "window_end": "10:00"}], "watch": True}).json()
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T08:50:00"})
+    client.post("/demo/incident", json={"segment_id": "I45N:greenspoint>i45_bw8n", "kind": "closure", "minutes": None})
+    for _ in range(6 * 12):
+        client.post("/demo/advance-clock", json={"minutes": 5})
+    assert client.get(f"/plan/{plan['plan_id']}").json()["done"] is True
+    assert client.post("/demo/clear-live").json()["notifications"] == []
+
+
+def test_fixed_order_windows_never_go_backwards_in_time(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T22:00:00"})
+    req = {
+        "start": {"place": "downtown"},
+        "stops": [
+            {"name": "Breakfast drop", "place": "medcenter", "window_start": "08:00", "window_end": "08:30", "fixed_order": True},
+            {"name": "Evening pickup", "place": "galleria", "window_start": "22:30", "window_end": "23:30", "fixed_order": True},
+        ],
+    }
+    plan = client.post("/plan", json=req).json()
+    assert plan["status"] == "ok"
+    assert [leg["window"]["start"] for leg in plan["legs"]] == ["2026-09-29T08:00:00", "2026-09-29T22:30:00"]
+
+
+def test_tight_trip_alert_does_not_say_late(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T11:50:00"})
+    client.post("/trips", json={"name": "Airport run", "origin": "downtown", "destination": "hobby", "arrive_by": "12:45", "days": [0]})
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": 49, "start": "2026-09-28T11:50:00"})
+    plan_note = next(n for n in client.get("/notifications").json() if n["kind"] == "plan")
+    assert "less than 5 min to spare" in plan_note["body"] and "after 12:45" not in plan_note["body"]

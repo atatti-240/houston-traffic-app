@@ -141,6 +141,11 @@ class Plan:
     def order_names(self) -> list[str]:
         return [s.place.name for s in self.order]
 
+    @property
+    def order_index(self) -> list[int]:
+        """The chosen order as positions in the typed stop list (names can repeat)."""
+        return _index_order(self.stops, self.order)
+
 
 @dataclass
 class _Sim:
@@ -155,6 +160,11 @@ class _Sim:
     @property
     def key(self) -> tuple:
         return (self.late, self.tight, round(self.late_min), round(self.cost, 3), self.first_departure)
+
+
+def _index_order(stops: list[StopRequest], order) -> list[int]:
+    """Positions of `order`'s stops in `stops`, by identity (equal duplicates stay distinct)."""
+    return [next(i for i, s in enumerate(stops) if s is stop) for stop in order]
 
 
 def stop_orders(stops: list[StopRequest]) -> list[tuple[StopRequest, ...]]:
@@ -206,7 +216,12 @@ class _Planner:
         """If leaving at dep means waiting at a closed road, the latest departure (on 5-min
         marks) that still arrives within a minute of it."""
         r0 = self.best(frm.node, stop.place.node, dep)
-        return latest_departure_for(lambda t: self.best(frm.node, stop.place.node, t), r0, dep, LEG_STEP, CLOSURE_SLACK)
+        slack = CLOSURE_SLACK
+        if stop.window_end is not None:  # never trade a closure wait for a tight or late arrival
+            for edge in (stop.window_end - self.buffer, stop.window_end):
+                if r0.arrive_at <= edge:
+                    slack = min(slack, edge - r0.arrive_at)
+        return latest_departure_for(lambda t: self.best(frm.node, stop.place.node, t), r0, dep, LEG_STEP, slack)
 
     def simulate(self, start: Place, order: tuple[StopRequest, ...], d0: datetime, earliest: datetime) -> _Sim:
         loc, ready = start, d0
@@ -263,11 +278,11 @@ def plan_trip(
     safe_path: bool = False,
     buffer_min: int = 5,
     view: ConditionsView | None = None,
-    prefer_order: list[str] | None = None,
+    prefer_order: list[int] | None = None,
 ) -> Plan:
-    """prefer_order: stop names in the order currently planned (re-planning a watched plan).
-    It is kept unless another order is better on lateness or saves ORDER_SWITCH_MIN of cost,
-    so a re-plan doesn't flip between near-equal orders."""
+    """prefer_order: the order currently planned, as positions in `stops` (re-planning a
+    watched plan). It is kept unless another order is better on lateness or saves
+    ORDER_SWITCH_MIN of cost, so a re-plan doesn't flip between near-equal orders."""
     if not stops:
         raise ValueError("add at least one stop")
     if len(stops) > MAX_STOPS:
@@ -290,7 +305,7 @@ def plan_trip(
         per_order.append(best)
     best = min(per_order, key=lambda s: s.key)
     if prefer_order:
-        kept = next((s for s in per_order if [x.place.name for x in s.order] == list(prefer_order)), None)
+        kept = next((s for s in per_order if _index_order(stops, s.order) == list(prefer_order)), None)
         if kept is not None and kept.key[:3] == best.key[:3] and kept.cost - best.cost < ORDER_SWITCH_MIN:
             best = kept
 
