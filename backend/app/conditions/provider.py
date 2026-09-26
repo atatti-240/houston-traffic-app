@@ -235,6 +235,27 @@ class ConditionsView:
     def feeds_down(self) -> list[str]:
         return [n for n, f in self.live.feeds.items() if not f.ok]
 
+    def freshness(self) -> dict:
+        """How old the newest live data is, per source, plus which feeds are up."""
+
+        def age(times) -> int | None:
+            times = [x for x in times if x is not None]
+            return None if not times else max(0, round((self.now - max(times)).total_seconds() / 60))
+
+        readings = [r for rs in self.live.traffic.values() for r in rs]
+        by_source: dict[str, list[datetime]] = defaultdict(list)
+        for r in readings:
+            by_source[r.source].append(r.observed_at)
+        return {
+            "history": "8-week replay per 15-min slot (synthetic until real history is loaded)",
+            "live_rss_age_min": age(by_source.get("transtar_rss", [])),
+            "cameras_age_min": age(by_source.get("camera", [])),
+            "live_traffic_age_min": age([r.observed_at for r in readings]),
+            "crossings_age_min": age([s.updated_at for s in self.live.crossings.values()]),
+            "incidents_age_min": age([i.updated_at for i in self.live.incidents]),
+            "feeds": {n: ("up" if f.ok else "down") for n, f in self.live.feeds.items()},
+        }
+
 
 class ConditionsProvider:
     def __init__(self, network: Network, models, sources=None, now: Callable[[], datetime] | None = None) -> None:

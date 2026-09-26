@@ -128,12 +128,31 @@ class TripState(Base):
     leave_now_sent: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class SavedPlan(Base):
+    """A multi-stop plan (POST /plan). Watched plans are re-planned by the scheduler."""
+
+    __tablename__ = "saved_plans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    request_json: Mapped[dict] = mapped_column(JSON)  # app.plan_io.request_to_json
+    result_json: Mapped[dict] = mapped_column(JSON)  # docs/contracts/plan_result.json shape
+    watch: Mapped[bool] = mapped_column(Boolean, default=False)
+    announced: Mapped[bool] = mapped_column(Boolean, default=False)
+    leave_now_sent: Mapped[list] = mapped_column(JSON, default=list)  # leg indexes alerted
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    last_planned_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = {"sqlite_autoincrement": True}  # never reuse ids after a demo reset
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     trip_id: Mapped[int | None] = mapped_column(ForeignKey("trips.id"), nullable=True)
+    plan_id: Mapped[str | None] = mapped_column(ForeignKey("saved_plans.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)  # simulated time
     kind: Mapped[str] = mapped_column(String)  # "leave_now" | "leave_earlier" | "info"
     title: Mapped[str] = mapped_column(String)

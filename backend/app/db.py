@@ -38,6 +38,7 @@ def init_db(bind: Engine | None = None) -> None:
 _ADDED_COLUMNS = {
     "trip_states": {"last_route": "VARCHAR"},
     "trips": {"safety_weight": "FLOAT"},
+    "notifications": {"plan_id": "VARCHAR"},
 }
 
 
