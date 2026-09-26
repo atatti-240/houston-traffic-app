@@ -59,7 +59,7 @@ def create_app(services: Services | None = None) -> FastAPI:
                 await task
 
     app = FastAPI(
-        title="Houston Traffic API",
+        title="BlindSpot API",
         version="0.1.0",
         description="Predicts congestion, crash risk and train crossing blockages to tell Houston "
         "commuters when to leave and which way to go.",

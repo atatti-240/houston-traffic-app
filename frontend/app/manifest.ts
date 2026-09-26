@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Houston Traffic",
-    short_name: "HouTraffic",
+    name: "BlindSpot",
+    short_name: "BlindSpot",
     description: "Know when to leave and which way to go, before Houston traffic hits.",
     start_url: "/",
     display: "standalone",
