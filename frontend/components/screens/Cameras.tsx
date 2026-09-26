@@ -1,16 +1,274 @@
 "use client";
 
-// Placeholder: replaced by the screen build (see docs in components/app/AppContext.tsx).
+/** Live cameras (design "Live cameras"): pick an area, watch a camera's live view and see what it
+ * shows; the note links to "Why it's slow" for that road. The map marks the selected camera. */
 
-import { useApp } from "@/components/app/AppContext";
-import { BackHeader, Title } from "@/components/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useApp, type MapScene, type Screen } from "@/components/app/AppContext";
+import CameraFeed, { camName, type LiveCam, type SimBase } from "@/components/screens/Cameras/CameraFeed";
+import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
+import { parseSim } from "@/lib/format";
+import { C, ICON, LEVEL, type Level } from "@/lib/theme";
+
+const RANK: Record<Level, number> = { heavy: 2, moderate: 1, light: 0 };
+
+type Pick = { area?: string; cam?: string };
+/** What each cameras screen (stack entry) was showing, so "Back" from "Why it's slow" returns to
+ * the same camera. Keyed by the stack entry itself: opening the screen afresh starts fresh. */
+const memory = new WeakMap<Screen, Pick>();
+
+/** Worst first: level, then delay, then name. */
+function worstFirst(a: LiveCam, b: LiveCam): number {
+  return RANK[b.level] - RANK[a.level] || b.delay_min - a.delay_min || a.name.localeCompare(b.name);
+}
+
+/** "Galleria / Uptown" -> "Galleria", "Texas Medical Center" -> "Medical Center" */
+function shortArea(area: string): string {
+  return area.replace(/\s*\/.*$/, "").replace(/^Texas\s+/, "");
+}
+
+/** Drop a zero delay ("· +0 min") and keep "+11 min" on one line. */
+function tidyNote(note: string): string {
+  return note.replace(/\s*·\s*\+0 min$/, "").replace(/\+(\d+) min/, "+$1 min");
+}
+
+interface Area {
+  name: string;
+  label: string;
+  cams: LiveCam[];
+  slow: number;
+}
+
+function Header({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="flex items-center gap-1">
+      <BackHeader onBack={onBack} />
+      <h1 className="m-0 text-[24px] font-bold tracking-[-0.02em]">Live cameras</h1>
+    </div>
+  );
+}
+
+function CamRow({ cam, selected, onPick }: { cam: LiveCam; selected: boolean; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      aria-pressed={selected}
+      className={`flex w-full cursor-pointer items-center gap-3 rounded-[14px] py-2.5 pr-3.5 pl-2.5 text-left ${selected ? "" : "bg-card hover:bg-card-hi"}`}
+      style={{
+        background: selected ? C.cardHi : undefined,
+        border: `1.5px solid ${selected ? C.accent : "transparent"}`,
+      }}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-line">
+        <Icon d={ICON.video} size={18} color={C.ink} />
+      </span>
+      <span className="flex min-w-0 flex-grow flex-col gap-0.5">
+        <span className="text-[14px] font-semibold text-ink">{camName(cam.name)}</span>
+        <span className="text-[12px] text-muted">
+          {cam.looking ?? "Live view"} · {LEVEL[cam.level].label} traffic
+        </span>
+      </span>
+      <LevelDot level={cam.level} size={10} />
+    </button>
+  );
+}
+
+/** The note with a chevron that stays on the line of its last word. */
+function NoteText({ note }: { note: string }) {
+  const i = note.lastIndexOf(" ");
+  return (
+    <>
+      {i > 0 ? note.slice(0, i + 1) : ""}
+      <span className="whitespace-nowrap">
+        {i > 0 ? note.slice(i + 1) : note}
+        <Icon d={ICON.chevron} size={14} color={C.muted} className="ml-0.5 inline-block align-[-3px]" />
+      </span>
+    </>
+  );
+}
+
+function Loading({ failed }: { failed: boolean }) {
+  return (
+    <>
+      <div className="flex gap-2" aria-hidden="true">
+        {[92, 84, 96].map((w) => (
+          <span key={w} className="h-9 shrink-0 rounded-[18px] border border-edge-strong" style={{ width: w }} />
+        ))}
+      </div>
+      <div
+        role="status"
+        className="flex w-full items-center justify-center rounded-2xl border border-line px-6 text-center text-[13px] text-muted"
+        style={{ aspectRatio: "350 / 220", background: "#0B0D11" }}
+      >
+        {failed ? "Can't reach the cameras right now. We'll keep trying." : "Connecting to cameras…"}
+      </div>
+    </>
+  );
+}
 
 export default function Cameras() {
-  const { back } = useApp();
+  const { screen, back, go, live, clock, backendDown, setScene, scene } = useApp();
+  const params = screen.name === "cameras" ? screen : { area: undefined, camId: undefined };
+  const [pick, setPick] = useState<Pick>(() => memory.get(screen) ?? { area: params.area, cam: params.camId });
+  useEffect(() => {
+    memory.set(screen, pick);
+  }, [screen, pick]);
+
+  const cams = useMemo(() => live?.cameras ?? [], [live]);
+
+  // Areas, most slow cameras first (then by name); each area's cameras worst first.
+  const areas = useMemo<Area[]>(() => {
+    const byArea = new Map<string, LiveCam[]>();
+    for (const c of cams) {
+      const list = byArea.get(c.area) ?? [];
+      list.push(c);
+      byArea.set(c.area, list);
+    }
+    return [...byArea]
+      .map(([name, list]) => ({
+        name,
+        label: shortArea(name),
+        cams: [...list].sort(worstFirst),
+        slow: list.filter((c) => c.level !== "light").length,
+      }))
+      .sort((a, b) => b.slow - a.slow || a.name.localeCompare(b.name));
+  }, [cams]);
+
+  const picked = pick.cam ? cams.find((c) => c.id === pick.cam) : undefined;
+  // An area from a link may be the full name ("Galleria / Uptown") or the chip label ("Galleria").
+  const want = (picked?.area ?? pick.area)?.toLowerCase();
+  const area = (want ? areas.find((a) => a.name.toLowerCase() === want || a.label.toLowerCase() === want) : undefined) ?? areas[0];
+  const cam = (picked && area?.cams.includes(picked) ? picked : undefined) ?? area?.cams[0];
+  const name = cam ? camName(cam.name) : "";
+
+  // The simulated clock, running on from the last time the backend reported it (real seconds
+  // when the demo clock is frozen, so the "live" picture's clock still ticks).
+  const simNow = clock?.now;
+  const simSpeed = clock?.speed ?? 1;
+  const [base, setBase] = useState<SimBase | null>(null);
+  useEffect(() => {
+    if (simNow)
+      setBase({
+        sim: parseSim(simNow).getTime(),
+        real: Date.now(),
+        speed: simSpeed > 0 ? simSpeed : 1,
+      });
+  }, [simNow, simSpeed]);
+
+  // Mark the camera on the map (and put it back if the shell clears the scene on arrival).
+  const ours = useRef<{ id: string; scene: MapScene } | null>(null);
+  useEffect(() => {
+    if (!cam) return;
+    if (scene && ours.current?.scene === scene && ours.current.id === cam.id) return;
+    const s: MapScene = {
+      points: [{ lat: cam.lat, lng: cam.lng, kind: "stop", label: name }],
+      fit: [[cam.lat, cam.lng]],
+    };
+    ours.current = { id: cam.id, scene: s };
+    setScene(s);
+  }, [cam, name, scene, setScene]);
+
+  // Keep the selected area chip in view (it may be far down the row).
+  const chipsRef = useRef<HTMLDivElement>(null);
+  const areaName = area?.name;
+  useEffect(() => {
+    const row = chipsRef.current;
+    const chip = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!row || !chip) return;
+    const r = row.getBoundingClientRect();
+    const b = chip.getBoundingClientRect();
+    const pad = 20;
+    if (b.left < r.left + pad) row.scrollLeft += b.left - r.left - pad;
+    else if (b.right > r.right - pad) row.scrollLeft += b.right - r.right + pad;
+  }, [areaName]);
+
+  // Picking a camera far down the list: bring its picture back into view.
+  const feedRef = useRef<HTMLDivElement>(null);
+  const pickCam = (areaName: string, camId: string) => {
+    setPick({ area: areaName, cam: camId });
+    const el = feedRef.current;
+    if (!el || el.getBoundingClientRect().top >= 0) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({
+      block: "start",
+      behavior: reduced ? "auto" : "smooth",
+    });
+  };
+
+  // The design uses the browser's normal line height throughout.
+  const page = "flex flex-col gap-3.5 px-5 pt-[52px] pb-28 leading-[normal] md:pt-6 md:pb-8";
+
+  if (!live) {
+    return (
+      <div className={page}>
+        <Header onBack={back} />
+        <Loading failed={backendDown} />
+      </div>
+    );
+  }
+
+  if (!cam || !area) {
+    return (
+      <div className={page}>
+        <Header onBack={back} />
+        <Card>
+          <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-line">
+            <Icon d={ICON.video} size={18} color={C.ink} />
+          </span>
+          <h2 className="m-0 text-[16px] font-semibold">No cameras reporting</h2>
+          <p className="m-0 text-[13px] text-soft">None of Houston&apos;s traffic cameras are sending a picture right now. Check back in a few minutes.</p>
+        </Card>
+      </div>
+    );
+  }
+
+  const count = area.cams.length;
+  const note = tidyNote(cam.note);
   return (
-    <div className="flex flex-col gap-4 px-5 pt-14 pb-28 md:pt-6">
-      <BackHeader onBack={back} />
-      <Title>Cameras</Title>
+    <div className={page}>
+      <Header onBack={back} />
+
+      {/* Clipped at the page padding as in the design; the 4px inset keeps focus rings visible. */}
+      <div ref={chipsRef} role="group" aria-label="Choose an area" className="no-scrollbar -m-1 flex gap-2 overflow-x-auto p-1 pb-1.5">
+        {areas.map((a) => (
+          <FilterChip key={a.name} label={a.label} selected={a.name === area.name} onClick={() => setPick({ area: a.name })} />
+        ))}
+      </div>
+
+      <div ref={feedRef} className="scroll-mt-3">
+        <CameraFeed key={cam.id} cam={cam} name={name} base={base} />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <LevelPill level={cam.level} />
+        {cam.slowdown_id ? (
+          <button
+            type="button"
+            onClick={() => go({ name: "why", id: cam.slowdown_id as string })}
+            aria-label={`${note}. ${cam.level === "light" ? "See this road's details" : "See why it's slow"}`}
+            className="cursor-pointer rounded text-left text-[13px] text-soft hover:text-ink"
+          >
+            <NoteText note={note} />
+          </button>
+        ) : (
+          <span className="text-[13px] text-soft">{note}</span>
+        )}
+      </div>
+
+      <div className="mt-1 flex items-baseline justify-between gap-3">
+        <h2 className="m-0 min-w-0 text-[16px] font-semibold">Cameras in {area.label}</h2>
+        <span className="shrink-0 text-[12px] whitespace-nowrap text-muted">
+          {count} camera{count === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {area.cams.map((c) => (
+          <CamRow key={c.id} cam={c} selected={c.id === cam.id} onPick={() => pickCam(area.name, c.id)} />
+        ))}
+      </div>
     </div>
   );
 }
