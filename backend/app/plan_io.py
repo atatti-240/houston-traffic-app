@@ -86,6 +86,20 @@ def hazards(route: Route) -> list[dict]:
             )
     seen: set[str] = set()
     for s in route.segments:
+        if s.closure and s.closure.id not in seen:
+            seen.add(s.closure.id)
+            out.append(
+                {
+                    "type": "closure",
+                    "name": s.closure.title,
+                    "road": s.name,
+                    "until": iso(s.reopens_at),
+                    "wait_min": round(s.closure_wait_s / 60, 1),
+                    "source": s.closure.source,
+                    "updated_at": iso(s.closure.updated_at),
+                    "confidence": "high",
+                }
+            )
         inc = s.incident
         if inc and inc.id not in seen:
             seen.add(inc.id)
@@ -131,6 +145,7 @@ def _breakdown(r: Route) -> dict:
     return {
         "base_travel_min": round(r.base_travel_s / 60, 1),
         "train_delay_min": round(r.train_delay_s / 60, 1),
+        "closure_wait_min": round(r.closure_wait_s / 60, 1),
         "crash_exposure": round(r.crash_exposure, 3),
     }
 

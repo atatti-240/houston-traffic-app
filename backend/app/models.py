@@ -141,6 +141,7 @@ class SavedPlan(Base):
     watch: Mapped[bool] = mapped_column(Boolean, default=False)
     announced: Mapped[bool] = mapped_column(Boolean, default=False)
     leave_now_sent: Mapped[list] = mapped_column(JSON, default=list)  # leg indexes alerted
+    held: Mapped[bool | None] = mapped_column(Boolean, default=False)  # "Hold on" sent; don't defer again
     done: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime)
     last_planned_at: Mapped[datetime] = mapped_column(DateTime)

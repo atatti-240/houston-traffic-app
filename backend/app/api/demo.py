@@ -39,7 +39,7 @@ def get_clock(svc: Services = Depends(get_services)):
 def advance_clock(req: AdvanceClockRequest, svc: Services = Depends(get_services)):
     """Jump simulated time (by `minutes` or `to` a datetime), then run the trip scheduler."""
     if req.to is not None:
-        svc.clock.set(req.to.replace(tzinfo=None))
+        svc.clock.set(resolve_time(svc, req.to))
     elif req.minutes is not None:
         svc.clock.advance(req.minutes)
     sent = svc.tick()
@@ -98,7 +98,8 @@ def live_traffic(req: LiveTrafficRequest, svc: Services = Depends(get_services))
 
 @router.post("/demo/incident")
 def incident(req: IncidentRequest, svc: Services = Depends(get_services)):
-    """Report a crash / stall / roadwork / closure on a segment. Closures remove the road."""
+    """Report a crash / stall / roadwork / closure on a segment. A closure shuts the road until
+    it clears: routes wait for it or go around."""
     seg = svc.network.segments.get(req.segment_id)
     if seg is None:
         raise HTTPException(404, f"unknown segment {req.segment_id!r}")
