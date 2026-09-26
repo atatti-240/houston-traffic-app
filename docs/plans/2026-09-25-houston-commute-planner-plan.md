@@ -8,7 +8,7 @@ API samples / 接口示例: `docs/contracts/*.json` (copy into the repo, see T0.
 ## How to use this plan / 怎么用
 - Every task has: **Owner role · Files · Depends on · Estimate · Steps · Done when**. Owner letters match the roles in `docs/outline.md` §10 (A Live data, B Camera AI, C Planner, D Website, E Safety + demo).
 - 每个任务都写了负责人、文件、依赖、预计时间、步骤和完成标准。
-- The repo already has Claude Code prompts 5–9 in `_bmad-output/planning-artifacts/claude-code-build-prompts.md`. Where a task says "Repo Prompt N", paste that prompt **plus** the "Changes vs repo prompt" lines below it.
+- The repo already has build prompts 5–9 in `docs/build-prompts.md`. Where a task says "Repo Prompt N", paste that prompt **plus** the "Changes vs repo prompt" lines below it.
 - 仓库里已有第 5–9 步的 Claude Code 提示词；任务里写“Repo Prompt N”的，贴原提示词再加上“改动”那几行。
 - One owner per file. If you must touch someone else's file, tell them first. / 每个文件只有一个负责人。
 - Branch per role: `a-data`, `b-camera`, `c-planner`, `d-web`, `e-safety`. PR into `main` before each checkpoint. / 每个角色一个分支，检查点前合并。

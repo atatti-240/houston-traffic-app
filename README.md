@@ -14,6 +14,7 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 
 ## Project docs
 
+- Product brief: [docs/product-brief.md](docs/product-brief.md) · Build prompts: [docs/build-prompts.md](docs/build-prompts.md)
 - Design spec: [docs/specs/2026-09-25-houston-commute-planner-design.md](docs/specs/2026-09-25-houston-commute-planner-design.md)
 - Implementation plan (roles A-E, checkpoints): [docs/plans/2026-09-25-houston-commute-planner-plan.md](docs/plans/2026-09-25-houston-commute-planner-plan.md)
 - Outline + decisions: [docs/outline.md](docs/outline.md) · Data research: [docs/feature-notes.md](docs/feature-notes.md)
