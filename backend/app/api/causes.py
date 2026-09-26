@@ -206,7 +206,7 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
                 "kind": "train",
                 "title": "Freight train blocking crossing",
                 "place": c.name,
-                "impact": f"{clears} · +{delay} min",
+                "impact": f"{clears} · +{delay} min" if delay else clears,
                 "detail": "Sensor down, low confidence" if not st.sensor_up else "",
                 "time": iso(st.blocked_since or st.updated_at),
                 "delay_min": delay,
@@ -219,6 +219,7 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
     for s in engine.slowdowns():
         if s.main.kind != "volume":
             continue
+        extra = round(s.main.seconds / 60)
         items.append(
             {
                 "id": f"volume:{s.id}",
@@ -226,10 +227,10 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
                 "kind": "volume",
                 "title": "Heavier than usual",
                 "place": f"{s.road} · {s.place}",
-                "impact": f"More traffic than usual · +{round(s.main.seconds / 60)} min",
+                "impact": f"More traffic than usual · +{extra} min" if extra else "More traffic than usual",
                 "detail": s.main.detail,
                 "time": iso(s.main.started_at),
-                "delay_min": round(s.main.seconds / 60),
+                "delay_min": extra,
                 "lat": s.lat,
                 "lng": s.lng,
                 "slowdown_id": s.id,
@@ -266,7 +267,7 @@ def camera_status(engine: CausesEngine, network: Network, cam: dict) -> dict:
     if seg and not looking:
         looking = f"Looking {LOOKING.get(seg.direction, seg.direction.lower())}"
     busy = s is not None and s.is_slowdown and s.causes
-    note = f"{s.main.title} · +{s.delay_min} min" if busy else "Flowing normally"
+    note = (f"{s.main.title} · +{s.delay_min} min" if s.delay_min else s.main.title) if busy else "Flowing normally"
     return {
         "area": _nearest_place(network, cam["lat"], cam["lng"]),
         "looking": looking,

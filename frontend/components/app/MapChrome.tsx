@@ -89,6 +89,7 @@ export function LiveCamsButton() {
 
 /** Desktop: all controls over the map area. */
 export default function MapChrome() {
+  const { screen } = useApp();
   return (
     <>
       <div className="pointer-events-auto absolute top-4 left-4 z-[900]">
@@ -98,9 +99,11 @@ export default function MapChrome() {
         <LayersButton />
         <ZoomButtons />
       </div>
-      <div className="pointer-events-auto absolute right-4 bottom-6 z-[900]">
-        <LiveCamsButton />
-      </div>
+      {screen.name !== "cameras" && (
+        <div className="pointer-events-auto absolute right-4 bottom-6 z-[900]">
+          <LiveCamsButton />
+        </div>
+      )}
     </>
   );
 }

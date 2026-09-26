@@ -270,7 +270,7 @@ def seed_network(session: Session) -> dict[str, int]:
                 Camera(
                     id=f"cam_{c.id}",
                     kind="train",
-                    name=f"{c.name} crossing cam",
+                    name=f"{c.name} crossing",
                     lat=c.lat,
                     lng=c.lng,
                     url=f"https://cameras.example/houston/train/{c.id}",
@@ -284,11 +284,15 @@ def seed_network(session: Session) -> dict[str, int]:
             seen.add(link.code)
             a, b = node_latlng(link.a), node_latlng(link.b)
             sid = segment_id(link, link.a, link.b)
+            # "I-45 Gulf Fwy @ Telephone Rd", not "I-45 Gulf Fwy @ I-45 Gulf Fwy @ Telephone Rd"
+            at = NODES[link.b][0]
+            if at.startswith(link.highway):
+                at = at.split(" @ ")[-1]
             session.add(
                 Camera(
                     id=f"cam_{link.code}_{link.a}_{link.b}",
                     kind="highway",
-                    name=f"{link.highway} {link.name} @ {NODES[link.b][0]}",
+                    name=f"{link.highway} {link.name} @ {at}",
                     lat=(a[0] + b[0]) / 2,
                     lng=(a[1] + b[1]) / 2,
                     url=f"https://cameras.example/houston/transtar/{link.code.lower()}-{link.a}-{link.b}",

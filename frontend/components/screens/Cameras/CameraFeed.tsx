@@ -20,20 +20,6 @@ export interface SimBase {
   speed: number;
 }
 
-/** "Houston Ave @ UP crossing cam" -> "Houston Ave at UP crossing"; drops a repeated road name
- * ("I-45 Gulf Fwy @ I-45 Gulf Fwy @ Telephone Rd" -> "I-45 Gulf Fwy at Telephone Rd"). */
-export function camName(raw: string): string {
-  const parts = raw
-    .replace(/\s+crossing cam$/i, " crossing")
-    .replace(/\s+cam$/i, "")
-    .split(/\s+@\s+/);
-  const out: string[] = [];
-  for (const p of parts) {
-    if (out.length && out[0].startsWith(p)) continue;
-    out.push(p);
-  }
-  return out.join(" at ");
-}
 
 const EXIT_FULL = "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5";
 const LIGHT_OFF = "#3A2A2C";

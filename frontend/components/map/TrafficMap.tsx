@@ -7,9 +7,10 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect, useMemo } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
-import { useApp, type MapHandle } from "@/components/app/AppContext";
+import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import { camName } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
 import type { LatLngTuple, Slowdown } from "@/lib/types";
 
@@ -50,13 +51,16 @@ function Register() {
   return null;
 }
 
-function FitScene({ fit }: { fit?: LatLngTuple[] }) {
+// Default room around a fitted scene: extra at the top for the legend and the demo bar.
+const FIT_PADDING: NonNullable<MapScene["fitPadding"]> = { topLeft: [56, 76], bottomRight: [56, 56] };
+
+function FitScene({ fit, padding = FIT_PADDING }: { fit?: LatLngTuple[]; padding?: MapScene["fitPadding"] }) {
   const map = useMap();
-  const key = fit ? JSON.stringify(fit) : "";
+  const key = fit ? JSON.stringify([fit, padding]) : "";
   useEffect(() => {
     if (!fit || !fit.length) return;
     if (fit.length === 1) map.setView(fit[0], 14);
-    else map.fitBounds(fit, { padding: [56, 56], maxZoom: 14 });
+    else map.fitBounds(fit, { paddingTopLeft: padding.topLeft, paddingBottomRight: padding.bottomRight, maxZoom: 14 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, map]);
   return null;
@@ -221,7 +225,7 @@ export default function TrafficMap({
       />
       {interactive && <Register />}
       {interactive && <ClickAway />}
-      {interactive && <FitScene fit={scene?.fit} />}
+      {interactive && <FitScene fit={scene?.fit} padding={scene?.fitPadding} />}
       {!interactive && center && <Recenter center={center} zoom={zoom} />}
 
       {/* Traffic: each direction offset to its right, dark casing under the colored line */}
@@ -303,7 +307,7 @@ export default function TrafficMap({
             pathOptions={{ color: "#0E1015", weight: 2, fillColor: C.accent, fillOpacity: 1 }}
             eventHandlers={{ click: () => go({ name: "cameras", area: cam.area, camId: cam.id }) }}
           >
-            <Tooltip className="dark-tip">📷 {cam.name}</Tooltip>
+            <Tooltip className="dark-tip">📷 {camName(cam.name)}</Tooltip>
           </CircleMarker>
         ))}
 
@@ -324,26 +328,28 @@ export default function TrafficMap({
         </>
       )}
 
-      {/* Scene points: start / stops / end */}
-      {(scene?.points ?? []).map((pt, i) => (
-        <CircleMarker
-          key={`pt-${i}`}
-          center={[pt.lat, pt.lng]}
-          radius={pt.kind === "stop" ? 8 : 9}
-          pathOptions={{
-            color: "#FFFFFF",
-            weight: 3,
-            fillColor: pt.kind === "start" ? C.light : pt.kind === "end" ? C.heavy : C.accent,
-            fillOpacity: 1,
-          }}
-        >
-          {pt.label && (
-            <Tooltip direction="top" className="dark-tip">
-              {pt.label}
-            </Tooltip>
-          )}
-        </CircleMarker>
-      ))}
+      {/* Scene points: start / stops / end (own pane: above the route lines and cause icons) */}
+      <Pane name="scene-points" style={{ zIndex: 640 }}>
+        {(scene?.points ?? []).map((pt, i) => (
+          <CircleMarker
+            key={`pt-${i}`}
+            center={[pt.lat, pt.lng]}
+            radius={pt.kind === "stop" ? 8 : 9}
+            pathOptions={{
+              color: "#FFFFFF",
+              weight: 3,
+              fillColor: pt.kind === "start" ? C.light : pt.kind === "end" ? C.heavy : C.accent,
+              fillOpacity: 1,
+            }}
+          >
+            {pt.label && (
+              <Tooltip direction="top" className="dark-tip">
+                {pt.label}
+              </Tooltip>
+            )}
+          </CircleMarker>
+        ))}
+      </Pane>
 
       {interactive && <CauseMarkers />}
     </MapContainer>
