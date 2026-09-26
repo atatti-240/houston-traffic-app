@@ -83,6 +83,9 @@ export interface RouteSegment {
   live_updated_at: string | null;
   incident: Incident | null;
   incident_slowdown: number;
+  /** Closed when you reach it: the route waits this long for it to reopen. */
+  closure: Incident | null;
+  closure_wait_min: number;
   confidence: Confidence;
   crash_risk: number;
   miles: number;
@@ -103,7 +106,7 @@ export interface Incident {
 }
 
 export interface Hazard {
-  type: "crossing_blocked" | "crossing_risk" | "incident" | "live_traffic" | "high_crash_risk" | string;
+  type: "crossing_blocked" | "crossing_risk" | "incident" | "closure" | "live_traffic" | "high_crash_risk" | string;
   name: string;
   confidence: Confidence;
   source: string;
@@ -141,6 +144,7 @@ export interface Route {
     free_flow_min: number;
     base_travel_min: number;
     train_delay_min: number;
+    closure_wait_min: number;
     crash_exposure: number;
     max_crash_risk: number;
     max_block_probability: number;
@@ -225,7 +229,18 @@ export interface LiveIncident extends Incident {
 export interface LiveConditions {
   generated_at: string;
   crossings: LiveCrossing[];
-  cameras: (Camera & { snapshot_url: string | null; congestion: number | null; detail: string; updated_at: string | null })[];
+  cameras: (Camera & {
+    snapshot_url: string | null;
+    vehicles: number | null;
+    baseline_vehicles: number | null;
+    congestion: "free" | "slow" | "heavy" | "unknown";
+    congestion_score: number | null;
+    valid: boolean | null;
+    stale: boolean | null;
+    refresh_sec_median: number | null;
+    detail: string;
+    updated_at: string | null;
+  })[];
   incidents: LiveIncident[];
   travel_times: {
     segment_id: string;
@@ -239,6 +254,7 @@ export interface LiveConditions {
     detail: string;
     updated_at: string | null;
   }[];
+  high_injury_segments_url: string | null;
   feeds: Record<string, { ok: boolean; records: number; error: string | null }>;
   data_freshness: Record<string, unknown>;
 }
@@ -275,7 +291,7 @@ export interface PlanLeg {
   drive_min: number;
   freeflow_min: number;
   miles: number;
-  breakdown: { base_travel_min: number; train_delay_min: number; crash_exposure: number };
+  breakdown: { base_travel_min: number; train_delay_min: number; closure_wait_min: number; crash_exposure: number };
   geometry: LatLngTuple[];
   hazards: Hazard[];
   why: string[];

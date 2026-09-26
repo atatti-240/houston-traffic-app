@@ -39,7 +39,7 @@ def get_clock(svc: Services = Depends(get_services)):
 def advance_clock(req: AdvanceClockRequest, svc: Services = Depends(get_services)):
     """Jump simulated time (by `minutes` or `to` a datetime), then run the trip scheduler."""
     if req.to is not None:
-        svc.clock.set(req.to.replace(tzinfo=None))
+        svc.clock.set(resolve_time(svc, req.to))
     elif req.minutes is not None:
         svc.clock.advance(req.minutes)
     sent = svc.tick()

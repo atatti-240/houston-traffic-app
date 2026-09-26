@@ -55,8 +55,10 @@ class TrainSource(ABC):
         Real adapters should return every crossing they know about (blocked or clear) so
         "sensor down" can be reported even when nothing is blocked.
         """
+        # updated_at is when we observed it (now), not when the train arrived: a long
+        # blockage must not look stale.
         return [
-            CrossingStatus(e.crossing_id, True, True, e.start, "trainwatch", clears_at=e.end)
+            CrossingStatus(e.crossing_id, True, True, now, "trainwatch", clears_at=e.end)
             for e in self.active_blockages(now)
         ]
 

@@ -80,6 +80,16 @@ class TripScheduler:
         def note(kind: str, title: str, body: str) -> None:
             notes.append(self.notifier.send(session, None, kind, title, body.strip(), now, plan_id=sp.id))
 
+        # Past every window and the last planned arrival (e.g. the clock jumped a day): stop
+        # watching instead of re-planning into stale "running late" alerts.
+        ends = [datetime.fromisoformat(leg["window"]["end"]) for leg in result["legs"] if leg["window"]["end"]]
+        deadline = max([*ends, datetime.fromisoformat(result["legs"][-1]["arrive_at"])])
+        if now > deadline:
+            if 0 not in sent:
+                note("info", f"Missed: {sp.name}", "Its time windows have passed, so it's no longer being watched.")
+            sp.done = True
+            return notes
+
         if not sp.announced:
             leg0 = result["legs"][0]
             leave = datetime.fromisoformat(leg0["leave_at"])
@@ -92,10 +102,16 @@ class TripScheduler:
             sp.announced = True
 
         # Re-plan until the trip starts; after that the legs are what the user is driving.
+        new = None
         if 0 not in sent and (replan_now or now - sp.last_planned_at >= REPLAN_EVERY):
-            start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
-            plan = plan_trip(self.router, start, stops, max(depart_after, now), now, weight, buffer_min=buffer_min)
-            new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
+            try:
+                start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
+                plan = plan_trip(self.router, start, stops, max(depart_after, now), now, weight, buffer_min=buffer_min)
+                new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
+            except Exception:
+                # Keep the last good plan (and its "leave now" alerts); retry next tick.
+                log.warning("scheduler: re-planning %s failed; keeping the last plan", sp.id, exc_info=True)
+        if new is not None:
             old_leave = datetime.fromisoformat(result["legs"][0]["leave_at"])
             new_leave = datetime.fromisoformat(new["legs"][0]["leave_at"])
             why = (new["legs"][0]["why"] or [""])[0]
@@ -106,7 +122,10 @@ class TripScheduler:
                     f"{' → '.join(new['order'])}; leave at {_fmt(new_leave)}. {why}",
                 )
             elif old_leave <= now:
-                pass  # the old departure already came up; "leave now" below covers it
+                # We said go at old_leave. If going now is still right, "leave now" below
+                # says so; if the new plan waits (e.g. a train just blocked the way), say that.
+                if new_leave > now:
+                    note("leave_later", f"Hold on: leave at {_fmt(new_leave)} for {sp.name}", f"Not yet. {why}")
             elif new_leave <= old_leave - SHIFT_ALERT:
                 minutes = (old_leave - new_leave).total_seconds() / 60
                 note("leave_earlier", f"Leave {minutes:.0f} min earlier for {sp.name}", f"New departure {_fmt(new_leave)}. {why}")

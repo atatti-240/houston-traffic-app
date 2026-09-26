@@ -1,13 +1,14 @@
 """Multi-stop plans (docs/contracts/trip_request.json -> plan_result.json)."""
 
 import uuid
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 
-from app.api.deps import get_services, resolve_place, resolve_time
+from app.api.deps import get_services, is_clock_time, resolve_place, resolve_time
 from app.api.planning import notification_json
-from app.api.schemas import TripPlanRequest
+from app.api.schemas import StopIn, TripPlanRequest
 from app.models import Notification, SavedPlan
 from app.plan_io import plan_to_json, request_to_json
 from app.planner import StopRequest, plan_trip
@@ -15,6 +16,24 @@ from app.routing.router import NoRouteError
 from app.services import Services
 
 router = APIRouter(tags=["plans"])
+DAY = timedelta(days=1)
+
+
+def _window(svc: Services, s: StopIn, depart_after: datetime) -> tuple[datetime | None, datetime | None]:
+    """HH:MM window times are on depart_after's day; an HH:MM end at or before its start is
+    the next day (23:30-00:30), and an HH:MM window that ended before depart_after is
+    tomorrow's. ISO times are taken as given."""
+    day = depart_after.date()
+    ws = resolve_time(svc, s.window_start, day) if s.window_start else None
+    we = resolve_time(svc, s.window_end, day) if s.window_end else None
+    clock_start, clock_end = is_clock_time(s.window_start), is_clock_time(s.window_end)
+    if ws and we and clock_end and we <= ws:
+        we += DAY
+    if we and clock_end and we < depart_after:
+        we += DAY
+        if ws and clock_start:
+            ws += DAY
+    return ws, we
 
 
 def _summary(sp: SavedPlan) -> dict:
@@ -39,11 +58,12 @@ def create_plan(req: TripPlanRequest, svc: Services = Depends(get_services)):
     leave now per leg)."""
     now = svc.clock.now()
     depart_after = resolve_time(svc, req.depart_after)
+    if is_clock_time(req.depart_after) and depart_after < now:
+        depart_after += DAY  # "07:30" at 10 PM means tomorrow morning
     start = resolve_place(svc, req.start)
     stops = []
     for s in req.stops:
-        ws = resolve_time(svc, s.window_start, depart_after.date()) if s.window_start else None
-        we = resolve_time(svc, s.window_end, depart_after.date()) if s.window_end else None
+        ws, we = _window(svc, s, depart_after)
         if ws and we and we <= ws:
             raise HTTPException(422, f"{s.name or s.place or 'stop'}: window_end must be after window_start")
         stops.append(StopRequest(resolve_place(svc, s), ws, we, s.dwell_min, s.fixed_order))

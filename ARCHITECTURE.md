@@ -71,10 +71,11 @@ The team's first idea was `score += today * factor`, which grows without bound. 
 | Crossing reported clear, sensor up | No wait if you arrive within 5 min. After that, back to the prediction |
 | Crossing sensor down or status older than 15 min | Prediction, low confidence |
 | Live congestion reading | Only while fresh (10 min freeway, 30 min street). Blend weight `0.8 × (1 − minutes_ahead/30) × confidence factor` |
-| Incident | Closure removes the road. Crash ×1.6, roadwork ×1.3, stall or hazard ×1.2, +0.25 per extra lane, max ×3, until it clears (default 45 min) |
-| Feed down | Predictions only, low confidence for the next 30 min, and the route says so |
+| Incident | A closure shuts the road until it clears (the router waits or goes around). Crash ×1.6, roadwork ×1.3, stall or hazard ×1.2, +0.25 per extra lane, max ×3, until it clears (default 45 min) |
+| Feed down | Predictions only, low confidence for the next 30 min (every road when the traffic or incident feed is down, crossings when the train feed is), and the route says so |
+| Time more than 15 min before now | Predictions only (live data describes the present) |
 
-Every road and crossing on a route carries its `confidence` (high / medium / low), its `source` and when that was last updated. A route's confidence is the worst of its inputs.
+Every road and crossing on a route carries its `confidence` (high / medium / low), its `source` and when that was last updated. A route is **low** if any input that matters (live data, an incident or closure, a likely crossing, or anything already low) is low. It is **high** when at least half the drive time rests on strong live readings (blend weight ≥ 0.4) and no predicted crossing has a ≥10% chance of a train. Otherwise it is **medium**.
 
 ## Routing
 
@@ -87,7 +88,7 @@ edge_cost = travel_time(seg, t_seg)                     # congestion (predicted,
 lambda_crash = 30 + safety_weight * (600 - 30)  s/mile   # slider: 0 = fastest, 1 = safest (= old safe_path)
 ```
 
-Closed roads are skipped.
+A closed road is a wait: the route reaches it, waits for the closure to clear, then drives it (like a blocked crossing), so the search waits or goes around, whichever is cheaper.
 
 It returns the best route, one alternative (found by penalizing edges of the best route), a breakdown (base travel, train delay, crash exposure) and human-readable "why" reasons. To explain its choice, it also computes:
 - a **traffic-only route** (congestion-aware but blind to trains and crash risk, roughly what a typical nav app picks). Hazards on it that the chosen route skips become "Avoided X: 72% chance of a train around 7:38 AM".

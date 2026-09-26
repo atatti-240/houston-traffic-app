@@ -18,7 +18,7 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 - Design spec: [docs/specs/2026-09-25-houston-commute-planner-design.md](docs/specs/2026-09-25-houston-commute-planner-design.md)
 - Implementation plan (roles A-E, checkpoints): [docs/plans/2026-09-25-houston-commute-planner-plan.md](docs/plans/2026-09-25-houston-commute-planner-plan.md)
 - Outline + decisions: [docs/outline.md](docs/outline.md) · Data research: [docs/feature-notes.md](docs/feature-notes.md)
-- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` return these shapes
+- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` follow these shapes, with two differences: times are naive Houston local time (no `-05:00`), and fields a feed doesn't provide yet (camera vehicle counts, `stale`, `high_injury_segments_url`) are `null`. Both endpoints also return a few extra fields
 - Routing wiring (which decision uses which data, priority rules): [docs/routing-wiring.md](docs/routing-wiring.md)
 - Website style guide: [docs/website-style.md](docs/website-style.md)
 - Data-source spikes (throwaway): [spikes/](spikes/)
@@ -97,7 +97,7 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 
 ## Status
 
-- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 92 backend tests
+- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 110 backend tests
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), multi-stop planner UI, OSM road graph, real web push, computer vision on camera feeds
