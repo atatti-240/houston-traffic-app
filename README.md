@@ -12,6 +12,15 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 
 > Built in 48 hours. All data is synthetic for now, behind interfaces that the real TranStar / TrainWatch feeds plug into. See [How real data plugs in](#how-real-data-plugs-in).
 
+## Project docs
+
+- Design spec: [docs/specs/2026-09-25-houston-commute-planner-design.md](docs/specs/2026-09-25-houston-commute-planner-design.md)
+- Implementation plan (roles A-E, checkpoints): [docs/plans/2026-09-25-houston-commute-planner-plan.md](docs/plans/2026-09-25-houston-commute-planner-plan.md)
+- Outline + decisions: [docs/outline.md](docs/outline.md) · Data research: [docs/feature-notes.md](docs/feature-notes.md)
+- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`)
+- Website style guide: [docs/website-style.md](docs/website-style.md)
+- Data-source spikes (throwaway): [spikes/](spikes/)
+
 ## Run it
 
 Needs [uv](https://docs.astral.sh/uv/) (Python 3.11+) and Node 20+.
