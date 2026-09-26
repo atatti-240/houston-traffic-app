@@ -1,26 +1,57 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Live-blocked crossing marker */
+@keyframes pulse-ring {
+  0%,
+  100% {
+    stroke-opacity: 1;
+    stroke-width: 3px;
+  }
+  50% {
+    stroke-opacity: 0.3;
+    stroke-width: 9px;
+  }
+}
+.pulse {
+  animation: pulse-ring 1.4s ease-in-out infinite;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.toast-in {
+  animation: toast-in 0.25s ease-out;
+}
+
+/* Small, quiet place labels on the map */
+.leaflet-tooltip.place-label {
+  background: rgba(255, 255, 255, 0.85);
+  border: none;
+  box-shadow: none;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.leaflet-tooltip.place-label::before {
+  display: none;
 }

@@ -155,3 +155,10 @@ backend/data/*.db
 frontend/.next/
 frontend/out/
 frontend/next-env.d.ts
+
+# Spikes (throwaway research scripts): keep code, not runtime output
+spikes/.venv/
+spikes/data/
+spikes/replay/
+spikes/crossing_cams/
+spikes/*.pt

@@ -1,0 +1,48 @@
+{
+  "_comment": "Response of POST /plan and GET /plan/{id} (planner -> website). Values from spikes/demo_trip.py (typical weekday). geometry trimmed to a few points.",
+  "plan_id": "p_20260928_001",
+  "created_at": "2026-09-28T14:55:00-05:00",
+  "status": "ok",
+  "order": ["UH main campus", "Ion District"],
+  "legs": [
+    {
+      "from": "UH Sugar Land",
+      "to": "UH main campus",
+      "leave_at": "2026-09-28T15:55:00-05:00",
+      "leave_at_safe": "2026-09-28T15:50:00-05:00",
+      "arrive_at": "2026-09-28T16:51:00-05:00",
+      "drive_min": 56,
+      "freeflow_min": 34,
+      "miles": 24.3,
+      "breakdown": { "base_travel_min": 56, "train_delay_min": 0, "crash_exposure": 0.21 },
+      "geometry": [[29.5747, -95.6480], [29.6960, -95.5270], [29.7320, -95.4590], [29.7199, -95.3422]],
+      "hazards": [
+        { "type": "high_injury_segment", "name": "FOUNTAIN VIEW DR", "severe_crashes": 8, "deaths": 1, "confidence": "low", "note": "freeway may pass over this street" },
+        { "type": "incident", "name": "IH-610 South Loop Eastbound At Fannin St - Accident", "source": "transtar_rss", "updated_at": "2026-09-28T14:54:00-05:00" }
+      ],
+      "why": ["Leaving after 4:00 PM risks arriving late: I-69 SW inbound is 1.70x slower at 4:00 PM"]
+    },
+    {
+      "from": "UH main campus",
+      "to": "Ion District",
+      "leave_at": "2026-09-28T17:40:00-05:00",
+      "leave_at_safe": "2026-09-28T17:40:00-05:00",
+      "arrive_at": "2026-09-28T17:50:00-05:00",
+      "drive_min": 10,
+      "freeflow_min": 7,
+      "miles": 2.7,
+      "breakdown": { "base_travel_min": 10, "train_delay_min": 0, "crash_exposure": 0.05 },
+      "geometry": [[29.7199, -95.3422], [29.7290, -95.3600], [29.7336, -95.3790]],
+      "hazards": [],
+      "why": []
+    }
+  ],
+  "late_stops": [],
+  "baseline": { "description": "typed order, leave now, no crossing awareness", "total_min": 72 },
+  "saved_min_vs_baseline": 6,
+  "navigate_links": {
+    "waze": "https://waze.com/ul?ll=29.7199,-95.3422&navigate=yes",
+    "google": "https://www.google.com/maps/dir/29.5747,-95.648/29.7199,-95.3422/29.7336,-95.379"
+  },
+  "data_freshness": { "history": "TranStar 2025 weekday", "live_rss_age_min": 1, "crossings_age_min": 1, "cameras_age_min": 2 }
+}
