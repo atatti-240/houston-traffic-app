@@ -56,6 +56,12 @@ export function tabOf(s: Screen): Tab | null {
   return null;
 }
 
+function parentOf(s: Screen): Screen {
+  if (s.name === "why") return { name: "causes" };
+  if (s.name === "trip") return { name: "where" };
+  return { name: "map" };
+}
+
 // ---- map scene ---------------------------------------------------------------------------------
 
 export interface MapPoint {
@@ -78,6 +84,8 @@ export interface MapScene {
   points?: MapPoint[];
   /** Fit the map to these points when the scene is set */
   fit?: LatLngTuple[];
+  /** Room to leave around `fit`, in px (e.g. for a bottom sheet over the map) */
+  fitPadding?: { topLeft: [number, number]; bottomRight: [number, number] };
   /** Show cause markers (default true) */
   markers?: boolean;
 }
@@ -406,7 +414,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStack((st) => [...st, s].slice(-30));
     setSelected(null);
   }, []);
-  const back = useCallback(() => setStack((st) => (st.length > 1 ? st.slice(0, -1) : [{ name: "map" }])), []);
+  // With nothing to go back to (opened from a link), go to the screen's natural parent.
+  const back = useCallback(() => setStack((st) => (st.length > 1 ? st.slice(0, -1) : [parentOf(st[0])])), []);
   const tab = useCallback((t: Tab) => setStack((st) => [...st, { name: t } as Screen].slice(-30)), []);
 
   // Screens own their scene: clear it when the screen changes.

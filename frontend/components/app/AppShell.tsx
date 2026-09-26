@@ -9,7 +9,7 @@
  *         the map with its controls on the right.
  */
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AppProvider, tabOf, useApp, useNewNotifications, type Screen, type Tab } from "@/components/app/AppContext";
 import DemoRunner from "@/components/app/DemoRunner";
@@ -134,18 +134,26 @@ function Shell() {
           setToasts((t) => t.filter((x) => x.id !== n.id));
         }, 9000),
       );
-      if (typeof Notification !== "undefined" && Notification.permission === "granted" && navigator.serviceWorker?.controller) {
-        navigator.serviceWorker.ready
-          .then((reg) => reg.showNotification(n.title, { body: n.body, icon: "/icon-192.png", tag: `n-${n.id}` }))
+      if (typeof Notification !== "undefined" && Notification.permission === "granted" && "serviceWorker" in navigator) {
+        navigator.serviceWorker
+          .getRegistration("/")
+          .then((reg) => reg?.showNotification(n.title, { body: n.body, icon: "/icon-192.png", tag: `n-${n.id}` }))
           .catch(() => {});
       }
     }
   }, []);
   useNewNotifications(onNew);
 
+  // The service worker shows system notifications (sw.js). Alerts > Turn on asks for permission.
+  useEffect(() => {
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }, []);
+
   const tabScreen = tabOf(screen) !== null;
   const isMap = screen.name === "map";
   const isTrip = screen.name === "trip";
+  // Phone screens that cover the whole map: take the map out of the tab order and the a11y tree.
+  const mapHidden = !isDesktop && !isMap && !isTrip;
 
   let panel: ReactNode;
   if (isDesktop) {
@@ -183,9 +191,25 @@ function Shell() {
     );
   }
 
+  const down = backendDown && (
+    <div
+      role="alert"
+      className={`absolute left-1/2 z-[1500] w-max max-w-[92vw] -translate-x-1/2 rounded-xl px-4 py-2 text-sm text-white ${isDesktop ? "top-16" : "bottom-[100px]"}`}
+      style={{ background: C.heavy }}
+    >
+      Can&apos;t reach the API. Start it with <code>make backend</code>.{" "}
+      <button type="button" className="cursor-pointer underline" onClick={refresh}>
+        Retry
+      </button>
+    </div>
+  );
+
+  // The panel comes first in the page so keyboard users reach it before the map's markers.
+  // `isolate` keeps Leaflet's own z-indexes (panes, controls) inside the map.
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-bg text-ink">
-      <div className={isDesktop ? "absolute inset-y-0 right-0 left-[420px]" : "absolute inset-0"}>
+      {panel}
+      <div className={`isolate ${isDesktop ? "absolute inset-y-0 right-0 left-[420px]" : "absolute inset-0"}`} inert={mapHidden}>
         <ClientTrafficMap />
         {isDesktop && <MapChrome />}
         {isDesktop && (
@@ -193,21 +217,14 @@ function Shell() {
             <DemoBar onDemo={() => setDemo(true)} />
           </div>
         )}
+        {isDesktop && down}
       </div>
-      {panel}
       {!isDesktop && isMap && (
         <div className="absolute top-3 right-4 z-[1100]">
           <DemoBar onDemo={() => setDemo(true)} />
         </div>
       )}
-      {backendDown && (
-        <div className="absolute top-16 left-1/2 z-[1500] -translate-x-1/2 rounded-xl px-4 py-2 text-sm text-white" style={{ background: C.heavy }}>
-          Can&apos;t reach the API. Start it with <code>make backend</code>.{" "}
-          <button type="button" className="cursor-pointer underline" onClick={refresh}>
-            Retry
-          </button>
-        </div>
-      )}
+      {!isDesktop && down}
       <Toasts
         toasts={toasts}
         dismiss={(id) => {

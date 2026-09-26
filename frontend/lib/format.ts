@@ -46,3 +46,18 @@ export function scoreColor(x: number): string {
   }
   return "rgb(220, 38, 38)";
 }
+
+/** Camera name for display: "Houston Ave @ UP crossing" -> "Houston Ave at UP crossing"; drops a repeated road name
+ * ("I-45 Gulf Fwy @ I-45 Gulf Fwy @ Telephone Rd" -> "I-45 Gulf Fwy at Telephone Rd"). */
+export function camName(raw: string): string {
+  const parts = raw
+    .replace(/\s+crossing cam$/i, " crossing")
+    .replace(/\s+cam$/i, "")
+    .split(/\s+@\s+/);
+  const out: string[] = [];
+  for (const p of parts) {
+    if (out.length && out[0].startsWith(p)) continue;
+    out.push(p);
+  }
+  return out.join(" at ");
+}

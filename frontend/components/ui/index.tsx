@@ -95,7 +95,7 @@ export function CauseChip({ kind, label, count, onClick, active }: { kind: Cause
       type={onClick ? "button" : undefined}
       onClick={onClick}
       aria-pressed={onClick ? !!active : undefined}
-      className="flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap text-ink"
+      className={`flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap text-ink ${onClick ? "cursor-pointer" : ""}`}
       style={{ background: active ? C.cardHi : C.card, border: `1px solid ${active ? C.accent : "transparent"}` }}
     >
       <CauseDot kind={kind} />

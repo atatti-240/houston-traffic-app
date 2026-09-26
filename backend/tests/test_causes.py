@@ -104,3 +104,18 @@ def test_new_incident_kinds_slow_roads(client):
 
 def test_unknown_scenario_is_404(client):
     assert client.post("/demo/scenario/nope").status_code == 404
+
+
+def test_a_train_counts_from_when_it_blocked_the_crossing(evening):
+    # The evening train on Navigation Blvd started at 4:56: the chart only drops after that.
+    d = evening.get("/slowdowns/NAV:downtown>eastend").json()
+    assert "train" in {c["kind"] for c in d["causes"]}
+    assert any(m["label"].endswith("train") and m["t"].endswith("T16:56:00") for m in d["history"]["markers"])
+    mph = {p["t"][11:16]: p["mph"] for p in d["history"]["points"]}
+    assert mph["16:50"] > mph["17:00"] * 1.5
+
+
+def test_alerts_never_say_plus_zero_minutes(evening):
+    items = evening.get("/traffic-alerts").json()["items"]
+    assert not any("+0 min" in a["impact"] for a in items)
+    assert not any("+0 min" in c["note"] for c in evening.get("/live").json()["cameras"])

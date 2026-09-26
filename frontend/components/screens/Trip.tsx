@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
-import { useApp, type MapPoint } from "@/components/app/AppContext";
+import { useApp, type MapPoint, type MapScene } from "@/components/app/AppContext";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
@@ -125,37 +125,10 @@ function arrowChoice<T>(e: KeyboardEvent<HTMLElement>, opts: T[], current: T, pi
   requestAnimationFrame(() => group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
 }
 
-/**
- * What to fit the map to. On a phone the sheet covers the lower ~64% of the map, so return a box
- * that, fitted by the map (56px padding, whole zoom levels, max zoom 14), puts the route in the
- * strip above the sheet: work out that zoom here, then hang the box below the route.
- */
-function fitAboveSheet(pts: LatLngTuple[], isDesktop: boolean): LatLngTuple[] {
-  if (isDesktop || !pts.length || typeof window === "undefined") return pts;
-  const PAD = 56;
-  const w = window.innerWidth - 2 * PAD;
-  const h = window.innerHeight - 2 * PAD;
-  const strip = window.innerHeight * 0.36 - PAD - 16;
-  if (w <= 0 || h <= 0 || strip <= 40) return pts;
-  // Web Mercator in radians; pixels per radian at zoom z = 256 * 2^z / 2π
-  const my = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
-  const lat = (y: number) => ((2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180) / Math.PI;
-  const xs = pts.map((p) => (p[1] * Math.PI) / 180);
-  const ys = pts.map((p) => my(p[0]));
-  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const need = Math.min(w / Math.max(x1 - x0, 1e-6), strip / Math.max(y1 - y0, 1e-6));
-  const zoom = Math.max(3, Math.min(14, Math.floor(Math.log2((need * 2 * Math.PI) / 256))));
-  const k = (256 * 2 ** zoom) / (2 * Math.PI);
-  // A box a bit smaller than the view at that zoom (so the map picks exactly it), with the
-  // route centred in the strip at its top.
-  const bw = (w * 0.98) / k;
-  const bh = (h * 0.98) / k;
-  const top = y1 + Math.max(0, strip / k - (y1 - y0)) / 2;
-  const cx = (x0 + x1) / 2;
-  return [
-    [lat(top), ((cx - bw / 2) * 180) / Math.PI],
-    [lat(top - bh), ((cx + bw / 2) * 180) / Math.PI],
-  ];
+/** On a phone the sheet covers the lower 64% of the map: fit the route into the strip above it. */
+function sheetPadding(isDesktop: boolean): MapScene["fitPadding"] {
+  if (isDesktop || typeof window === "undefined") return undefined;
+  return { topLeft: [32, 28], bottomRight: [32, Math.round(window.innerHeight * 0.64) + 20] };
 }
 
 // ---- pieces ------------------------------------------------------------------------------------
@@ -441,7 +414,12 @@ export default function Trip() {
       }
       if (endPt) pts.push({ ...endPt, kind: "end", label: toName });
       const all = legs.flat();
-      setScene({ legs, points: pts, fit: fitAboveSheet(all.length ? all : pts.map((p) => [p.lat, p.lng] as LatLngTuple), isDesktop) });
+      setScene({
+        legs,
+        points: pts,
+        fit: all.length ? all : pts.map((p) => [p.lat, p.lng] as LatLngTuple),
+        fitPadding: sheetPadding(isDesktop),
+      });
       return;
     }
     const best = result.kind === "rec" ? result.rec.route : result.best;
@@ -452,7 +430,8 @@ export default function Trip() {
       route: best.geometry,
       alternative: shownAlt,
       points: pts,
-      fit: fitAboveSheet([...best.geometry, ...(shownAlt ?? [])], isDesktop),
+      fit: [...best.geometry, ...(shownAlt ?? [])],
+      fitPadding: sheetPadding(isDesktop),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, showAlt, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
@@ -596,7 +575,7 @@ export default function Trip() {
         <div className="grid grid-cols-3 gap-2">
           <Tile label="Driving">{driveMin} min</Tile>
           <Tile label="Trains" tone={trainMin ? C.heavyText : undefined}>
-            {trainMin ? `+${trainMin} min` : best.crossings.length ? "+0 min" : "None"}
+            {trainMin ? `+${trainMin} min` : best.crossings.length ? "No wait" : "None"}
           </Tile>
           <Tile label={third.label} tone={third.tone}>
             {third.value}

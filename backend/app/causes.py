@@ -261,6 +261,11 @@ class CausesEngine:
 
     def _train_cause(self, c: CrossingInfo, arrive: datetime) -> Cause | None:
         cc = self.view.crossing(c, arrive)
+        st = self.view.live.crossings.get(c.id)
+        if cc.live and st is not None and st.blocked_since and arrive < st.blocked_since:
+            # Routing counts a live train from now even for a time just before now (you can't
+            # get there any sooner). For "what was it like at 4:50" it wasn't there yet.
+            cc = self.view.without_live().crossing(c, arrive)
         if cc.expected_delay_s < MIN_TRAIN_S:
             return None
         if cc.live and cc.block_probability >= 1.0:
@@ -273,7 +278,7 @@ class CausesEngine:
                 "Freight train blocking crossing",
                 f"{c.name} is blocked; expected to clear about {fmt(clears)}. "
                 f"Crossings like this usually clear in about {avg} minutes.",
-                started_at=cc.updated_at,
+                started_at=(st.blocked_since if st else None) or cc.updated_at,
                 source=cc.source,
                 crossing_id=c.id,
             )

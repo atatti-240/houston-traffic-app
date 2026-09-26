@@ -6,9 +6,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp, type MapScene, type Screen } from "@/components/app/AppContext";
-import CameraFeed, { camName, type LiveCam, type SimBase } from "@/components/screens/Cameras/CameraFeed";
+import CameraFeed, { type LiveCam, type SimBase } from "@/components/screens/Cameras/CameraFeed";
 import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
-import { parseSim } from "@/lib/format";
+import { camName, parseSim } from "@/lib/format";
 import { C, ICON, LEVEL, type Level } from "@/lib/theme";
 
 const RANK: Record<Level, number> = { heavy: 2, moderate: 1, light: 0 };

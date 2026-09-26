@@ -104,10 +104,11 @@ const STEPS: Step[] = [
     },
   },
   {
-    title: "Downtown → Hobby by 5:45, safer",
-    narration: "The Faster ↔ Safer slider trades a few minutes for a route around the crash-prone stretch of the Gulf Freeway.",
+    title: "Downtown → Hobby by 5:45",
+    narration:
+      "The Gulf Freeway is the usual way to Hobby. With the crash on it, BlindSpot goes around and says why. Slide toward Safer and it stays off crash-prone stretches even on a normal day.",
     run: async (a) => {
-      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 1 });
+      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 0 });
     },
   },
   {
@@ -133,6 +134,7 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
   const [index, setIndex] = useState(-1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   async function go(i: number) {
     setBusy(true);
@@ -149,10 +151,65 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
 
   const step = index >= 0 ? STEPS[index] : null;
   const last = index === STEPS.length - 1;
+  const next = () => (last ? onExit() : go(index + 1));
+  const nextLabel = busy ? "…" : index < 0 ? "Start" : last ? "Done" : "Next →";
+  const errorBox = error && (
+    <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: "rgba(255,77,77,0.15)", color: C.heavyText }}>
+      Backend error: {error}. Is the API running on :8000?
+    </p>
+  );
+
+  // Phone: one compact row at the top so the map, route and popups stay visible; tap the title
+  // for the narration.
+  if (!app.isDesktop) {
+    return (
+      <div
+        className="fixed inset-x-2 top-2 z-[1300] rounded-[18px] border border-pop-line px-3 py-2 text-ink"
+        style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+          >
+            <span className="font-num shrink-0 text-[12px] text-muted">{step ? `${index + 1}/${STEPS.length}` : "Demo"}</span>
+            <span className="truncate text-[14px] font-semibold">{step ? step.title : "Scripted demo"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={next}
+            disabled={busy}
+            className="h-8 shrink-0 cursor-pointer rounded-2xl px-3 text-[13px] font-semibold disabled:opacity-60"
+            style={{ background: C.accent, color: C.onAccent }}
+          >
+            {nextLabel}
+          </button>
+          <button type="button" onClick={onExit} aria-label="Exit demo" className="h-8 w-6 shrink-0 cursor-pointer text-muted">
+            ✕
+          </button>
+        </div>
+        {open && (
+          <div className="pb-1">
+            <p className="mt-1 text-[13px] leading-snug text-soft">
+              {step ? step.narration : "A Monday in Houston: the morning commute, a live train, then why everything is slow at 5 PM."}
+            </p>
+            {index > 0 && (
+              <button type="button" onClick={() => go(0)} disabled={busy} className="mt-2 h-8 cursor-pointer rounded-2xl border border-edge-strong px-3 text-[13px]">
+                Restart
+              </button>
+            )}
+          </div>
+        )}
+        {errorBox}
+      </div>
+    );
+  }
 
   return (
     <div
-      className="fixed top-16 left-1/2 z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] border border-pop-line p-4 text-ink md:top-auto md:bottom-6 md:left-[calc(420px+(100vw-420px)/2)]"
+      className="fixed bottom-6 left-[calc(420px+(100vw-420px)/2)] z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] border border-pop-line p-4 text-ink"
       style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
     >
       <div className="flex items-center justify-between text-[12px] text-muted">
@@ -165,11 +222,7 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
       <p className="mt-1 text-[14px] text-soft">
         {step ? step.narration : "A Monday in Houston: the morning commute, a live train, then why everything is slow at 5 PM."}
       </p>
-      {error && (
-        <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: "rgba(255,77,77,0.15)", color: C.heavyText }}>
-          Backend error: {error}. Is the API running on :8000?
-        </p>
-      )}
+      {errorBox}
       <div className="mt-3 flex justify-end gap-2">
         {index > 0 && (
           <button type="button" onClick={() => go(0)} disabled={busy} className="h-9 cursor-pointer rounded-[18px] border border-edge-strong px-3.5 text-[14px]">
@@ -178,12 +231,12 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
         )}
         <button
           type="button"
-          onClick={() => (last ? onExit() : go(index + 1))}
+          onClick={next}
           disabled={busy}
           className="h-9 cursor-pointer rounded-[18px] px-4 text-[14px] font-semibold disabled:opacity-60"
           style={{ background: C.accent, color: C.onAccent }}
         >
-          {busy ? "…" : index < 0 ? "Start" : last ? "Done" : "Next →"}
+          {nextLabel}
         </button>
       </div>
     </div>

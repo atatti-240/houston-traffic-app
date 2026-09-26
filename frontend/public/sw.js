@@ -2,6 +2,10 @@
 // The backend's WebPush channel is still a stub (no VAPID keys yet); today the page calls
 // registration.showNotification() itself when new alerts arrive.
 
+// Take over open pages right away, so alerts can be shown without a reload.
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
   event.waitUntil(
