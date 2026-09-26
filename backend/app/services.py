@@ -53,5 +53,5 @@ class Services:
         self._install(models)
         return days
 
-    def tick(self):
-        return self.scheduler.tick(self.clock.now())
+    def tick(self, replan_now: bool = False):
+        return self.scheduler.tick(self.clock.now(), replan_now)
