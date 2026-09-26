@@ -58,7 +58,7 @@ class TrainSource(ABC):
         # updated_at is when we observed it (now), not when the train arrived: a long
         # blockage must not look stale.
         return [
-            CrossingStatus(e.crossing_id, True, True, now, "trainwatch", clears_at=e.end)
+            CrossingStatus(e.crossing_id, True, True, now, "trainwatch", clears_at=e.end, blocked_since=e.start)
             for e in self.active_blockages(now)
         ]
 

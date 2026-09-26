@@ -5,7 +5,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_services, resolve_time
+from app.api.causes import camera_status
 from app.api.schemas import incident_json
+from app.causes import CausesEngine
+from app.seed.network import PLACE_ADDRESSES
 from app.services import Services
 
 router = APIRouter(tags=["map"])
@@ -13,7 +16,10 @@ router = APIRouter(tags=["map"])
 
 @router.get("/places")
 def places(svc: Services = Depends(get_services)):
-    return [{"id": n.id, "name": n.name, "lat": n.lat, "lng": n.lng} for n in svc.network.places()]
+    return [
+        {"id": n.id, "name": n.name, "lat": n.lat, "lng": n.lng, "address": PLACE_ADDRESSES.get(n.id)}
+        for n in svc.network.places()
+    ]
 
 
 @router.get("/segments")
@@ -122,6 +128,7 @@ def live(svc: Services = Depends(get_services)):
     """What the live feeds say right now (docs/contracts/live_conditions.json): crossing status
     with sensor health, cameras, incidents, live travel times and which feeds are down."""
     view = svc.router.view()
+    engine = CausesEngine(svc.router, view)
     now = view.now
     cams = svc.sources.cameras.cameras()
     cam_for_crossing = {c["crossing_id"]: c["id"] for c in cams if c.get("crossing_id")}
@@ -175,6 +182,8 @@ def live(svc: Services = Depends(get_services)):
                 "detail": reading.detail if reading else "",
                 "updated_at": reading.observed_at if reading else None,
                 "mock": cam.get("mock", False),
+                # What the camera's road looks like right now (area, direction, level, why).
+                **camera_status(engine, svc.network, cam),
             }
         )
 
