@@ -5,10 +5,10 @@
 Waze and Google Maps react to congestion after it has formed. This app predicts the stuff they're blind to:
 
 - **Freight trains blocking at-grade crossings.** Learned per crossing, per 15 minutes of the week.
-- **Crash-prone stretches of freeway.** Learned per road segment and hour, with a 🛡️ **Safe Path** toggle that steers around them.
+- **Crash-prone stretches of freeway.** Learned per road segment and hour, with a 🛡️ **Faster ↔ Safer** slider that steers around them.
 - **Tomorrow's congestion.** A congestion score per road × 15-minute slot, nudged every day by a moving average.
 
-Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, and a **"Leave now"** alert.
+Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, and a **"Leave now"** alert. Live train, traffic and incident reports override the predictions for the next half hour, and every answer says how sure it is and where the data came from. Errands with up to 3 stops get the best stop order and departure times.
 
 > Built in 48 hours. All data is synthetic for now, behind interfaces that the real TranStar / TrainWatch feeds plug into. See [How real data plugs in](#how-real-data-plugs-in).
 
@@ -18,7 +18,8 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 - Design spec: [docs/specs/2026-09-25-houston-commute-planner-design.md](docs/specs/2026-09-25-houston-commute-planner-design.md)
 - Implementation plan (roles A-E, checkpoints): [docs/plans/2026-09-25-houston-commute-planner-plan.md](docs/plans/2026-09-25-houston-commute-planner-plan.md)
 - Outline + decisions: [docs/outline.md](docs/outline.md) · Data research: [docs/feature-notes.md](docs/feature-notes.md)
-- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`)
+- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` return these shapes
+- Routing wiring (which decision uses which data, priority rules): [docs/routing-wiring.md](docs/routing-wiring.md)
 - Website style guide: [docs/website-style.md](docs/website-style.md)
 - Data-source spikes (throwaway): [spikes/](spikes/)
 
@@ -55,16 +56,18 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 4. **Live train on Old Spanish Trail.** A *"New route"* alert: *"Rerouted around Old Spanish Trail @ Almeda: blocked by a train right now"*.
 5. **7:35 AM.** *"Leave now"* alert with the route.
 6. **Evening: Downtown → Hobby.** The fastest route is the crash-prone I-45 Gulf Freeway.
-7. **Safe Path on.** The route skips the crash-prone stretch of the Gulf Freeway from downtown to 610: *"Safe Path: 35% less crash exposure than the traffic-only route for +6 min"*.
+7. **Slide toward Safer.** The route skips the crash-prone stretch of the Gulf Freeway from downtown to 610: *"Safe Path: 35% less crash exposure than the traffic-only route for +6 min"*.
+8. **Live crash on I-45.** Back on Fastest, a crash reported on the Gulf Freeway reroutes you: *"Rerouted around I-45 Gulf Fwy: crash reported (demo feed, just now)"*.
 
-You can also use the app yourself: pick places or click the map (📍), scrub the time slider to watch rush hour build, toggle crash-risk / crossing / camera layers, and use **+15m / +1h** to move the simulated clock.
+You can also use the app yourself: pick places or click the map (📍), scrub the time slider to watch rush hour build, toggle crash-risk / crossing / incident / camera layers, and use **+15m / +1h** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down.
 
 ## How it works
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:
 
 - **One model shape for everything.** Each model keeps a score per (thing, time bucket) and nudges it daily: `score += α × (today − score)`. Congestion: segment × 15-min slot. Trains: crossing × 15-min slot (+ average blockage length). Crashes: segment × weekday/weekend hour, pooled because crashes are sparse.
-- **Time-dependent routing.** Each road is scored at the time you'd actually reach it: predicted travel time + expected train delay + a crash-risk penalty (×20 with Safe Path).
+- **Time-dependent routing.** Each road is scored at the time you'd actually reach it: predicted travel time + expected train delay + a crash-risk penalty that grows up to ×20 as you slide toward Safer.
+- **Live beats predicted, carefully.** Fresh live data is blended in for the next 30 min, incidents slow or close roads, and a feed that goes down falls back to predictions and says so. See [docs/routing-wiring.md](docs/routing-wiring.md).
 - **Explainable.** Every route is compared with a traffic-only route (what a typical nav app would pick), and the differences become the "why" bullets.
 
 ```
@@ -74,15 +77,19 @@ frontend/  Next.js PWA + Leaflet: map, trip planner, time slider, alerts, script
 
 ## How real data plugs in
 
-Every source is an interface in `backend/app/adapters/base.py`. Today each one has a `Mock*` implementation in `adapters/mock.py` built on the deterministic synthetic world (`app/seed/synthetic.py`). To go live, write a real implementation and register it in `build_sources()` behind `DATA_SOURCE=live`. Nothing else changes.
+Every source is an interface in `backend/app/adapters/base.py`. Today each one has a `Mock*` implementation in `adapters/mock.py` built on the deterministic synthetic world (`app/seed/synthetic.py`). To go live, write a real implementation and register it in `build_sources()` behind `DATA_SOURCE=live`. Nothing else changes: the router only reads the road-conditions layer, which already handles live data, confidence and feed outages. [docs/routing-wiring.md](docs/routing-wiring.md) has the rules each adapter must follow.
 
 | Interface | Returns | Real feed |
 |---|---|---|
 | `SpeedSource.observations(day)` | speed per segment per 15-min slot | Houston TranStar speed / travel-time data (its Bluetooth AVI readers), plus TranStar historical archives to backfill |
 | `CrashSource.crashes(day)` | crashes with segment + time | TranStar incident feed (live), TxDOT CRIS crash records (history) |
 | `TrainSource.crossing_events(day)` | blockage start/end per crossing | TrainWatch data / crossing sensors, FRA blocked-crossing reports |
-| `TrainSource.active_blockages(now)` | crossings blocked right now | Same, live. Also where camera-based detection would plug in |
+| `TrainSource.crossing_status(now)` | every crossing's live status: blocked/clear, sensor up/down, expected clear time | Train Watch (ArcGIS), crossing sensors. Also where camera-based detection would plug in |
+| `LiveTrafficSource.current(now)` | live congestion per segment (0-1) with source and confidence | TranStar RSS live travel times, camera vehicle counts vs each camera's baseline |
+| `IncidentSource.active(now)` | incidents and closures matched to segments | TranStar RSS incidents and lane closures |
 | `CameraSource.cameras()` | camera catalog | TranStar CCTV list + train crossing cameras |
+
+Live methods are called once per request, so cache the upstream for about a minute, and raise when it's down. The app marks the feed down and falls back to predictions.
 
 The one step real feeds need is **map matching**: snap each sensor, incident or crossing to a `RoadSegment` id. The seeded graph (`app/seed/network.py`) is a hand-built sketch of the major corridors; swapping in OpenStreetMap-derived segments keeps the same schema.
 
@@ -90,6 +97,7 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 
 ## Status
 
-- ✅ Models, routing, recommender, scheduler, API, map UI, demo: all working, 41 backend tests
+- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 92 backend tests
+- ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
-- ⏭️ Next: real TranStar/TrainWatch adapters, OSM road graph, real web push, computer vision on camera feeds
+- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), multi-stop planner UI, OSM road graph, real web push, computer vision on camera feeds

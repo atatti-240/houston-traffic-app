@@ -102,10 +102,12 @@ def cameras(svc: Services = Depends(get_services)):
 
 
 def _midpoint(geometry) -> tuple[float, float] | None:
+    """Middle of a polyline's vertices (between the two middle ones when there's an even count)."""
     if not geometry:
         return None
-    lat, lng = geometry[len(geometry) // 2]
-    return lat, lng
+    n = len(geometry)
+    a, b = geometry[(n - 1) // 2], geometry[n // 2]
+    return (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
 
 
 @router.get("/live")
