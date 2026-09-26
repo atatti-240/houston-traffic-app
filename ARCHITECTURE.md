@@ -104,7 +104,7 @@ It returns the best route, one alternative (found by penalizing edges of the bes
    - `leave_earlier` if the recommended departure moved ≥5 minutes earlier
    - `leave_later` if it moved ≥10 minutes later
    - `reroute` if the departure time held but the route changed (e.g. a live train)
-   - `leave_now` once, when `now >= departure`. If a closed road means the best departure comes after the arrive-by time (leaving later arrives just as soon), the trip stays watched past arrive-by until that "leave now" goes out. When the trip can't be on time, the plan alert gives the ETA and how late it will be.
+   - `leave_now` once, when `now >= departure`. If a closed road means the best departure comes after the arrive-by time (leaving later arrives just as soon), the trip stays watched past arrive-by (for up to a day) until that "leave now" goes out. When the trip can't be on time, the plan alert gives the ETA and how late it will be.
 4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. A plan is marked done after the last arrival. A plan you never started whose windows have all closed, and whose planned departure has passed, gets one `info` "Missed" alert instead. Re-plans keep the current stop order unless another is clearly better (on lateness, or by 3+ min), so the order doesn't flip-flop.
 5. The frontend polls `/notifications`, shows toasts, and uses web push when available.
 

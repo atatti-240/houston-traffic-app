@@ -28,8 +28,9 @@ def _windows(svc: Services, stops: list[StopIn], depart_after: datetime) -> list
         or it's already past while another window in the request moved (so "08:00"-"08:30"
         then "09:00" asked at 10 PM are both tomorrow).
     A window still ahead today never moves, so "23:00"-"23:30" then "00:15"-"00:45" is
-    tonight then after midnight. An end at or before its start is overnight (23:30-00:30):
-    the window you're inside right now, else tonight's."""
+    tonight then after midnight, unless it's a fixed-order stop whose window would close
+    before the previous fixed stop's opens. An end at or before its start is overnight
+    (23:30-00:30): the window you're inside right now, else tonight's."""
     day = depart_after.date()
     windows, rolled, passed_starts = [], False, []
     for i, s in enumerate(stops):
@@ -56,6 +57,18 @@ def _windows(svc: Services, stops: list[StopIn], depart_after: datetime) -> list
         for i in passed_starts:
             ws, we = windows[i]
             windows[i] = (ws + DAY, we)
+    # Fixed-order stops are visited in typed order: an HH:MM window that would close before
+    # the previous fixed stop's window even opens is the next day's.
+    prev_open = None
+    for i, s in enumerate(stops):
+        ws, we = windows[i]
+        if not s.fixed_order or (ws is None and we is None):
+            continue
+        if prev_open is not None and (we or ws) < prev_open:
+            ws = ws + DAY if ws and is_clock_time(s.window_start) else ws
+            we = we + DAY if we and is_clock_time(s.window_end) else we
+            windows[i] = (ws, we)
+        prev_open = ws or we
     return windows
 
 

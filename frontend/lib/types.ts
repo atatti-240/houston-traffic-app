@@ -311,6 +311,8 @@ export interface PlanResult {
   planned_at: string;
   status: "ok" | "late";
   order: string[];
+  /** The chosen order as positions in the request's stops (names can repeat). */
+  order_index: number[];
   legs: PlanLeg[];
   late_stops: { name: string; late_min: number }[];
   baseline: { description: string; total_min: number; wait_min: number; late_stops: number };
