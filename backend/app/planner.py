@@ -191,10 +191,10 @@ class _Planner:
             self._cache[key] = self.router.best_route(frm, to, at, safety_weight=self.weight, view=self.view)
         return self._cache[key]
 
-    def leg_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
+    def leg_departure(self, frm: Place, stop: StopRequest, ready: datetime, later_deadline: bool = False) -> datetime:
         """For a later leg: leave when ready, or later to arrive as the stop's window opens,
         or later still if leaving now would only mean sitting at a closed road."""
-        return self.skip_closure_wait(frm, stop, self._window_departure(frm, stop, ready))
+        return self.skip_closure_wait(frm, stop, self._window_departure(frm, stop, ready), later_deadline)
 
     def _window_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
         target = stop.window_start
@@ -212,11 +212,12 @@ class _Planner:
             dep -= LEG_STEP
         return ready
 
-    def skip_closure_wait(self, frm: Place, stop: StopRequest, dep: datetime) -> datetime:
+    def skip_closure_wait(self, frm: Place, stop: StopRequest, dep: datetime, later_deadline: bool = False) -> datetime:
         """If leaving at dep means waiting at a closed road, the latest departure (on 5-min
-        marks) that still arrives within a minute of it."""
+        marks) that still arrives within a minute of it: no later at all when a stop after
+        this one has a deadline, since arriving later here pushes it back too."""
         r0 = self.best(frm.node, stop.place.node, dep)
-        slack = CLOSURE_SLACK
+        slack = timedelta(seconds=1) if later_deadline else CLOSURE_SLACK
         if stop.window_end is not None:  # never trade a closure wait for a tight or late arrival
             for edge in (stop.window_end - self.buffer, stop.window_end):
                 if r0.arrive_at <= edge:
@@ -227,7 +228,8 @@ class _Planner:
         loc, ready = start, d0
         legs, late, tight, late_min, cost = [], 0, 0, 0.0, 0.0
         for i, stop in enumerate(order):
-            leave = d0 if i == 0 else self.leg_departure(loc, stop, ready)
+            later_deadline = any(s.window_end is not None for s in order[i + 1 :])
+            leave = d0 if i == 0 else self.leg_departure(loc, stop, ready, later_deadline)
             r = self.best(loc.node, stop.place.node, leave)
             arrive = r.arrive_at
             # First stop: arriving before its target is time better spent at home. Later
