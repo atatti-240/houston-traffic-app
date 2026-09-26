@@ -264,3 +264,148 @@ def test_live_cameras_carry_the_contract_fields(client):
     assert {"vehicles", "baseline_vehicles", "congestion", "valid", "stale", "snapshot_url"} <= set(cams[0])
     labels = {c["congestion"] for c in cams}
     assert labels <= {"free", "slow", "heavy", "unknown"} and "slow" in labels
+
+
+# --- second review round ------------------------------------------------------------------------
+
+
+def test_plans_without_end_times_never_expire_as_missed(client):
+    plan = client.post("/plan", json={"start": {"place": "downtown"}, "depart_after": "12:20", "stops": [{"place": "medcenter"}], "watch": True}).json()
+    assert plan["legs"][0]["leave_at"] == "2026-09-28T12:20:00"
+    notes = client.post("/demo/advance-clock", json={"minutes": 15}).json()["notifications"]
+    notes += client.post("/demo/advance-clock", json={"minutes": 15}).json()["notifications"]
+    assert kinds(notes) == ["leave_now"]
+
+
+def test_start_only_window_opening_is_not_missed(client):
+    client.post("/plan", json={"start": {"place": "downtown"}, "stops": [{"place": "medcenter", "window_start": "13:00"}], "watch": True})
+    notes = client.post("/demo/advance-clock", json={"to": "2026-09-28T13:00:00"}).json()["notifications"]
+    assert "info" not in kinds(notes) and "leave_now" in kinds(notes)
+
+
+def test_remaining_legs_still_alert_after_a_clock_jump(client):
+    req = {"start": {"place": "downtown"}, "stops": [{"place": "medcenter", "dwell_min": 20, "fixed_order": True}, {"place": "galleria", "fixed_order": True}], "watch": True}
+    plan = client.post("/plan", json=req).json()
+    assert kinds(plan["notifications"]) == ["leave_now"]  # leg 0 is due right away
+    notes = client.post("/demo/advance-clock", json={"minutes": 60}).json()["notifications"]
+    assert kinds(notes) == ["leave_now"] and "Galleria" in notes[0]["title"]
+
+
+def test_leave_now_uses_a_fresh_plan_even_right_after_a_replan(client):
+    plan = client.post("/plan", json={"start": {"place": "downtown"}, "depart_after": "12:20", "stops": [{"place": "hobby"}], "watch": True}).json()
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": 30, "start": "2026-09-28T12:18:00"})
+    assert client.post("/demo/advance-clock", json={"to": "2026-09-28T12:16:00"}).json()["notifications"] == []
+    notes = client.post("/demo/advance-clock", json={"to": "2026-09-28T12:20:00"}).json()["notifications"]
+    assert kinds(notes) == ["leave_later"] and notes[0]["title"].startswith("Hold on")
+    assert client.get(f"/plan/{plan['plan_id']}").json()["legs"][0]["leave_at"] > "2026-09-28T12:20:00"
+
+
+def test_closure_without_a_clear_time_holds_once_then_says_go(client):
+    client.post("/plan", json={"start": {"place": "downtown"}, "depart_after": "12:20", "stops": [{"place": "hobby"}], "watch": True})
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": None, "start": "2026-09-28T12:20:00"})
+    notes = []
+    for _ in range(120):  # two hours, a minute at a time
+        notes += client.post("/demo/advance-clock", json={"minutes": 1}).json()["notifications"]
+    titles = [n["title"] for n in notes]
+    assert sum(t.startswith("Hold on") for t in titles) == 1
+    assert kinds(notes)[-1] == "leave_now"
+
+
+def test_hhmm_windows_in_one_request_share_a_day(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T22:00:00"})
+    req = {
+        "start": {"place": "downtown"},
+        "stops": [
+            {"place": "medcenter", "window_start": "08:00", "window_end": "08:30", "fixed_order": True},
+            {"place": "galleria", "window_start": "09:00", "fixed_order": True},
+        ],
+    }
+    plan = client.post("/plan", json=req).json()
+    assert plan["legs"][1]["window"]["start"] == "2026-09-29T09:00:00"
+    assert plan["legs"][1]["arrive_at"] >= "2026-09-29T08:55:00"
+    single = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [{"place": "medcenter", "window_start": "08:00"}]}).json()
+    assert single["legs"][0]["window"]["start"] == "2026-09-29T08:00:00" and single["legs"][0]["leave_at"] > "2026-09-29T07:00"
+    # A start-only window that opened earlier today is still today's.
+    client.post("/demo/advance-clock", json={"to": "2026-09-29T12:20:00"})
+    today = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [{"place": "medcenter", "window_start": "12:00"}]}).json()
+    assert today["legs"][0]["window"]["start"] == "2026-09-29T12:00:00"
+
+
+def test_overnight_window_you_are_inside_counts(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-29T00:05:00"})
+    plan = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [{"place": "medcenter", "window_start": "23:30", "window_end": "00:30"}]}).json()
+    leg = plan["legs"][0]
+    assert leg["window"] == {"start": "2026-09-28T23:30:00", "end": "2026-09-29T00:30:00"}
+    assert leg["leave_at"] == "2026-09-29T00:05:00" and plan["status"] == "ok"
+
+
+def test_depart_after_in_the_current_minute_is_now(client, services):
+    services.clock.set(datetime(2026, 9, 28, 12, 20, 30))
+    plan = client.post("/plan", json={"start": {"place": "downtown"}, "depart_after": "12:20", "stops": [{"place": "medcenter"}]}).json()
+    assert plan["legs"][0]["leave_at"].startswith("2026-09-28T12:20")
+
+
+def test_advance_clock_is_bounded(client):
+    assert client.post("/demo/advance-clock", json={"minutes": 1e12}).status_code == 422
+    assert client.post("/demo/advance-clock", json={"minutes": 1e9}).status_code == 422
+
+
+def test_later_windowed_stop_moves_the_first_departure_instead_of_idling(world):
+    network, _, _, router, _ = world
+    stops = [StopRequest(place(network, "galleria"), MON(18), MON(18, 30)), StopRequest(place(network, "midtown"))]
+    plan = plan_trip(router, place(network, "downtown"), stops, NOW, NOW)
+    assert plan.status == "ok" and plan.legs[0].leave_at > MON(16)
+    for leg in plan.legs[1:]:
+        assert leg.leave_at - leg.ready_at < timedelta(minutes=30)
+
+
+def test_waiting_for_a_window_never_arrives_after_it_opens(world):
+    network, _, _, router, clock = world
+    now = MON(15, 30)
+    clock["now"] = now
+    stops = [
+        StopRequest(place(network, "heights"), dwell_min=10, fixed_order=True),
+        StopRequest(place(network, "energy"), MON(16, 40), fixed_order=True),
+        StopRequest(place(network, "midtown"), None, datetime(2026, 9, 28, 17, 5, 56), fixed_order=True),
+    ]
+    plan = plan_trip(router, place(network, "downtown"), stops, now, now)
+    assert plan.status == "ok"
+    assert plan.legs[1].arrive_at <= MON(16, 40) or plan.legs[1].leave_at == plan.legs[1].ready_at
+
+
+def test_search_does_not_settle_for_a_dominated_route_at_a_closure(world):
+    _, sources, _, router, clock = world
+    clock["now"] = MON(17)
+    sources.incidents.inject(HOBBY_ONLY_ROAD, "closure", "I-45 closed at Hobby", MON(17), 60)
+    best, alt = router.route("galleria", "hobby", MON(17), safety_weight=0.5)
+    assert alt is None or best.cost <= alt.cost + 1e-6
+
+
+def test_recommend_does_not_say_leave_now_to_sit_at_a_closure(world):
+    _, sources, _, router, _ = world
+    sources.incidents.inject(HOBBY_ONLY_ROAD, "closure", "I-45 closed at Hobby", NOW, 120)
+    rec = recommend_departure(router, "downtown", "hobby", MON(12, 45), earliest=NOW)
+    assert not rec.on_time and rec.depart_at > MON(13, 30)
+    assert rec.route.closure_wait_s < 10 * 60
+
+
+def test_overlapping_closure_reports_cost_one_wait(world):
+    _, sources, _, router, _ = world
+    for minutes in (10, 20, 30, 40):
+        sources.incidents.inject(HOBBY_ONLY_ROAD, "closure", f"closed {minutes}", NOW, minutes)
+    overlapping, _ = router.route("downtown", "hobby", NOW)
+    sources.incidents.clear()
+    sources.incidents.inject(HOBBY_ONLY_ROAD, "closure", "closed 40", NOW, 40)
+    single, _ = router.route("downtown", "hobby", NOW)
+    assert overlapping.arrive_at == single.arrive_at
+
+
+def test_later_leg_leaves_later_instead_of_sitting_at_a_closure(world):
+    network, sources, _, router, _ = world
+    sources.incidents.inject(HOBBY_ONLY_ROAD, "closure", "I-45 closed at Hobby", NOW, 90)
+    stops = [
+        StopRequest(place(network, "eastend"), MON(12, 15), MON(12, 30), 5, True),
+        StopRequest(place(network, "hobby"), fixed_order=True),
+    ]
+    plan = plan_trip(router, place(network, "downtown"), stops, NOW, NOW)
+    assert plan.legs[1].route.closure_wait_s < 6 * 60

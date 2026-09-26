@@ -30,7 +30,8 @@ Feeds down
 
 Past times
   - Live data describes the present. For times more than 15 min before now (e.g. the map's
-    time slider scrubbed back) only predictions are used.
+    time slider scrubbed back) live traffic and crossing status are ignored, and incidents
+    count only if they had already started by then.
 """
 
 from collections import defaultdict
@@ -186,18 +187,23 @@ class ConditionsView:
         return max(inc.started_at + INCIDENT_DEFAULT, self.now + INCIDENT_MIN_REMAINING)
 
     def _incident(self, segment_id: str, at: datetime) -> tuple[Incident | None, float, bool]:
-        worst_inc, slowdown = None, 1.0
+        worst_inc, slowdown, closure = None, 1.0, None
         # Shortly before now, what's reported now applies; well before now, only what had started.
         moment = max(at, self.now) if at >= self.now - PAST_LIVE_TOLERANCE else at
         for inc in self.live.incidents_on.get(segment_id, ()):
             if not (inc.started_at <= moment < self.incident_end(inc)):
                 continue
             if inc.kind == "closure":
-                return inc, 1.0, True
+                # Overlapping closure reports: the one that clears last decides.
+                if closure is None or self.incident_end(inc) > self.incident_end(closure):
+                    closure = inc
+                continue
             factor = INCIDENT_SLOWDOWN.get(inc.kind, INCIDENT_SLOWDOWN["other"])
             factor = min(MAX_INCIDENT_SLOWDOWN, factor + EXTRA_LANE_SLOWDOWN * max(0, inc.lanes_blocked - 1))
             if factor > slowdown:
                 worst_inc, slowdown = inc, factor
+        if closure is not None:
+            return closure, 1.0, True
         return worst_inc, slowdown, False
 
     # --- crossings ------------------------------------------------------------------------

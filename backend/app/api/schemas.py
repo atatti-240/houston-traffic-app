@@ -97,8 +97,11 @@ class TripPlanRequest(BaseModel):
     watch: bool = Field(False, description="Re-plan every 5 min and send alerts until the trip is done")
 
 
+MAX_ADVANCE_MIN = 366 * 24 * 60  # a year, same limit as other times
+
+
 class AdvanceClockRequest(BaseModel):
-    minutes: float | None = None
+    minutes: float | None = Field(None, ge=-MAX_ADVANCE_MIN, le=MAX_ADVANCE_MIN)
     to: datetime | None = None
 
 

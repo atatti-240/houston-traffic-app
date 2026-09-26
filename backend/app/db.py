@@ -39,6 +39,7 @@ _ADDED_COLUMNS = {
     "trip_states": {"last_route": "VARCHAR"},
     "trips": {"safety_weight": "FLOAT"},
     "notifications": {"plan_id": "VARCHAR"},
+    "saved_plans": {"held": "BOOLEAN"},
 }
 
 

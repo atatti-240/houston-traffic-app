@@ -82,12 +82,14 @@ def test_windows_decide_the_order_and_the_departure(world):
     assert plan.order_names == ["Galleria / Uptown", "Texas Medical Center"]
     assert plan.status == "ok" and not plan.warnings
     first, second = plan.legs
-    # Leave as late as still makes the window start, not right now.
+    # Leave late enough to not sit around (at the Galleria or before the Med Center), but
+    # arrive inside the Galleria window with the buffer to spare.
     assert first.leave_at > NOW + timedelta(minutes=45)
-    assert MON(13, 15) <= first.arrive_at <= MON(13, 30)
-    assert first.wait_min < 10
+    assert MON(13, 15) <= first.arrive_at <= MON(14, 0) - timedelta(minutes=5)
+    assert first.wait_min < 10 and not first.tight
     assert second.ready_at == max(first.arrive_at, MON(13, 30)) + timedelta(minutes=45)
     assert second.leave_at >= second.ready_at and second.arrive_at <= MON(15, 30)
+    assert second.leave_at - second.ready_at < timedelta(minutes=20)  # no long idle before TMC
     for leg in plan.legs:
         assert leg.ready_at <= leg.leave_at_safe <= leg.leave_at
     # The baseline (typed order, leave now) misses the Galleria window.
