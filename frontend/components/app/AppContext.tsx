@@ -222,6 +222,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [device, setDevice] = useState<{ lat: number; lng: number } | null>(null);
 
   const [stack, setStack] = useState<Screen[]>([{ name: "where" }]);
+  // Deep links for testing / sharing: ?screen=map|causes|alerts|cameras|why&id=...&area=...
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const name = q.get("screen");
+    const id = q.get("id");
+    let s: Screen | null = null;
+    if (name === "map" || name === "causes" || name === "alerts" || name === "where") s = { name };
+    else if (name === "cameras") s = { name, area: q.get("area") ?? undefined, camId: q.get("cam") ?? undefined };
+    else if (name === "why" && id) s = { name, id };
+    else if (name === "trip" && q.get("to"))
+      s = {
+        name,
+        to: q.get("to") as string,
+        from: q.get("from") ?? undefined,
+        arriveBy: q.get("by") ?? undefined,
+        safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      };
+    if (s) setStack([s]);
+  }, []);
   const screen = stack[stack.length - 1];
   const [isDesktop, setIsDesktop] = useState(false);
 

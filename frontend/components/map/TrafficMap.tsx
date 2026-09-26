@@ -185,12 +185,27 @@ function CauseMarkers() {
   );
 }
 
-export default function TrafficMap({ interactive = true }: { interactive?: boolean }) {
-  const { segments, levels, scene, places, here, layers, live, go, select } = useApp();
+/**
+ * `interactive` (default): the app's one main map (registers itself for zoom/focus, shows the
+ * screen's scene and cause markers). `interactive={false}`: a static preview (e.g. the "You're
+ * in ..." card) centred on `center` at `zoom`, traffic lines only.
+ */
+export default function TrafficMap({
+  interactive = true,
+  center,
+  zoom = 13,
+}: {
+  interactive?: boolean;
+  center?: LatLngTuple;
+  zoom?: number;
+}) {
+  const app = useApp();
+  const { segments, levels, places, here, layers, live, go } = app;
+  const scene = interactive ? app.scene : null;
   return (
     <MapContainer
-      center={HOUSTON_CENTER}
-      zoom={11}
+      center={center ?? HOUSTON_CENTER}
+      zoom={center ? zoom : 11}
       className="h-full w-full"
       zoomControl={false}
       attributionControl
@@ -204,9 +219,10 @@ export default function TrafficMap({ interactive = true }: { interactive?: boole
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
         url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
       />
-      <Register />
-      <ClickAway />
-      <FitScene fit={scene?.fit} />
+      {interactive && <Register />}
+      {interactive && <ClickAway />}
+      {interactive && <FitScene fit={scene?.fit} />}
+      {!interactive && center && <Recenter center={center} zoom={zoom} />}
 
       {/* Traffic: each direction offset to its right, dark casing under the colored line */}
       {segments.map((s) => {
@@ -256,7 +272,7 @@ export default function TrafficMap({ interactive = true }: { interactive?: boole
       ))}
 
       {/* Crossings layer */}
-      {layers.crossings &&
+      {interactive && layers.crossings &&
         (live?.crossings ?? []).map((c) => (
           <CircleMarker
             key={`x-${c.id}`}
@@ -277,7 +293,7 @@ export default function TrafficMap({ interactive = true }: { interactive?: boole
         ))}
 
       {/* Cameras layer */}
-      {layers.cameras &&
+      {interactive && layers.cameras &&
         (live?.cameras ?? []).map((cam) => (
           <CircleMarker
             key={`cam-${cam.id}`}
@@ -330,12 +346,16 @@ export default function TrafficMap({ interactive = true }: { interactive?: boole
       ))}
 
       {interactive && <CauseMarkers />}
-      {!interactive && <DeselectOnMount select={select} />}
     </MapContainer>
   );
 }
 
-function DeselectOnMount({ select }: { select: (id: string | null) => void }) {
-  useEffect(() => select(null), [select]);
+function Recenter({ center, zoom }: { center: LatLngTuple; zoom: number }) {
+  const map = useMap();
+  const key = `${center[0]},${center[1]},${zoom}`;
+  useEffect(() => {
+    map.setView(center, zoom, { animate: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, map]);
   return null;
 }
