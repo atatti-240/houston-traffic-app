@@ -4,9 +4,9 @@ setup:
 	cd backend && uv sync
 	cd frontend && npm install
 
-# Build the Houston road network and replay synthetic history through the models.
+# Rebuild the database from scratch: Houston road network + synthetic history replay.
 seed:
-	cd backend && uv run python scripts/seed.py && uv run python scripts/replay_history.py
+	cd backend && rm -f data/app.db && uv run python scripts/seed.py && uv run python scripts/replay_history.py
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
@@ -20,4 +20,4 @@ dev:
 
 test:
 	cd backend && uv run pytest -q
-	cd frontend && npx tsc --noEmit
+	cd frontend && npx next typegen && npx tsc --noEmit
