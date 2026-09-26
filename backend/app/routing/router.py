@@ -9,10 +9,14 @@ only the road-conditions layer (app.conditions), which merges predictions with l
 
     lambda = 30 s/mile at safety_weight 0 ... 600 s/mile at safety_weight 1
 
-Closed roads are skipped. The search minimizes cost; ETA only counts real time.
+A closed road is a wait: you reach it, wait for the closure to clear, then drive it (like
+waiting at a blocked crossing), so the search either waits or goes around, whichever is
+cheaper, and a closure never makes a trip impossible. The search minimizes cost; ETA only
+counts real time.
 """
 
 import heapq
+import itertools
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -34,6 +38,7 @@ CONGESTION_REASON_SCORE = 0.5
 LIVE_REASON_EXTRA = 0.15  # live congestion this much above the prediction is worth saying
 SAFE_REASON_MIN_DROP = 0.05  # don't brag about a crash-exposure drop smaller than this
 MAX_REASONS = 7
+MAX_CLOSURE_WAITS = 3  # back-to-back closures on one road before we treat it as impassable
 
 SOURCE_LABELS = {
     "trainwatch": "Train Watch",
@@ -91,8 +96,14 @@ class SegmentOnRoute:
     live_detail: str = ""
     incident: Incident | None = None
     incident_slowdown: float = 1.0
-    closed: bool = False
+    closed: bool = False  # impassable (never on a returned route)
     confidence: Confidence = "medium"
+    closure: Incident | None = None  # closed when you reach it; the route waits for it to reopen
+    closure_wait_s: float = 0.0
+
+    @property
+    def reopens_at(self) -> datetime:
+        return self.enter_at + timedelta(seconds=self.closure_wait_s)
 
 
 @dataclass
@@ -111,6 +122,7 @@ class Route:
     confidence: Confidence = "medium"
     feeds_down: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    closure_wait_s: float = 0.0  # time spent waiting for closed roads to reopen
 
     @property
     def safe_path(self) -> bool:
@@ -138,7 +150,9 @@ class Route:
 
     @property
     def uses_live(self) -> bool:
-        return any(s.live_weight > 0 or s.incident for s in self.segments) or any(c.live for c in self.crossings)
+        return any(s.live_weight > 0 or s.incident or s.closure for s in self.segments) or any(
+            c.live for c in self.crossings
+        )
 
     @property
     def geometry(self) -> list[list[float]]:
@@ -208,10 +222,20 @@ class Router:
 
     def _eval_segment(self, seg: SegmentInfo, enter_at: datetime, view: ConditionsView) -> SegmentOnRoute:
         sc = view.segment(seg, enter_at)
+        # Closed when we get there: wait for it to clear, then drive it.
+        closure, start = None, enter_at
+        for _ in range(MAX_CLOSURE_WAITS):
+            if not (sc.closed and sc.incident):
+                break
+            reopen = view.incident_end(sc.incident)
+            if reopen <= start:
+                break
+            closure, start = closure or sc.incident, reopen
+            sc = view.segment(seg, start)
         crossings = []
         delay = 0.0
         for c in self.network.crossings_on.get(seg.id, []):
-            cc = view.crossing(c, enter_at + timedelta(seconds=sc.travel_s / 2))
+            cc = view.crossing(c, start + timedelta(seconds=sc.travel_s / 2))
             crossings.append(
                 CrossingOnRoute(
                     c.id, c.name, c.lat, c.lng, cc.arrive_at, cc.block_probability, cc.expected_delay_s,
@@ -240,11 +264,18 @@ class Router:
             incident_slowdown=sc.incident_slowdown,
             closed=sc.closed,
             confidence=sc.confidence,
+            closure=closure,
+            closure_wait_s=(start - enter_at).total_seconds(),
         )
 
     @staticmethod
-    def _cost(s: SegmentOnRoute, lam: float) -> float:
-        return s.travel_s + s.train_delay_s + lam * s.crash_risk * s.miles
+    def _time(s: SegmentOnRoute) -> float:
+        """Real seconds spent on the segment: closure wait + driving + train delay."""
+        return s.closure_wait_s + s.travel_s + s.train_delay_s
+
+    @classmethod
+    def _cost(cls, s: SegmentOnRoute, lam: float) -> float:
+        return cls._time(s) + lam * s.crash_risk * s.miles
 
     # --- search ---------------------------------------------------------------------------
 
@@ -264,42 +295,39 @@ class Router:
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
-        best: dict[str, float] = {origin: 0.0}
-        prev: dict[str, tuple[str, str]] = {}
-        heap = [(0.0, 0.0, origin)]
-        done: set[str] = set()
+        # Label-setting search over (time so far, penalty so far), penalty = cost - time
+        # (crash penalty, alternative-route multipliers). One label per node isn't enough
+        # once roads can be waited on: reaching a closed road later means waiting less, so
+        # a path that looks worse halfway can be the better one. A label is dropped only
+        # when another reached the same node no later and with no more penalty.
+        fronts: dict[str, list[tuple[float, float]]] = {origin: [(0.0, 0.0)]}
+        tie = itertools.count()
+        heap: list = [(0.0, 0.0, next(tie), origin, (), frozenset((origin,)))]
         while heap:
-            cost, elapsed, node = heapq.heappop(heap)
-            if node in done:
-                continue
-            done.add(node)
+            cost, elapsed, _, node, path, visited = heapq.heappop(heap)
             if node == destination:
-                break
+                return list(path)
             now = depart_at + timedelta(seconds=elapsed)
             for seg in self.network.out_edges.get(node, []):
-                if seg.to_node in done:
+                if seg.to_node in visited:
                     continue
                 s = self._eval_segment(seg, now, view)
                 if s.closed:
                     continue
-                if blind:
-                    step_cost = step_time = s.travel_s
-                else:
-                    step_cost = self._cost(s, lam)
-                    step_time = s.travel_s + s.train_delay_s
+                step_time = self._time(s)
+                step_cost = (s.closure_wait_s + s.travel_s) if blind else self._cost(s, lam)
                 step_cost *= penalties.get(seg.id, 1.0)
-                new_cost = cost + step_cost
-                if new_cost < best.get(seg.to_node, float("inf")):
-                    best[seg.to_node] = new_cost
-                    prev[seg.to_node] = (node, seg.id)
-                    heapq.heappush(heap, (new_cost, elapsed + step_time, seg.to_node))
-        if destination not in prev and origin != destination:
-            raise NoRouteError(f"no open route from {origin} to {destination}")
-        path, node = [], destination
-        while node != origin:
-            node, sid = prev[node]
-            path.append(sid)
-        return path[::-1]
+                new_elapsed, new_cost = elapsed + step_time, cost + step_cost
+                new_penalty = new_cost - new_elapsed
+                front = fronts.setdefault(seg.to_node, [])
+                if any(e <= new_elapsed + 1e-6 and p <= new_penalty + 1e-6 for e, p in front):
+                    continue
+                front[:] = [(e, p) for e, p in front if not (new_elapsed <= e and new_penalty <= p)]
+                front.append((new_elapsed, new_penalty))
+                heapq.heappush(
+                    heap, (new_cost, new_elapsed, next(tie), seg.to_node, (*path, seg.id), visited | {seg.to_node})
+                )
+        raise NoRouteError(f"no open route from {origin} to {destination}")
 
     def evaluate(
         self,
@@ -316,7 +344,7 @@ class Router:
         for sid in segment_ids:
             s = self._eval_segment(self.network.segments[sid], t, view)
             segs.append(s)
-            t += timedelta(seconds=s.travel_s + s.train_delay_s)
+            t += timedelta(seconds=self._time(s))
         route = Route(
             origin=origin,
             destination=destination,
@@ -330,6 +358,7 @@ class Router:
             crash_exposure=sum(s.crash_risk * s.miles for s in segs),
             cost=sum(self._cost(s, lam) for s in segs),
             feeds_down=view.feeds_down,
+            closure_wait_s=sum(s.closure_wait_s for s in segs),
         )
         route.confidence = self._route_confidence(route)
         return route
@@ -342,7 +371,7 @@ class Router:
         medium: predictions (the normal case)."""
         levels: list[Confidence] = []
         for s in route.segments:
-            if s.live_weight > 0 or s.incident or s.confidence == "low":
+            if s.live_weight > 0 or s.incident or s.closure or s.confidence == "low":
                 levels.append(s.confidence)
         for c in route.crossings:
             if c.live or c.block_probability >= TRAIN_REASON_P or c.confidence == "low":
@@ -447,10 +476,12 @@ class Router:
         for s in usual.segments:
             if s.id in on_route:
                 continue
-            if s.closed and s.incident:
+            closure = s.closure or (s.incident if s.closed else None)
+            if closure:
+                until = "" if s.closed else f" until about {_fmt(s.reopens_at)}"
                 out.append(
-                    f"Rerouted around {s.name}: closed ({s.incident.title}; "
-                    f"{_provenance(s.incident.source, s.incident.updated_at, now)})"
+                    f"Rerouted around {s.name}: closed{until} ({closure.title}; "
+                    f"{_provenance(closure.source, closure.updated_at, now)})"
                 )
             elif s.incident:
                 out.append(
@@ -545,6 +576,12 @@ class Router:
                 )
         seen_incidents: set[str] = set()
         for s in chosen.segments:
+            if s.closure and s.closure_wait_s >= 60:
+                reasons.append(
+                    f"Heads up: {s.name} is closed until about {_fmt(s.reopens_at)} "
+                    f"({_provenance(s.closure.source, s.closure.updated_at, now)}); this route waits "
+                    f"~{s.closure_wait_s / 60:.0f} min for it to reopen"
+                )
             inc = s.incident
             if inc and inc.id not in seen_incidents:
                 seen_incidents.add(inc.id)

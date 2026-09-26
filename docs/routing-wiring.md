@@ -44,11 +44,13 @@ comes from one snapshot of the data and says where that data came from.
 
 **Incidents:**
 
-- A closure removes the road.
+- A closure shuts the road until it clears. The router treats it like a blocked crossing: it either waits for the road to reopen or goes around, whichever is cheaper. A closure never makes a trip impossible.
 - Other kinds slow it down until they clear: crash ×1.6, roadwork ×1.3, stall or hazard ×1.2, plus 0.25 for every extra blocked lane, up to ×3.
 - With no clear time we assume 45 min from the start, and at least 15 more minutes from now.
 
-**Feeds:** a live method that raises is marked down. Everything falls back to predictions, the route's `feeds_down` lists the feed, and the "why" bullets say so.
+**Feeds:** a live method that raises is marked down. Everything falls back to predictions, the route's `feeds_down` lists the feed, and the "why" bullets say so. Inputs in the next 30 min are marked low confidence: crossings when the train feed is down, and every road when the traffic or incident feed is down, since a crash or closure could be missing.
+
+**Past times:** live data describes the present. For a time more than 15 min before now, for example when the map's time slider is scrubbed back, live traffic and crossing status are ignored, and an incident counts only if it had already started by then.
 
 ## Contracts for real adapters
 
@@ -94,11 +96,16 @@ Every one of them re-checks saved trips and re-plans watched plans right away.
 `POST /plan` takes the request in `docs/contracts/trip_request.json` and returns
 `plan_result.json`:
 
-- **Search.** It tries every stop order (at most 3 stops, so at most 6 orders). Stops marked `fixed_order` keep their typed position. Each order is tried with first departures every 15 min for 2 h, and the best one is refined to 5 min.
-- **Later legs** leave as late as is still useful: they aim for the next stop's window start, and never leave before you're ready (arrival + dwell).
-- **Cost.** `route cost + 0.5 × minutes waiting at a stop + 0.3 × minutes the first departure is later than it could be`.
+- **Search.** It tries every stop order (at most 3 stops, so at most 6 orders). Stops marked `fixed_order` keep their typed position. Each order is tried with first departures every 15 min for the next 2 h, plus every 15 min in the 2 h before each stop's target time, so a window later in the day still gets a departure close to it. The best one is then refined to 5 min.
+- **First departure** aims to reach the first stop at its window start, or at its end minus the buffer when only an end is given. Time at home beats time waiting at a stop.
+- **Later legs** leave when you're ready (arrival + dwell). They leave later only in two cases: to avoid arriving before a stop's window opens (and never so late that you'd get there after it opened), or to avoid sitting at a closed road when leaving later gets you there just as soon. For a stop with only an end time, arriving early costs nothing, and waiting at the previous stop would only put the stops after it at risk.
+- **Cost.** `route cost + 0.5 × wasted waiting + 0.3 × minutes the first departure is later than it could be`. Route cost includes any wait at a closed road. Wasted waiting covers three cases: arriving at the first stop before its target, waiting at a later stop for its window to open, and idling at the previous stop before leaving for it.
+- **Times.** ISO times with an offset are converted to Houston time. `HH:MM` for `depart_after` means the next time that clock time comes up (the current minute counts as now). All `HH:MM` window times in one request refer to the same day: the departure's day, or the next day if any of them already ended by then, or if a start-only one is more than 12 h earlier (like `08:00` asked at 10 PM). An end at or before its start is overnight (`23:30`-`00:30`): the window you're inside right now, otherwise tonight's.
 - **Ranking.** Fewest missed windows first, then fewest tight arrivals (inside the buffer), then least lateness, then lowest cost. If every order is late, the plan comes back with `status: "late"` and says by how much.
 - **Baseline.** The typed order, leaving now, on traffic-only routes. `saved_min_vs_baseline` compares drive minutes against it.
-- **Watched plans** (`watch: true`) are re-planned every 5 min until you leave, and right away when live data changes. Their alerts are `plan`, `order_changed`, `leave_earlier`, `leave_later` and `leave_now` (one per leg).
+- **Watched plans** (`watch: true`) are re-planned every 5 min until you leave, right away when live data changes, and on the tick your departure comes due, so "leave now" always uses fresh conditions. Their alerts are `plan`, `order_changed`, `leave_earlier`, `leave_later`, `leave_now` (one per leg) and `info`.
+  - If the departure you were told gets pushed back just as it comes due, the alert is "Hold on: leave at …" (a `leave_later`) instead of "leave now". This happens at most once. After it, re-plans can only move the departure earlier, and "leave now" comes at the new time.
+  - If a re-plan fails, the last good plan and its alerts stay in place.
+  - If you never left and every stop's window has closed, the plan stops being watched and sends one "Missed" alert (`info`). Stops without an end time never expire this way. Once you've left, the remaining legs' "leave now" alerts still come.
 - **Safety slider.** `safety_weight` runs from 0 (fastest) to 1 (safest) and sets the crash penalty from 30 to 600 s per risk-weighted mile. The old `safe_path: true` means 1.0.
 - **`leave_at_safe`** is `leave_at` minus a margin: 0, 5 or 10 min for high, medium or low confidence. Use it if you can't afford to be late.

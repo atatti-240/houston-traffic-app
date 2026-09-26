@@ -87,7 +87,9 @@ class TripPlanRequest(BaseModel):
     name: str | None = None
     device_id: str | None = None
     start: PlaceIn
-    depart_after: str | None = Field(None, description="Defaults to the simulated now. ISO or HH:MM")
+    depart_after: str | None = Field(
+        None, description="Defaults to the simulated now. ISO, or HH:MM meaning the next time that clock time comes up"
+    )
     stops: list[StopIn] = Field(..., min_length=1, max_length=3)
     safe_path: bool = False
     safety_weight: SafetyWeight = None
@@ -95,8 +97,11 @@ class TripPlanRequest(BaseModel):
     watch: bool = Field(False, description="Re-plan every 5 min and send alerts until the trip is done")
 
 
+MAX_ADVANCE_MIN = 366 * 24 * 60  # a year, same limit as other times
+
+
 class AdvanceClockRequest(BaseModel):
-    minutes: float | None = None
+    minutes: float | None = Field(None, ge=-MAX_ADVANCE_MIN, le=MAX_ADVANCE_MIN)
     to: datetime | None = None
 
 
@@ -172,6 +177,7 @@ def route_json(r: Route | None) -> dict | None:
             "free_flow_min": round(r.free_flow_s / 60, 1),
             "base_travel_min": round(r.base_travel_s / 60, 1),
             "train_delay_min": round(r.train_delay_s / 60, 1),
+            "closure_wait_min": round(r.closure_wait_s / 60, 1),
             "crash_exposure": round(r.crash_exposure, 3),
             "max_crash_risk": round(r.max_crash_risk, 3),
             "max_block_probability": round(r.max_block_probability, 3),
@@ -194,6 +200,8 @@ def route_json(r: Route | None) -> dict | None:
                 "live_updated_at": s.live_updated_at,
                 "incident": incident_json(s.incident),
                 "incident_slowdown": round(s.incident_slowdown, 2),
+                "closure": incident_json(s.closure),
+                "closure_wait_min": round(s.closure_wait_s / 60, 1),
                 "confidence": s.confidence,
                 "crash_risk": round(s.crash_risk, 3),
                 "miles": round(s.miles, 2),

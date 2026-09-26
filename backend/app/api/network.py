@@ -1,6 +1,6 @@
 """Read-only map data: places, segments, scores, crossings, cameras, live conditions."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 
@@ -85,7 +85,7 @@ def crossings(at: datetime | None = None, svc: Services = Depends(get_services))
                 "segment_ids": list(c.segment_ids),
                 "block_probability": round(cc.block_probability, 3),
                 "expected_delay_min": round(cc.expected_delay_s / 60, 1),
-                "live_blocked_until": cc.arrive_at + timedelta(seconds=cc.expected_delay_s) if blocked else None,
+                "live_blocked_until": cc.clears_at if blocked else None,
                 "live": cc.live,
                 "sensor": None if cc.sensor_up is None else ("UP" if cc.sensor_up else "DOWN"),
                 "confidence": cc.confidence,
@@ -99,6 +99,13 @@ def crossings(at: datetime | None = None, svc: Services = Depends(get_services))
 @router.get("/cameras")
 def cameras(svc: Services = Depends(get_services)):
     return svc.sources.cameras.cameras()
+
+
+def _congestion_label(score: float | None) -> str:
+    """0-1 congestion -> the contract's camera label."""
+    if score is None:
+        return "unknown"
+    return "free" if score < 0.35 else "slow" if score < 0.6 else "heavy"
 
 
 def _midpoint(geometry) -> tuple[float, float] | None:
@@ -157,7 +164,14 @@ def live(svc: Services = Depends(get_services)):
                 "snapshot_url": cam.get("url"),
                 "segment_id": cam.get("segment_id"),
                 "crossing_id": cam.get("crossing_id"),
-                "congestion": round(reading.congestion, 2) if reading else None,
+                # Contract fields a camera adapter fills in (unknown for mock cameras).
+                "vehicles": None,
+                "baseline_vehicles": None,
+                "congestion": _congestion_label(reading.congestion if reading else None),
+                "congestion_score": round(reading.congestion, 2) if reading else None,
+                "valid": None,
+                "stale": None,
+                "refresh_sec_median": None,
                 "detail": reading.detail if reading else "",
                 "updated_at": reading.observed_at if reading else None,
                 "mock": cam.get("mock", False),
@@ -205,6 +219,7 @@ def live(svc: Services = Depends(get_services)):
         "cameras": cameras,
         "incidents": incidents,
         "travel_times": travel_times,
+        "high_injury_segments_url": None,  # Vision Zero layer: not wired yet
         "feeds": {
             f.name: {"ok": f.ok, "records": f.records, "error": f.error} for f in view.live.feeds.values()
         },
