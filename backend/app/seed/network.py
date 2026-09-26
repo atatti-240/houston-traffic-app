@@ -141,6 +141,20 @@ LINKS: list[LinkDef] = [
     LinkDef("SCOT", "Scott St", "Scott St", "gulf_ee", "ost_cullen", "arterial", congestion_mult=0.8),
 ]
 
+# Street addresses for the named places (shown in search).
+PLACE_ADDRESSES: dict[str, str] = {
+    "downtown": "Main St & Texas Ave",
+    "midtown": "Main St & Elgin St",
+    "galleria": "5085 Westheimer Rd",
+    "medcenter": "Fannin St & Holcombe Blvd",
+    "energy": "I-10 & Eldridge Pkwy",
+    "greenspoint": "I-45 & Greens Rd",
+    "eastend": "Navigation Blvd & N York St",
+    "heights": "Heights Blvd & W 19th St",
+    "nns": "Irvington Blvd & Quitman St",
+    "hobby": "7800 Airport Blvd",
+}
+
 # Links that get a highway camera placeholder (TranStar has cameras on all of these).
 CAMERA_LINKS = ["I45N", "I45S", "I10W", "I69", "L610W", "L610S", "SH288", "US290"]
 

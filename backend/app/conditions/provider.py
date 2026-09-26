@@ -19,8 +19,9 @@ Road speed (entering at time T)
 
 Incidents
   - A closure shuts the road until it clears (the router waits for it to reopen or goes
-    around). Other incidents slow it down (crash x1.6, roadwork x1.3, stall/hazard x1.2,
-    +0.25 per extra blocked lane, max x3) until they clear. Without a clear time we assume
+    around). Other incidents slow it down (crash x1.6, lane closure x1.5, weather x1.35,
+    roadwork / event x1.3, stall/hazard x1.2, +0.25 per extra blocked lane, max x3) until
+    they clear. Without a clear time we assume
     45 min from the start, and at least 15 more min from now.
 
 Feeds down
@@ -58,7 +59,16 @@ CLEAR_TRUST = timedelta(minutes=5)
 PAST_LIVE_TOLERANCE = timedelta(minutes=15)  # live data still applies this far before now
 INCIDENT_DEFAULT = timedelta(minutes=45)
 INCIDENT_MIN_REMAINING = timedelta(minutes=15)
-INCIDENT_SLOWDOWN = {"crash": 1.6, "roadwork": 1.3, "stall": 1.2, "hazard": 1.2, "other": 1.2}
+INCIDENT_SLOWDOWN = {
+    "crash": 1.6,
+    "lane_closure": 1.5,
+    "weather": 1.35,
+    "roadwork": 1.3,
+    "event": 1.3,
+    "stall": 1.2,
+    "hazard": 1.2,
+    "other": 1.2,
+}
 EXTRA_LANE_SLOWDOWN = 0.25
 MAX_INCIDENT_SLOWDOWN = 3.0
 STRONG_LIVE_WEIGHT = 0.4  # live weight at which we call a reading "the" source

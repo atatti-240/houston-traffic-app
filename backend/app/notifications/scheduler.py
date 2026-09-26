@@ -13,7 +13,8 @@ from datetime import datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import Notification, SavedPlan, Trip, TripState
+from app.causes import CausesEngine
+from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState
 from app.notifications.service import NotificationService
 from app.plan_io import plan_to_json, request_from_json
 from app.planner import plan_trip
@@ -23,6 +24,7 @@ from app.routing.router import Router
 LOOKAHEAD = timedelta(hours=3)  # start watching a trip this long before its arrive-by time
 SHIFT_ALERT = timedelta(minutes=5)
 REPLAN_EVERY = timedelta(minutes=5)
+WATCH_FOR = timedelta(hours=12)  # give up on a "notify me when it clears" after this
 DEFERRED_WATCH = timedelta(days=1)  # keep watching a trip past arrive-by this long for a deferred "leave now"
 
 log = logging.getLogger("houston.scheduler")
@@ -102,7 +104,41 @@ class TripScheduler:
                     log.exception("scheduler: skipping plan %s", plan_id)
                     continue
                 sent.extend(notes)
+            try:
+                sent.extend(self._check_watches(session, now))
+                session.commit()
+            except Exception:
+                session.rollback()
+                log.exception("scheduler: skipping road watches")
         return sent
+
+    # --- "notify me when it clears" -------------------------------------------------------------
+
+    def _check_watches(self, session: Session, now: datetime) -> list[Notification]:
+        watches = list(session.scalars(select(SlowdownWatch).where(~SlowdownWatch.done)))
+        if not watches:
+            return []
+        engine = CausesEngine(self.router)
+        notes = []
+        for w in watches:
+            seg = self.router.network.segments.get(w.segment_id)
+            if seg is None or now - w.created_at > WATCH_FOR:
+                w.done = True
+                continue
+            s = engine.analyze(seg, now)
+            unusual = [c for c in s.causes if c.kind != "rush" and c.seconds >= 60]
+            if w.routine_only and not s.is_slowdown:
+                body = f"Traffic is moving normally again from {s.place} ({round(s.speed_mph)} mph)."
+            elif not w.routine_only and not unusual:
+                body = (
+                    f"Nothing unusual left from {s.place}: it's back to typical traffic for this time "
+                    f"({round(s.speed_mph)} mph)."
+                )
+            else:
+                continue
+            notes.append(self.notifier.send(session, None, "cleared", f"{s.road} has cleared", body, now))
+            w.done = True
+        return notes
 
     # --- watched multi-stop plans -------------------------------------------------------------
 

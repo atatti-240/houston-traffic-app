@@ -88,6 +88,7 @@ class MockTrainSource(_Switchable, TrainSource):
                 updated_at=now,
                 source="demo",
                 clears_at=blocked[cid].end if cid in blocked else None,
+                blocked_since=blocked[cid].start if cid in blocked else None,
             )
             for cid in sorted(ids)
         ]
@@ -131,6 +132,7 @@ class MockIncidentSource(_Switchable, IncidentSource):
         started_at: datetime,
         minutes: float | None,
         lanes_blocked: int = 1,
+        detail: str = "",
     ) -> Incident:
         self._n += 1
         inc = Incident(
@@ -143,6 +145,7 @@ class MockIncidentSource(_Switchable, IncidentSource):
             updated_at=started_at,
             clears_at=started_at + timedelta(minutes=minutes) if minutes else None,
             lanes_blocked=lanes_blocked,
+            detail=detail,
         )
         self.items[inc.id] = inc
         return inc
