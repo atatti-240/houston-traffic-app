@@ -1,6 +1,6 @@
 # Architecture
 
-Houston Traffic App tells commuters **when to leave and which way to go** before traffic hits. It predicts congestion, crash risk and freight-train crossing blockages from historical data, instead of only reacting to live jams.
+BlindSpot tells commuters **when to leave and which way to go** before traffic hits. It predicts congestion, crash risk and freight-train crossing blockages from historical data, instead of only reacting to live jams.
 
 Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Every external feed sits behind an interface with a synthetic **mock** implementation, so the app runs end to end with no API keys.
 

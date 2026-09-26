@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Houston Traffic",
+  title: "BlindSpot",
   description: "Know when to leave and which way to go, before Houston traffic hits.",
-  appleWebApp: { capable: true, title: "Houston Traffic", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "BlindSpot", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

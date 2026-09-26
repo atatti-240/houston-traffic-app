@@ -323,7 +323,7 @@ export default function HomeClient() {
       {/* Top bar */}
       <header className="absolute inset-x-0 top-0 z-[1000] flex items-center justify-between gap-2 bg-white/95 px-3 py-2 shadow backdrop-blur">
         <div className="min-w-0">
-          <div className="truncate font-bold">🚦 Houston Traffic</div>
+          <div className="truncate font-bold">🚦 BlindSpot</div>
           <div className="hidden text-xs text-slate-500 sm:block">Know when to leave and which way to go, before traffic hits.</div>
         </div>
         <div className="flex items-center gap-1.5">
