@@ -1,0 +1,340 @@
+"""Multi-stop planner (docs/specs section 5): best stop order and departure times.
+
+Search
+  - Every stop order (at most 3 stops -> 6 orders; stops marked fixed_order keep their place)
+  - x first departures every 15 min for the next 2 h, then the best one refined to 5 min.
+  - Later legs leave the previous stop as late as useful: aiming to arrive at the next
+    stop's window start (or its end minus the buffer when only an end is given), never
+    before you're ready (arrival + dwell).
+  - Each leg is routed by the router on ONE snapshot of live conditions.
+
+Cost (minutes, lower is better)
+    sum(route cost: drive + train delay + crash penalty) + 0.5 x wait at stops
+    + 0.3 x minutes the first departure is later than the earliest possible one
+
+Ranking: fewest stops missed (arrive after window end), then fewest "tight" stops (inside
+the buffer), then least lateness, then cost. If every order is late, the plan with the
+fewest late stops is returned with status "late".
+"""
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from itertools import permutations
+
+from app.conditions.live import CONFIDENCE_RANK, Confidence
+from app.conditions.provider import ConditionsView
+from app.recommender import SAFE_MARGIN_MIN, route_confidence
+from app.routing.router import Route, Router, resolve_safety
+
+MAX_STOPS = 3
+FIRST_STEP = timedelta(minutes=15)
+FIRST_HORIZON = timedelta(hours=2)
+REFINE_STEP = timedelta(minutes=5)
+REFINE_SPAN = timedelta(minutes=15)
+LEG_STEP = timedelta(minutes=5)
+WAIT_WEIGHT = 0.5
+DELAY_WEIGHT = 0.3
+FAR_SNAP_KM = 1.0
+
+
+@dataclass(frozen=True)
+class Place:
+    name: str
+    node: str
+    lat: float
+    lng: float
+    snapped_km: float = 0.0  # distance from the requested point to the graph node used
+
+
+@dataclass(frozen=True)
+class StopRequest:
+    place: Place
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    dwell_min: float = 0.0
+    fixed_order: bool = False
+
+    def target(self, buffer: timedelta) -> datetime | None:
+        """When we'd ideally arrive: the window start, else end minus buffer, else ASAP."""
+        if self.window_start is not None:
+            return self.window_start
+        if self.window_end is not None:
+            return self.window_end - buffer
+        return None
+
+
+@dataclass
+class LegPlan:
+    frm: Place
+    stop: StopRequest
+    ready_at: datetime  # earliest you could leave (previous arrival + dwell, or earliest start)
+    leave_at: datetime
+    arrive_at: datetime
+    wait_min: float  # waiting at the stop for its window to open
+    late_min: float  # minutes after the window end (0 if on time)
+    tight: bool  # on time but inside the buffer
+    route: Route
+    alternative: Route | None = None
+
+    @property
+    def to(self) -> Place:
+        return self.stop.place
+
+    @property
+    def confidence(self) -> Confidence:
+        score: Confidence = "high" if route_confidence(self.route) >= 0.8 else (
+            "medium" if route_confidence(self.route) >= 0.6 else "low"
+        )
+        data = self.route.confidence
+        return score if CONFIDENCE_RANK[score] <= CONFIDENCE_RANK[data] else data
+
+    @property
+    def leave_at_safe(self) -> datetime:
+        return max(self.ready_at, self.leave_at - timedelta(minutes=SAFE_MARGIN_MIN[self.confidence]))
+
+    @property
+    def service_start(self) -> datetime:
+        ws = self.stop.window_start
+        return max(self.arrive_at, ws) if ws else self.arrive_at
+
+
+@dataclass
+class Plan:
+    start: Place
+    stops: list[StopRequest]  # as requested (typed order)
+    order: list[StopRequest]  # chosen order
+    legs: list[LegPlan]
+    depart_after: datetime
+    now: datetime
+    safety_weight: float
+    buffer_min: int
+    cost_min: float
+    baseline: "Baseline"
+    warnings: list[str] = field(default_factory=list)
+    feeds_down: list[str] = field(default_factory=list)
+    freshness: dict = field(default_factory=dict)
+
+    @property
+    def late_stops(self) -> list[LegPlan]:
+        return [leg for leg in self.legs if leg.late_min > 0]
+
+    @property
+    def status(self) -> str:
+        return "late" if self.late_stops else "ok"
+
+    @property
+    def drive_min(self) -> float:
+        return sum(leg.route.total_s for leg in self.legs) / 60
+
+    @property
+    def order_names(self) -> list[str]:
+        return [s.place.name for s in self.order]
+
+
+@dataclass
+class _Sim:
+    order: tuple[StopRequest, ...]
+    first_departure: datetime
+    legs: list[tuple[Place, StopRequest, datetime, datetime, Route]]  # frm, stop, ready, leave, route
+    late: int
+    tight: int
+    late_min: float
+    cost: float
+
+    @property
+    def key(self) -> tuple:
+        return (self.late, self.tight, round(self.late_min), round(self.cost, 3), self.first_departure)
+
+
+def stop_orders(stops: list[StopRequest]) -> list[tuple[StopRequest, ...]]:
+    """All orders that keep fixed_order stops at their typed position."""
+    n = len(stops)
+    out = []
+    for perm in permutations(range(n)):
+        if all(perm[i] == i for i in range(n) if stops[i].fixed_order):
+            out.append(tuple(stops[i] for i in perm))
+    return out
+
+
+class _Planner:
+    def __init__(self, router: Router, view: ConditionsView, weight: float, buffer: timedelta) -> None:
+        self.router = router
+        self.view = view
+        self.weight = weight
+        self.buffer = buffer
+        self._cache: dict[tuple[str, str, datetime], Route] = {}
+
+    def best(self, frm: str, to: str, at: datetime) -> Route:
+        key = (frm, to, at)
+        if key not in self._cache:
+            self._cache[key] = self.router.best_route(frm, to, at, safety_weight=self.weight, view=self.view)
+        return self._cache[key]
+
+    def leg_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
+        """Latest useful departure: arrive at the stop's target time, never before ready."""
+        target = stop.target(self.buffer)
+        if target is None:
+            return ready
+        slack = target - self.best(frm.node, stop.place.node, ready).arrive_at
+        if slack < LEG_STEP:
+            return ready
+        dep = ready + LEG_STEP * math.floor(slack / LEG_STEP)
+        while dep > ready:
+            r = self.best(frm.node, stop.place.node, dep)
+            fits_end = stop.window_end is None or r.arrive_at + self.buffer <= stop.window_end
+            if r.arrive_at <= target + LEG_STEP and fits_end:
+                return dep
+            dep -= LEG_STEP
+        return ready
+
+    def simulate(self, start: Place, order: tuple[StopRequest, ...], d0: datetime, earliest: datetime) -> _Sim:
+        loc, ready = start, d0
+        legs, late, tight, late_min, cost = [], 0, 0, 0.0, 0.0
+        for i, stop in enumerate(order):
+            leave = d0 if i == 0 else self.leg_departure(loc, stop, ready)
+            r = self.best(loc.node, stop.place.node, leave)
+            arrive = r.arrive_at
+            target = stop.target(self.buffer)
+            wait = max(0.0, (target - arrive).total_seconds() / 60) if target else 0.0
+            if stop.window_end is not None:
+                over = (arrive - stop.window_end).total_seconds() / 60
+                if over > 0:
+                    late += 1
+                    late_min += over
+                elif arrive + self.buffer > stop.window_end:
+                    tight += 1
+            cost += r.cost / 60 + WAIT_WEIGHT * wait
+            legs.append((loc, stop, ready if i else earliest, leave, r))
+            service = max(arrive, stop.window_start) if stop.window_start else arrive
+            ready = service + timedelta(minutes=stop.dwell_min)
+            loc = stop.place
+        cost += DELAY_WEIGHT * max(0.0, (d0 - earliest).total_seconds() / 60)
+        return _Sim(order, d0, legs, late, tight, late_min, cost)
+
+
+def plan_trip(
+    router: Router,
+    start: Place,
+    stops: list[StopRequest],
+    depart_after: datetime,
+    now: datetime,
+    safety_weight: float | None = None,
+    safe_path: bool = False,
+    buffer_min: int = 5,
+    view: ConditionsView | None = None,
+) -> Plan:
+    if not stops:
+        raise ValueError("add at least one stop")
+    if len(stops) > MAX_STOPS:
+        raise ValueError(f"at most {MAX_STOPS} stops")
+    w = resolve_safety(safe_path, safety_weight)
+    view = view or router.view(now)
+    buffer = timedelta(minutes=buffer_min)
+    earliest = max(depart_after, now)
+    p = _Planner(router, view, w, buffer)
+
+    orders = stop_orders(stops)
+    grid = [earliest + FIRST_STEP * k for k in range(int(FIRST_HORIZON / FIRST_STEP) + 1)]
+    sims = [p.simulate(start, order, d, earliest) for order in orders for d in grid]
+    best = min(sims, key=lambda s: s.key)
+    steps = int(REFINE_SPAN / REFINE_STEP)
+    for k in range(-steps, steps + 1):
+        d = best.first_departure + REFINE_STEP * k
+        if k and d >= earliest:
+            best = min(best, p.simulate(start, best.order, d, earliest), key=lambda s: s.key)
+
+    legs = []
+    for frm, stop, ready, leave, _ in best.legs:
+        route, alt = router.route(frm.node, stop.place.node, leave, safety_weight=w, view=view)
+        late_min = 0.0
+        tight = False
+        if stop.window_end is not None:
+            late_min = max(0.0, (route.arrive_at - stop.window_end).total_seconds() / 60)
+            tight = late_min == 0 and route.arrive_at + buffer > stop.window_end
+        legs.append(
+            LegPlan(
+                frm=frm,
+                stop=stop,
+                ready_at=ready,
+                leave_at=leave,
+                arrive_at=route.arrive_at,
+                wait_min=(
+                    max(0.0, (stop.window_start - route.arrive_at).total_seconds() / 60) if stop.window_start else 0.0
+                ),
+                late_min=late_min,
+                tight=tight,
+                route=route,
+                alternative=alt,
+            )
+        )
+
+    plan = Plan(
+        start=start,
+        stops=stops,
+        order=list(best.order),
+        legs=legs,
+        depart_after=depart_after,
+        now=now,
+        safety_weight=w,
+        buffer_min=buffer_min,
+        cost_min=best.cost,
+        baseline=_baseline(router, start, stops, earliest, buffer, view),
+        feeds_down=view.feeds_down,
+        freshness=view.freshness(),
+    )
+    plan.warnings = _warnings(plan, router)
+    return plan
+
+
+@dataclass
+class Baseline:
+    """Typed order, leave now, each leg as soon as ready, traffic-only routes (no train or
+    crash awareness), judged with our full expected costs. What the plan is compared to."""
+
+    drive_min: float
+    wait_min: float
+    late_stops: int
+
+
+def _baseline(
+    router: Router,
+    start: Place,
+    stops: list[StopRequest],
+    earliest: datetime,
+    buffer: timedelta,
+    view: ConditionsView,
+) -> Baseline:
+    loc, t, drive, wait, late = start, earliest, 0.0, 0.0, 0
+    for stop in stops:
+        r = router.traffic_only_route(loc.node, stop.place.node, t, view=view)
+        drive += r.total_s / 60
+        arrive = r.arrive_at
+        if stop.window_start and arrive < stop.window_start:
+            wait += (stop.window_start - arrive).total_seconds() / 60
+        if stop.window_end and arrive > stop.window_end:
+            late += 1
+        service = max(arrive, stop.window_start) if stop.window_start else arrive
+        t = service + timedelta(minutes=stop.dwell_min)
+        loc = stop.place
+    return Baseline(drive, wait, late)
+
+
+def _warnings(plan: Plan, router: Router) -> list[str]:
+    out = []
+    for place in [plan.start] + [s.place for s in plan.stops]:
+        if place.snapped_km > FAR_SNAP_KM:
+            node = router.network.nodes[place.node].name
+            out.append(
+                f"{place.name} is {place.snapped_km:.1f} km from the nearest point on our road map "
+                f"({node}); that stretch isn't modeled yet"
+            )
+    for leg in plan.late_stops:
+        out.append(f"Can't reach {leg.to.name} before its window ends: about {leg.late_min:.0f} min late")
+    for leg in plan.legs:
+        if leg.tight and not leg.late_min:
+            out.append(f"{leg.to.name} is tight: less than {plan.buffer_min} min to spare")
+    names = {"trains": "Train", "traffic": "Live traffic", "incidents": "Incident"}
+    for feed in plan.feeds_down:
+        out.append(f"{names.get(feed, feed)} feed is down; using predictions")
+    return out

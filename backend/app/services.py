@@ -3,6 +3,7 @@
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters import DataSources, build_sources
+from app.conditions.provider import ConditionsProvider
 from app.clock import SimClock
 from app.config import settings
 from app.graph import Network, load_network
@@ -37,7 +38,8 @@ class Services:
     def _install(self, models: Models) -> None:
         # Build the new router/scheduler first, then swap: requests and scheduler ticks
         # running meanwhile keep using the old, complete set of scores.
-        router = Router(self.network, models, lambda: self.sources.trains.active_blockages(self.clock.now()))
+        conditions = ConditionsProvider(self.network, models, self.sources, self.clock.now)
+        router = Router(self.network, models, conditions)
         scheduler = TripScheduler(self.session_factory, router, self.notifier)
         self.models, self.router, self.scheduler = models, router, scheduler
 
@@ -51,5 +53,5 @@ class Services:
         self._install(models)
         return days
 
-    def tick(self):
-        return self.scheduler.tick(self.clock.now())
+    def tick(self, replan_now: bool = False):
+        return self.scheduler.tick(self.clock.now(), replan_now)

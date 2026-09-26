@@ -11,13 +11,22 @@ from app.models import Notification, Trip
 class NotificationService(ABC):
     @abstractmethod
     def send(
-        self, session: Session, trip: Trip | None, kind: str, title: str, body: str, at: datetime
+        self,
+        session: Session,
+        trip: Trip | None,
+        kind: str,
+        title: str,
+        body: str,
+        at: datetime,
+        plan_id: str | None = None,
     ) -> Notification: ...
 
 
 class MockNotificationService(NotificationService):
-    def send(self, session, trip, kind, title, body, at):
-        n = Notification(trip_id=trip.id if trip else None, created_at=at, kind=kind, title=title, body=body)
+    def send(self, session, trip, kind, title, body, at, plan_id=None):
+        n = Notification(
+            trip_id=trip.id if trip else None, plan_id=plan_id, created_at=at, kind=kind, title=title, body=body
+        )
         session.add(n)
         session.flush()
         return n
@@ -30,8 +39,8 @@ class WebPushNotificationService(MockNotificationService):
     (POST /devices), and send with pywebpush.webpush(subscription, payload, vapid_private_key=...).
     """
 
-    def send(self, session, trip, kind, title, body, at):
-        n = super().send(session, trip, kind, title, body, at)
+    def send(self, session, trip, kind, title, body, at, plan_id=None):
+        n = super().send(session, trip, kind, title, body, at, plan_id)
         # TODO: webpush(...) to trip.device_id's subscription
         return n
 

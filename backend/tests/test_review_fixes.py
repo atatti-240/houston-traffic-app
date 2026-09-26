@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
 from app.db import init_db
 from app.main import create_app
-from app.models import Notification, Trip
+from app.models import Trip
 from app.recommender import recommend_departure
 
 MON = lambda h, m=0: datetime(2026, 9, 28, h, m)  # noqa: E731

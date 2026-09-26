@@ -35,7 +35,11 @@ def init_db(bind: Engine | None = None) -> None:
 
 # Columns added after the first release. create_all() never alters existing tables, so an
 # app.db from an older checkout gets them here. (For anything bigger: `make seed` rebuilds.)
-_ADDED_COLUMNS = {"trip_states": {"last_route": "VARCHAR"}}
+_ADDED_COLUMNS = {
+    "trip_states": {"last_route": "VARCHAR"},
+    "trips": {"safety_weight": "FLOAT"},
+    "notifications": {"plan_id": "VARCHAR"},
+}
 
 
 def _add_missing_columns(bind: Engine) -> None:

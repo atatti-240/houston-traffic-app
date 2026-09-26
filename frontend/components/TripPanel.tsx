@@ -15,8 +15,9 @@ interface Props {
   setDestination: (l: Location) => void;
   arriveBy: string;
   setArriveBy: (v: string) => void;
-  safe: boolean;
-  setSafe: (v: boolean) => void;
+  /** 0 = fastest, 1 = safest */
+  safety: number;
+  setSafety: (v: number) => void;
   pickMode: PickMode;
   setPickMode: (m: PickMode) => void;
   onPlan: () => void;
@@ -78,10 +79,48 @@ function PlaceField(props: {
 
 function reasonIcon(reason: string): string {
   if (reason.startsWith("Avoided") || reason.startsWith("Rerouted")) return "✅";
-  if (reason.startsWith("Safe Path")) return "🛡️";
+  if (reason.startsWith("Safe Path") || reason.startsWith("Safety setting")) return "🛡️";
   if (reason.startsWith("About")) return "⏱️";
+  if (reason.includes("unavailable")) return "📡";
   return "⚠️";
 }
+
+const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
+
+export function safetyLabel(w: number): string {
+  return SAFETY_LABELS[Math.round(Math.max(0, Math.min(1, w)) * 4)];
+}
+
+function SafetySlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="block">
+      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-500">
+        <span>Route</span>
+        <span className={value > 0 ? "text-violet-700" : "text-slate-600"}>
+          {value > 0 ? "🛡️ " : ""}
+          {safetyLabel(value)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.25}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Faster or safer route"
+        aria-valuetext={safetyLabel(value)}
+        className="mt-1 w-full accent-violet-600"
+      />
+      <div className="flex justify-between text-[11px] text-slate-500">
+        <span>Faster</span>
+        <span>Safer (fewer crash-prone roads)</span>
+      </div>
+    </label>
+  );
+}
+
+const CONF_TONE = { high: "text-green-700", medium: "text-amber-700", low: "text-red-700" } as const;
 
 export default function TripPanel(p: Props) {
   const r = p.rec;
@@ -106,7 +145,7 @@ export default function TripPanel(p: Props) {
       {p.pickMode && <p className="text-xs text-blue-700">Click the map to set the {p.pickMode}.</p>}
 
       <div className="flex items-end gap-3">
-        <label className="block">
+        <label className="block shrink-0">
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Arrive by</span>
           <input
             type="time"
@@ -115,17 +154,9 @@ export default function TripPanel(p: Props) {
             className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
           />
         </label>
-        <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm">
-          <span
-            role="switch"
-            aria-checked={p.safe}
-            onClick={() => p.setSafe(!p.safe)}
-            className={`relative inline-block h-5 w-9 rounded-full transition ${p.safe ? "bg-violet-600" : "bg-slate-300"}`}
-          >
-            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${p.safe ? "left-4" : "left-0.5"}`} />
-          </span>
-          🛡️ Safe Path
-        </label>
+        <div className="min-w-0 flex-1">
+          <SafetySlider value={p.safety} onChange={p.setSafety} />
+        </div>
       </div>
 
       <button
@@ -145,14 +176,21 @@ export default function TripPanel(p: Props) {
           </div>
           <div className="mt-1 text-sm text-slate-600">
             Arrive {fmtTime(r.eta)} · {r.route.total_min} min ·{" "}
-            <span
-              className={
-                r.confidence_label === "high" ? "text-green-700" : r.confidence_label === "medium" ? "text-amber-700" : "text-red-700"
-              }
-            >
+            <span className={CONF_TONE[r.confidence_label]}>
               {r.confidence_label} confidence ({pct(r.confidence)})
             </span>
           </div>
+          {r.leave_at_safe !== r.depart_at && (
+            <div className="mt-0.5 text-xs text-slate-500">
+              Can&apos;t be late? Leave by {fmtTime(r.leave_at_safe)}
+              {r.data_confidence !== "high" ? " (this route leans on predictions)" : ""}.
+            </div>
+          )}
+          {r.route.feeds_down.length > 0 && (
+            <div className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              📡 Live {r.route.feeds_down.join(", ")} data is down; using predictions.
+            </div>
+          )}
           <div className="mt-2 text-sm font-medium text-slate-800">{r.route.summary}</div>
 
           {r.route.reasons.length > 0 && (
@@ -209,6 +247,7 @@ export default function TripPanel(p: Props) {
               ["congestion", "🚦 Congestion"],
               ["crash", "💥 Crash risk"],
               ["trains", "🚆 Rail crossings"],
+              ["incidents", "🚧 Incidents"],
               ["cameras", "📷 Cameras"],
             ] as const
           ).map(([key, label]) => (
