@@ -8,6 +8,9 @@ import type {
   Place,
   PlanResult,
   Recommendation,
+  SlowdownDetail,
+  SlowdownList,
+  TrafficAlert,
   Route,
   ScoreMap,
   Segment,
@@ -54,6 +57,15 @@ export const api = {
     safety_weight?: number;
   }) => post<Recommendation>("/recommend", body),
   live: () => call<LiveConditions>("/live"),
+  slowdowns: () => call<SlowdownList>("/slowdowns"),
+  slowdown: (id: string) => call<SlowdownDetail>(`/slowdowns/${encodeURIComponent(id)}`),
+  watchSlowdown: (id: string) => post<{ id: number; watching: boolean }>(`/slowdowns/${encodeURIComponent(id)}/watch`),
+  unwatchSlowdown: (id: string) => call<void>(`/slowdowns/${encodeURIComponent(id)}/watch`, { method: "DELETE" }),
+  trafficAlerts: () => call<{ generated_at: string; items: TrafficAlert[] }>("/traffic-alerts"),
+  plans: () =>
+    call<{ plan_id: string; name: string; status: string; order: string[]; leave_at: string; arrive_at: string; watch: boolean; done: boolean }[]>(
+      "/plans",
+    ),
   plan: (body: TripPlanRequest) => post<PlanResult>("/plan", body),
   getPlan: (id: string) => call<PlanResult>(`/plan/${encodeURIComponent(id)}`),
   deletePlan: (id: string) => call<void>(`/plan/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -75,5 +87,6 @@ export const api = {
   feed: (feed: "trains" | "traffic" | "incidents", up: boolean) =>
     post<{ notifications: AppNotification[] }>("/demo/feed", { feed, up }),
   clearLive: () => post<{ notifications: AppNotification[] }>("/demo/clear-live"),
+  scenario: (name: "evening") => post<ClockState>(`/demo/scenario/${name}`),
   reset: () => post<ClockState>("/demo/reset"),
 };

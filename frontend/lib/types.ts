@@ -9,6 +9,7 @@ export interface Place {
   name: string;
   lat: number;
   lng: number;
+  address?: string | null;
 }
 
 export interface Segment {
@@ -188,7 +189,7 @@ export interface AppNotification {
   trip_id: number | null;
   plan_id?: string | null;
   created_at: string;
-  kind: "plan" | "leave_now" | "leave_earlier" | "leave_later" | "reroute" | "order_changed" | "info";
+  kind: "plan" | "leave_now" | "leave_earlier" | "leave_later" | "reroute" | "order_changed" | "cleared" | "info";
   title: string;
   body: string;
 }
@@ -230,6 +231,17 @@ export interface LiveConditions {
   generated_at: string;
   crossings: LiveCrossing[];
   cameras: (Camera & {
+    /** Nearest named place, e.g. "Galleria / Uptown" */
+    area: string;
+    /** "Looking north" / "Looking at the crossing" */
+    looking: string | null;
+    level: "heavy" | "moderate" | "light";
+    delay_min: number;
+    /** "Heavy rain and street flooding · +15 min" or "Flowing normally" */
+    note: string;
+    /** Rain/weather on this camera's road */
+    weather: boolean;
+    slowdown_id: string | null;
     snapshot_url: string | null;
     vehicles: number | null;
     baseline_vehicles: number | null;
@@ -326,4 +338,92 @@ export interface PlanResult {
   drive_min: number;
   warnings: string[];
   notifications?: AppNotification[];
+}
+
+// ---- Why traffic is slow (GET /slowdowns, /slowdowns/{id}, /traffic-alerts) ----------------
+
+export type CauseKind = "rush" | "event" | "crash" | "train" | "closure" | "weather" | "construction" | "volume";
+
+export interface SlowdownCause {
+  kind: CauseKind;
+  /** "Rush hour", "Crash", "Higher than usual volume", ... */
+  label: string;
+  /** Share of the delay, 0-100 (all causes add up to 100) */
+  pct: number;
+  minutes: number;
+  title: string;
+  detail: string;
+  started_at: string | null;
+  source: string;
+}
+
+export interface Slowdown {
+  /** Road segment id, e.g. "I45S:gulf_ee>i45_610s" (encodeURIComponent it in URLs) */
+  id: string;
+  /** "I-45 Gulf Fwy southbound" */
+  road: string;
+  /** "Telephone Rd to I-45 / 610 South" */
+  place: string;
+  miles: number;
+  road_class: "freeway" | "arterial";
+  level: "heavy" | "moderate" | "light";
+  closed: boolean;
+  delay_min: number;
+  speed_mph: number;
+  free_flow_mph: number;
+  usual_mph: number;
+  /** Marker position (segment middle, offset to the right of travel like the map line) */
+  lat: number;
+  lng: number;
+  /** Worth an icon on the map (anything unusual + the worst few rush-hour spots) */
+  highlight: boolean;
+  /** The cause to lead with (null when the road is flowing) */
+  kind: CauseKind | null;
+  label: string | null;
+  title: string;
+  detail: string;
+  started_at: string | null;
+  causes: SlowdownCause[];
+  geometry: LatLngTuple[];
+}
+
+export interface SlowdownList {
+  generated_at: string;
+  count: number;
+  counts_by_kind: Partial<Record<CauseKind, number>>;
+  items: Slowdown[];
+}
+
+export interface SlowdownDetail extends Slowdown {
+  is_slowdown: boolean;
+  history: {
+    /** Every 10 min over the last 2 hours */
+    points: { t: string; mph: number }[];
+    usual_mph: number;
+    free_flow_mph: number;
+    /** e.g. { t: "...T16:52:00", label: "4:52pm crash" } */
+    markers: { t: string; label: string }[];
+  };
+  /** "Notify me when it clears" is on */
+  watching: boolean;
+}
+
+export type AlertGroup = "incident" | "roadwork" | "event" | "weather" | "train" | "volume";
+
+export interface TrafficAlert {
+  id: string;
+  group: AlertGroup;
+  kind: CauseKind;
+  title: string;
+  /** "I-45 Gulf Fwy southbound · Telephone Rd to I-45 / 610 South" */
+  place: string;
+  /** "2 lanes blocked · +12 min" */
+  impact: string;
+  detail: string;
+  time: string | null;
+  delay_min: number | null;
+  lat: number | null;
+  lng: number | null;
+  slowdown_id: string | null;
+  source: string;
 }
