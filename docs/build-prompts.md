@@ -16,7 +16,7 @@ commuters when to leave and which way to go BEFORE traffic hits, by predicting
 congestion, crash risk, and freight-train crossing blockages from historical +
 live data (Houston TranStar, TrainWatch-style train data, Bluetooth speed sensors).
 
-Read _bmad-output/planning-artifacts/briefs/brief-houston-traffic-app-2026-09-25/brief.md for the full brief.
+Read docs/product-brief.md for the full brief.
 
 Write ARCHITECTURE.md at the repo root, then scaffold the repo to match it. Keep it
 hackathon-sized: one backend service, one frontend, SQLite. Cover:
@@ -256,4 +256,3 @@ Read ARCHITECTURE.md first. We demo in front of judges soon. Add:
 
 - If the agent starts drifting, tell it: "re-read ARCHITECTURE.md and stick to it."
 - If you're short on time, cut in this order: Prompt 4's crash risk, then the time slider in Prompt 8, then the WebPush stub. **Don't cut the train blockage model.** It's your differentiator.
-- You've got BMAD installed. `/bmad-architecture` can do Prompt 1 more rigorously if you have the time, but for a 48-hour build the plain prompt is faster.

@@ -150,7 +150,7 @@ Likely severe (fatal + serious-injury) crashes only — confirm methodology befo
 - For intersection-level + time-of-day detail: US Accidents (Kaggle) or CRIS, later.
 
 ## Team repo review / 团队仓库审阅 (github.com/atatti-240/houston-traffic-app @ dbe17e4, 2026-09-25)
-Built with BMAD + Claude Code prompts 1–9 (`_bmad-output/planning-artifacts/claude-code-build-prompts.md`). **Done: prompts 1–4** — ARCHITECTURE.md, FastAPI skeleton (`/health` only), SQLAlchemy models, hand-made 24-node Houston graph, 8-week synthetic history, mock adapters, 3 EMA models (congestion / crash / train, formula already fixed), tests. Frontend = Next.js 16 + react-leaflet, blank map only.
+Built from build prompts 1–9 (`docs/build-prompts.md`). **Done: prompts 1–4** — ARCHITECTURE.md, FastAPI skeleton (`/health` only), SQLAlchemy models, hand-made 24-node Houston graph, 8-week synthetic history, mock adapters, 3 EMA models (congestion / crash / train, formula already fixed), tests. Frontend = Next.js 16 + react-leaflet, blank map only.
 **Not done: prompts 5–9** — routing (`routing/` empty), recommender, notifications, REST API (`api/` empty), frontend UI, demo mode.
 Differences vs our research: all data synthetic (cameras = `cameras.example` URLs, crossings approximate); single origin→destination + arrive_by (no multi-stop / time windows); computer vision explicitly out; own graph + Dijkstra instead of TomTom/OSRM; stack = Next.js/TypeScript + uv (not plain JS).
 Fits well: adapter interfaces `SpeedSource / CrashSource / TrainSource / CameraSource` map 1:1 to our tested real feeds; sim clock = our replay mode; EMA = our congestion score.
