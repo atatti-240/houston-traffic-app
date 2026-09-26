@@ -1,32 +1,58 @@
 """Time-dependent routing with a blended cost (travel time + train delay + crash risk).
 
-For departure time t, each segment is scored at the moment you'd actually reach it:
+For departure time t, each segment is scored at the moment you'd actually reach it, using
+only the road-conditions layer (app.conditions), which merges predictions with live data:
 
-    edge_cost = travel_time(seg, t_seg)
-              + sum(expected_train_delay(crossing, t_crossing))
-              + lambda_crash * crash_risk(seg, t_seg) * seg_miles
+    edge_cost = travel_time(seg, t_seg)                         # predicted, blended with live traffic
+              + sum(expected_train_delay(crossing, t_crossing))  # live status first, then prediction
+              + lambda(safety_weight) * crash_risk(seg, t_seg) * seg_miles
 
-The search minimizes cost; ETA only counts real time (travel + train delay).
+    lambda = 30 s/mile at safety_weight 0 ... 600 s/mile at safety_weight 1
+
+Closed roads are skipped. The search minimizes cost; ETA only counts real time.
 """
 
 import heapq
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from app.conditions.live import Confidence, Incident, worst
+from app.conditions.provider import LIVE_WINDOW, ConditionsProvider, ConditionsView
 from app.graph import Network, SegmentInfo
 from app.scoring import Models
-from app.seed.synthetic import TrainEvent
 
-# Seconds of penalty per mile at crash risk 1.0.
+# Seconds of penalty per mile at crash risk 1.0, at the two ends of the safety slider.
 LAMBDA_CRASH = 30.0
 LAMBDA_CRASH_SAFE = 600.0
+SAFE_PATH_WEIGHT = 1.0  # what the old on/off "Safe Path" maps to
+SAFE_MODE_WEIGHT = 0.5  # from here on we talk about the route as a safety-first route
 ALT_PENALTY = 1.5  # cost multiplier on the best route's segments when looking for an alternative
 
 TRAIN_REASON_P = 0.25
 CRASH_REASON_RISK = 0.45
 CONGESTION_REASON_SCORE = 0.5
+LIVE_REASON_EXTRA = 0.15  # live congestion this much above the prediction is worth saying
 SAFE_REASON_MIN_DROP = 0.05  # don't brag about a crash-exposure drop smaller than this
+MAX_REASONS = 7
+
+SOURCE_LABELS = {
+    "trainwatch": "Train Watch",
+    "transtar_rss": "TranStar",
+    "camera": "traffic camera",
+    "demo": "demo feed",
+    "history": "history",
+}
+
+
+def resolve_safety(safe_path: bool | None = None, safety_weight: float | None = None) -> float:
+    """safety_weight wins; the old boolean maps to 1.0 (on) or 0.0 (off)."""
+    if safety_weight is not None:
+        return min(1.0, max(0.0, float(safety_weight)))
+    return SAFE_PATH_WEIGHT if safe_path else 0.0
+
+
+def crash_lambda(safety_weight: float) -> float:
+    return LAMBDA_CRASH + safety_weight * (LAMBDA_CRASH_SAFE - LAMBDA_CRASH)
 
 
 @dataclass
@@ -39,6 +65,10 @@ class CrossingOnRoute:
     block_probability: float
     expected_delay_s: float
     live: bool
+    confidence: Confidence = "medium"
+    source: str = "history"
+    updated_at: datetime | None = None
+    sensor_up: bool | None = None
 
 
 @dataclass
@@ -54,6 +84,15 @@ class SegmentOnRoute:
     miles: float
     geometry: list[list[float]]
     crossings: list[CrossingOnRoute] = field(default_factory=list)
+    predicted_congestion: float = 0.0
+    congestion_source: str = "history"
+    live_weight: float = 0.0
+    live_updated_at: datetime | None = None
+    live_detail: str = ""
+    incident: Incident | None = None
+    incident_slowdown: float = 1.0
+    closed: bool = False
+    confidence: Confidence = "medium"
 
 
 @dataclass
@@ -62,14 +101,20 @@ class Route:
     destination: str
     depart_at: datetime
     arrive_at: datetime
-    safe_path: bool
+    safety_weight: float
     segments: list[SegmentOnRoute]
     free_flow_s: float
     base_travel_s: float
     train_delay_s: float
     crash_exposure: float  # sum of risk * miles
     cost: float
+    confidence: Confidence = "medium"
+    feeds_down: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+
+    @property
+    def safe_path(self) -> bool:
+        return self.safety_weight >= SAFE_MODE_WEIGHT
 
     @property
     def total_s(self) -> float:
@@ -92,6 +137,10 @@ class Route:
         return max((s.crash_risk for s in self.segments), default=0.0)
 
     @property
+    def uses_live(self) -> bool:
+        return any(s.live_weight > 0 or s.incident for s in self.segments) or any(c.live for c in self.crossings)
+
+    @property
     def geometry(self) -> list[list[float]]:
         pts: list[list[float]] = []
         for s in self.segments:
@@ -107,8 +156,25 @@ def _fmt(t: datetime) -> str:
     return t.strftime("%-I:%M %p")
 
 
+def _label(source: str) -> str:
+    parts = source.removeprefix("live:").split("+")
+    return " + ".join(SOURCE_LABELS.get(p, p) for p in parts)
+
+
+def _ago(updated: datetime | None, now: datetime) -> str:
+    if updated is None:
+        return ""
+    minutes = max(0, round((now - updated).total_seconds() / 60))
+    return "just now" if minutes == 0 else f"{minutes} min ago"
+
+
+def _provenance(source: str, updated: datetime | None, now: datetime) -> str:
+    ago = _ago(updated, now)
+    return f"{_label(source)}, {ago}" if ago else _label(source)
+
+
 def _dedupe_live(reasons: list[str]) -> list[str]:
-    """Drop repeats, and "Avoided X: blocked..." when "Rerouted around X" already says it."""
+    """Drop repeats, and "Avoided X: ..." when "Rerouted around X" already says it."""
     rerouted = {r.split(":")[0].removeprefix("Rerouted around ") for r in reasons if r.startswith("Rerouted around ")}
     out = []
     for r in dict.fromkeys(reasons):
@@ -116,48 +182,64 @@ def _dedupe_live(reasons: list[str]) -> list[str]:
         if r.startswith("Avoided ") and name in rerouted and "right now" in r:
             continue
         out.append(r)
-    return out[:6]
+    return out[:MAX_REASONS]
 
 
 class Router:
-    def __init__(
-        self,
-        network: Network,
-        models: Models,
-        live_blockages: Callable[[], list[TrainEvent]] = lambda: [],
-    ) -> None:
+    def __init__(self, network: Network, models: Models, conditions: ConditionsProvider | None = None) -> None:
         self.network = network
         self.models = models
-        self.live_blockages = live_blockages
+        # Without a provider (tests, scripts) routing uses predictions only.
+        self.conditions = conditions or ConditionsProvider(network, models)
+
+    def view(self, now: datetime | None = None) -> ConditionsView:
+        """Live conditions as of now. Build one per request so every search in it sees the
+        same data (and live feeds are pulled once)."""
+        return self.conditions.view(now)
+
+    def _view_for(self, view: ConditionsView | None, depart_at: datetime) -> ConditionsView:
+        if view is not None:
+            return view
+        if self.conditions.has_clock:
+            return self.conditions.view()
+        return self.conditions.view(depart_at, live=False)  # no clock: predictions only
 
     # --- per-segment evaluation -----------------------------------------------------------
 
-    def _eval_segment(
-        self, seg: SegmentInfo, enter_at: datetime, live: list[TrainEvent]
-    ) -> SegmentOnRoute:
-        m = self.models
-        travel = m.congestion.get_segment_travel_time(seg.id, enter_at)
+    def _eval_segment(self, seg: SegmentInfo, enter_at: datetime, view: ConditionsView) -> SegmentOnRoute:
+        sc = view.segment(seg, enter_at)
         crossings = []
         delay = 0.0
         for c in self.network.crossings_on.get(seg.id, []):
-            reach = enter_at + timedelta(seconds=travel / 2)
-            d = m.train.get_expected_delay(c.id, reach, live)
-            is_live = any(e.crossing_id == c.id and e.start <= reach < e.end for e in live)
-            p = 1.0 if is_live else m.train.get_block_probability(c.id, reach)
-            crossings.append(CrossingOnRoute(c.id, c.name, c.lat, c.lng, reach, p, d, is_live))
-            delay += d
+            cc = view.crossing(c, enter_at + timedelta(seconds=sc.travel_s / 2))
+            crossings.append(
+                CrossingOnRoute(
+                    c.id, c.name, c.lat, c.lng, cc.arrive_at, cc.block_probability, cc.expected_delay_s,
+                    cc.live, cc.confidence, cc.source, cc.updated_at, cc.sensor_up,
+                )
+            )
+            delay += cc.expected_delay_s
         return SegmentOnRoute(
             id=seg.id,
             name=seg.name,
             road_class=seg.road_class,
             enter_at=enter_at,
-            travel_s=travel,
+            travel_s=sc.travel_s,
             train_delay_s=delay,
-            congestion=m.congestion.get_score(seg.id, enter_at),
-            crash_risk=m.crash.get_crash_risk(seg.id, enter_at),
+            congestion=sc.congestion,
+            crash_risk=sc.crash_risk,
             miles=seg.length_miles,
             geometry=[list(p) for p in seg.geometry],
             crossings=crossings,
+            predicted_congestion=sc.predicted_congestion,
+            congestion_source=sc.congestion_source,
+            live_weight=sc.live_weight,
+            live_updated_at=sc.live_updated_at,
+            live_detail=sc.live_detail,
+            incident=sc.incident,
+            incident_slowdown=sc.incident_slowdown,
+            closed=sc.closed,
+            confidence=sc.confidence,
         )
 
     @staticmethod
@@ -172,12 +254,13 @@ class Router:
         destination: str,
         depart_at: datetime,
         lam: float,
-        live: list[TrainEvent],
+        view: ConditionsView,
         penalties: dict[str, float] | None = None,
         blind: bool = False,
     ) -> list[str]:
-        """Returns segment ids. `blind=True` routes on traffic only, ignoring trains and
-        crash risk: roughly what a typical nav app picks. Used to explain what we avoided."""
+        """Returns segment ids. `blind=True` routes on traffic only (live traffic and
+        incidents included, trains and crash risk ignored): roughly what a typical nav app
+        picks. Used to explain what we avoided."""
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
@@ -196,7 +279,9 @@ class Router:
             for seg in self.network.out_edges.get(node, []):
                 if seg.to_node in done:
                     continue
-                s = self._eval_segment(seg, now, live)
+                s = self._eval_segment(seg, now, view)
+                if s.closed:
+                    continue
                 if blind:
                     step_cost = step_time = s.travel_s
                 else:
@@ -209,7 +294,7 @@ class Router:
                     prev[seg.to_node] = (node, seg.id)
                     heapq.heappush(heap, (new_cost, elapsed + step_time, seg.to_node))
         if destination not in prev and origin != destination:
-            raise NoRouteError(f"no route from {origin} to {destination}")
+            raise NoRouteError(f"no open route from {origin} to {destination}")
         path, node = [], destination
         while node != origin:
             node, sid = prev[node]
@@ -222,64 +307,112 @@ class Router:
         origin: str,
         destination: str,
         depart_at: datetime,
-        safe_path: bool,
-        live: list[TrainEvent] | None = None,
+        safety_weight: float,
+        view: ConditionsView,
     ) -> Route:
-        live = self.live_blockages() if live is None else live
-        lam = LAMBDA_CRASH_SAFE if safe_path else LAMBDA_CRASH
+        lam = crash_lambda(safety_weight)
         t = depart_at
         segs = []
         for sid in segment_ids:
-            s = self._eval_segment(self.network.segments[sid], t, live)
+            s = self._eval_segment(self.network.segments[sid], t, view)
             segs.append(s)
             t += timedelta(seconds=s.travel_s + s.train_delay_s)
-        return Route(
+        route = Route(
             origin=origin,
             destination=destination,
             depart_at=depart_at,
             arrive_at=t,
-            safe_path=safe_path,
+            safety_weight=safety_weight,
             segments=segs,
             free_flow_s=sum(self.network.segments[sid].free_flow_seconds for sid in segment_ids),
             base_travel_s=sum(s.travel_s for s in segs),
             train_delay_s=sum(s.train_delay_s for s in segs),
             crash_exposure=sum(s.crash_risk * s.miles for s in segs),
             cost=sum(self._cost(s, lam) for s in segs),
+            feeds_down=view.feeds_down,
         )
+        route.confidence = self._route_confidence(route)
+        return route
+
+    @staticmethod
+    def _route_confidence(route: Route) -> Confidence:
+        """low: something that matters rests on a low-confidence input (sensor down, stale or
+        low-confidence live data, a down feed in the next 30 min).
+        high: most of the drive is backed by strong live readings and no crossing is a gamble.
+        medium: predictions (the normal case)."""
+        levels: list[Confidence] = []
+        for s in route.segments:
+            if s.live_weight > 0 or s.incident or s.confidence == "low":
+                levels.append(s.confidence)
+        for c in route.crossings:
+            if c.live or c.block_probability >= TRAIN_REASON_P or c.confidence == "low":
+                levels.append(c.confidence)
+        if levels and worst(*levels) == "low":
+            return "low"
+        total = sum(s.travel_s for s in route.segments) or 1.0
+        live_share = sum(s.travel_s for s in route.segments if s.live_weight >= 0.4) / total
+        risky = any(not c.live and c.block_probability >= 0.1 for c in route.crossings)
+        if live_share >= 0.5 and not risky:
+            return "high"
+        return "medium"
 
     # --- public API -----------------------------------------------------------------------
 
-    def best_route(self, origin: str, destination: str, depart_at: datetime, safe_path: bool = False) -> Route:
+    def best_route(
+        self,
+        origin: str,
+        destination: str,
+        depart_at: datetime,
+        safe_path: bool = False,
+        safety_weight: float | None = None,
+        view: ConditionsView | None = None,
+    ) -> Route:
         """Best route only (no alternative / reasons); cheap enough to call in a loop."""
-        live = self.live_blockages()
-        lam = LAMBDA_CRASH_SAFE if safe_path else LAMBDA_CRASH
-        ids = self._search(origin, destination, depart_at, lam, live)
-        return self.evaluate(ids, origin, destination, depart_at, safe_path, live)
+        view = self._view_for(view, depart_at)
+        w = resolve_safety(safe_path, safety_weight)
+        ids = self._search(origin, destination, depart_at, crash_lambda(w), view)
+        return self.evaluate(ids, origin, destination, depart_at, w, view)
+
+    def traffic_only_route(
+        self, origin: str, destination: str, depart_at: datetime, view: ConditionsView | None = None
+    ) -> Route:
+        """What a traffic-only nav app would pick, evaluated with our full expected costs."""
+        view = self._view_for(view, depart_at)
+        ids = self._search(origin, destination, depart_at, crash_lambda(0.0), view, blind=True)
+        return self.evaluate(ids, origin, destination, depart_at, 0.0, view)
 
     def route(
-        self, origin: str, destination: str, depart_at: datetime, safe_path: bool = False
+        self,
+        origin: str,
+        destination: str,
+        depart_at: datetime,
+        safe_path: bool = False,
+        safety_weight: float | None = None,
+        view: ConditionsView | None = None,
     ) -> tuple[Route, Route | None]:
         """Best route and (if one exists) a meaningfully different alternative."""
-        live = self.live_blockages()
-        lam = LAMBDA_CRASH_SAFE if safe_path else LAMBDA_CRASH
-        best_ids = self._search(origin, destination, depart_at, lam, live)
-        best = self.evaluate(best_ids, origin, destination, depart_at, safe_path, live)
+        view = self._view_for(view, depart_at)
+        w = resolve_safety(safe_path, safety_weight)
+        lam = crash_lambda(w)
+        best_ids = self._search(origin, destination, depart_at, lam, view)
+        best = self.evaluate(best_ids, origin, destination, depart_at, w, view)
 
-        naive_ids = self._search(origin, destination, depart_at, lam, live, blind=True)
-        naive = self.evaluate(naive_ids, origin, destination, depart_at, safe_path, live)
-        best.reasons = self._live_reasons(origin, destination, depart_at, lam, live, best) + self._reasons(
-            best, naive
+        naive_ids = self._search(origin, destination, depart_at, lam, view, blind=True)
+        naive = self.evaluate(naive_ids, origin, destination, depart_at, w, view)
+        best.reasons = _dedupe_live(
+            self._live_reasons(origin, destination, depart_at, lam, view, best) + self._reasons(best, naive, view)
         )
-        best.reasons = _dedupe_live(best.reasons)
 
         alt = None
         alt_ids = self._search(
-            origin, destination, depart_at, lam, live, penalties={sid: ALT_PENALTY for sid in best_ids}
+            origin, destination, depart_at, lam, view, penalties={sid: ALT_PENALTY for sid in best_ids}
         )
         if alt_ids != best_ids:
-            alt = self.evaluate(alt_ids, origin, destination, depart_at, safe_path, live)
-            alt.reasons = self._reasons(alt, naive)
+            alt = self.evaluate(alt_ids, origin, destination, depart_at, w, view)
+            alt.reasons = _dedupe_live(self._reasons(alt, naive, view))
         return best, alt
+
+    # --- explanations ---------------------------------------------------------------------
 
     def _live_reasons(
         self,
@@ -287,22 +420,49 @@ class Router:
         destination: str,
         depart_at: datetime,
         lam: float,
-        live: list[TrainEvent],
+        view: ConditionsView,
         chosen: Route,
     ) -> list[str]:
-        """If a live blockage changed our pick, say which crossing we routed around."""
-        if not live:
+        """If live data changed our pick, say what we routed around and where the data came from."""
+        if not view.has_live:
             return []
-        usual_ids = self._search(origin, destination, depart_at, lam, [])
+        try:
+            usual_ids = self._search(origin, destination, depart_at, lam, view.without_live())
+        except NoRouteError:
+            return []
         if usual_ids == chosen.segment_ids:
             return []
-        usual = self.evaluate(usual_ids, origin, destination, depart_at, chosen.safe_path, live)
+        usual = self.evaluate(usual_ids, origin, destination, depart_at, chosen.safety_weight, view)
+        on_route = set(chosen.segment_ids)
         chosen_crossings = {c.id for c in chosen.crossings}
-        return [
-            f"Rerouted around {c.name}: blocked by a train right now (~{c.expected_delay_s / 60:.0f} min wait)"
-            for c in usual.crossings
-            if c.live and c.id not in chosen_crossings
-        ]
+        now = view.now
+        out = []
+        for c in usual.crossings:
+            if c.live and c.block_probability >= 1.0 and c.id not in chosen_crossings:
+                note = "" if c.sensor_up is not False else "; sensor down, low confidence"
+                out.append(
+                    f"Rerouted around {c.name}: blocked by a train right now "
+                    f"(~{c.expected_delay_s / 60:.0f} min wait; {_provenance(c.source, c.updated_at, now)}{note})"
+                )
+        for s in usual.segments:
+            if s.id in on_route:
+                continue
+            if s.closed and s.incident:
+                out.append(
+                    f"Rerouted around {s.name}: closed ({s.incident.title}; "
+                    f"{_provenance(s.incident.source, s.incident.updated_at, now)})"
+                )
+            elif s.incident:
+                out.append(
+                    f"Rerouted around {s.name}: {s.incident.kind} reported "
+                    f"({_provenance(s.incident.source, s.incident.updated_at, now)})"
+                )
+            elif s.live_weight >= 0.3 and s.congestion - s.predicted_congestion >= LIVE_REASON_EXTRA:
+                out.append(
+                    f"Rerouted around {s.name}: heavier traffic than usual right now "
+                    f"({_provenance(s.congestion_source, s.live_updated_at, now)})"
+                )
+        return list(dict.fromkeys(out))
 
     @staticmethod
     def _skipped_stretches(naive: Route, on_route: set[str]) -> list[list[SegmentOnRoute]]:
@@ -325,19 +485,25 @@ class Router:
         name = self.network.nodes[seg.from_node if end == "from" else seg.to_node].name
         return name.removeprefix(f"{seg.name} @ ")
 
-    def _reasons(self, chosen: Route, naive: Route) -> list[str]:
+    def _reasons(self, chosen: Route, naive: Route, view: ConditionsView) -> list[str]:
         reasons: list[str] = []
         on_route = set(chosen.segment_ids)
         chosen_crossings = {c.id for c in chosen.crossings}
+        now = view.now
 
         # Hazards the traffic-only route would have hit.
         if naive.segment_ids != chosen.segment_ids:
             for c in naive.crossings:
-                if c.id not in chosen_crossings and (c.live or c.block_probability >= TRAIN_REASON_P):
-                    what = "blocked by a train right now" if c.live else (
-                        f"{c.block_probability:.0%} chance of a train around {_fmt(c.arrive_at)}"
+                if c.id in chosen_crossings:
+                    continue
+                if c.live and c.block_probability >= 1.0:
+                    reasons.append(
+                        f"Avoided {c.name}: blocked by a train right now ({_provenance(c.source, c.updated_at, now)})"
                     )
-                    reasons.append(f"Avoided {c.name}: {what}")
+                elif not c.live and c.block_probability >= TRAIN_REASON_P:
+                    reasons.append(
+                        f"Avoided {c.name}: {c.block_probability:.0%} chance of a train around {_fmt(c.arrive_at)}"
+                    )
             chosen_roads = {s.name for s in chosen.segments}
             for stretch in self._skipped_stretches(naive, on_route):
                 first = stretch[0]
@@ -345,39 +511,68 @@ class Router:
                 if first.name in chosen_roads:  # we still drive part of it: name the stretch
                     where = f"{first.name} from {self._place(stretch[0].id, 'from')} to {self._place(stretch[-1].id, 'to')}"
                 risk = max(s.crash_risk for s in stretch)
-                jam = max(s.congestion for s in stretch)
+                jam = max(stretch, key=lambda s: s.congestion)
                 if chosen.safe_path and risk >= CRASH_REASON_RISK:
                     reasons.append(f"Avoided {where}: crash risk {risk:.0%} around {_fmt(first.enter_at)}")
-                elif jam >= CONGESTION_REASON_SCORE:
-                    reasons.append(f"Avoided {where}: heavy congestion expected around {_fmt(first.enter_at)}")
+                elif jam.congestion >= CONGESTION_REASON_SCORE:
+                    if jam.live_weight >= 0.3:
+                        src = _provenance(jam.congestion_source, jam.live_updated_at, now)
+                        reasons.append(f"Avoided {where}: heavy traffic right now ({src})")
+                    else:
+                        reasons.append(f"Avoided {where}: heavy congestion expected around {_fmt(first.enter_at)}")
             saved = (naive.arrive_at - chosen.arrive_at).total_seconds() / 60
             if saved >= 1:
                 reasons.append(f"About {saved:.0f} min faster than a traffic-only route")
-            if chosen.safe_path and naive.crash_exposure > 0:
+            if chosen.safety_weight > 0 and naive.crash_exposure > 0:
                 drop = 1 - chosen.crash_exposure / naive.crash_exposure
                 if drop >= SAFE_REASON_MIN_DROP:
                     extra = f" for +{-saved:.0f} min" if saved <= -1 else ""
-                    reasons.append(f"Safe Path: {drop:.0%} less crash exposure than the traffic-only route{extra}")
+                    label = "Safe Path" if chosen.safe_path else "Safety setting"
+                    reasons.append(f"{label}: {drop:.0%} less crash exposure than the traffic-only route{extra}")
 
         # Heads-ups on the chosen route itself.
         for c in chosen.crossings:
-            if c.live:
-                reasons.append(f"{c.name} is blocked right now (+{c.expected_delay_s / 60:.0f} min)")
-            elif c.block_probability >= TRAIN_REASON_P:
+            low = " (sensor down, low confidence)" if c.sensor_up is False else ""
+            if c.live and c.block_probability >= 1.0:
+                reasons.append(
+                    f"{c.name} is blocked right now (+{c.expected_delay_s / 60:.0f} min; "
+                    f"{_provenance(c.source, c.updated_at, now)}){low}"
+                )
+            elif not c.live and c.block_probability >= TRAIN_REASON_P:
                 reasons.append(
                     f"Heads up: {c.block_probability:.0%} chance of a train at {c.name} around "
-                    f"{_fmt(c.arrive_at)} (~{c.expected_delay_s / 60:.0f} min expected)"
+                    f"{_fmt(c.arrive_at)} (~{c.expected_delay_s / 60:.0f} min expected){low}"
                 )
-        worst: dict[str, float] = {}
+        seen_incidents: set[str] = set()
+        for s in chosen.segments:
+            inc = s.incident
+            if inc and inc.id not in seen_incidents:
+                seen_incidents.add(inc.id)
+                extra = s.travel_s * (1 - 1 / s.incident_slowdown) / 60
+                reasons.append(
+                    f"Heads up: {inc.kind} on {s.name} ({_provenance(inc.source, inc.updated_at, now)}), "
+                    f"about +{max(1, round(extra))} min"
+                )
+            elif not inc and s.live_weight >= 0.3 and s.congestion - s.predicted_congestion >= LIVE_REASON_EXTRA:
+                reasons.append(
+                    f"Heads up: {s.name} is slower than usual right now "
+                    f"({_provenance(s.congestion_source, s.live_updated_at, now)})"
+                )
+        worst_crash: dict[str, float] = {}
         for s in chosen.segments:
             if s.crash_risk >= CRASH_REASON_RISK and s.road_class == "freeway":
-                worst[s.name] = max(worst.get(s.name, 0.0), s.crash_risk)
-        for name, risk in worst.items():
+                worst_crash[s.name] = max(worst_crash.get(s.name, 0.0), s.crash_risk)
+        for name, risk in worst_crash.items():
             reasons.append(f"Heads up: elevated crash risk on {name} ({risk:.0%})")
 
-        seen, unique = set(), []
-        for r in reasons:
-            if r not in seen:
-                seen.add(r)
-                unique.append(r)
-        return unique[:6]
+        # Missing live feeds go first so the reason cap never hides them.
+        notes = []
+        soon = chosen.depart_at - now <= LIVE_WINDOW
+        if soon and "trains" in chosen.feeds_down and chosen.crossings:
+            notes.append("Live train data is unavailable right now; crossing waits are predictions")
+        if soon and "traffic" in chosen.feeds_down:
+            notes.append("Live traffic data is unavailable right now; using predicted traffic")
+        if soon and "incidents" in chosen.feeds_down:
+            notes.append("Incident feed is unavailable right now; crashes and closures may be missing")
+
+        return list(dict.fromkeys(notes + reasons))

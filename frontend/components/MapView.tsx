@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { fmtTime, pct, scoreColor } from "@/lib/format";
-import type { Camera, Crossing, LatLngTuple, Place, Route, Segment } from "@/lib/types";
+import type { Camera, Crossing, LatLngTuple, LiveIncident, Place, Route, Segment, SegmentIncident } from "@/lib/types";
 
 export const HOUSTON_CENTER: LatLngTuple = [29.7604, -95.3698];
 
@@ -13,14 +13,27 @@ export interface Layers {
   congestion: boolean;
   crash: boolean;
   trains: boolean;
+  incidents: boolean;
   cameras: boolean;
 }
+
+const INCIDENT_ICON: Record<string, string> = {
+  crash: "💥",
+  closure: "⛔",
+  roadwork: "🚧",
+  stall: "🚗",
+  hazard: "⚠️",
+  other: "⚠️",
+};
 
 export interface MapViewProps {
   segments: Segment[];
   congestion: Record<string, number>;
   crashRisk: Record<string, number>;
   crossings: Crossing[];
+  incidents: LiveIncident[];
+  /** Segments slowed or closed by an incident right now (from /scores/congestion). */
+  incidentSegments: Record<string, SegmentIncident>;
   cameras: Camera[];
   places: Place[];
   route: Route | null;
@@ -127,6 +140,27 @@ export default function MapView(p: MapViewProps) {
             );
           })}
 
+      {/* Roads hit by an incident: black dashes = closed, orange = slowed */}
+      {p.layers.incidents &&
+        p.segments
+          .filter((s) => p.incidentSegments[s.id])
+          .map((s) => {
+            const inc = p.incidentSegments[s.id];
+            return (
+              <Polyline
+                key={`i-${s.id}`}
+                positions={offsetLine(s.geometry)}
+                pathOptions={{ color: inc.closed ? "#111827" : "#ea580c", weight: 7, opacity: 0.9, dashArray: "6 6" }}
+              >
+                <Tooltip sticky>
+                  <span className="text-xs">
+                    {inc.title}: {inc.closed ? "closed" : `about ${inc.slowdown}x slower`}
+                  </span>
+                </Tooltip>
+              </Polyline>
+            );
+          })}
+
       {/* Alternative route (dimmed) and chosen route */}
       {p.showAlternative && p.alternative && (
         <Polyline
@@ -168,11 +202,41 @@ export default function MapView(p: MapViewProps) {
                     {pct(c.block_probability)} chance of a train · ~{c.expected_delay_min} min expected
                   </div>
                 )}
-                <div className="text-slate-500">{c.rail_line} line</div>
+                <div className="text-slate-500">
+                  {c.rail_line} line
+                  {c.sensor === "DOWN" ? " · sensor down, low confidence" : c.sensor === "UP" ? " · live sensor" : ""}
+                </div>
               </div>
             </Tooltip>
           </CircleMarker>
         ))}
+
+      {/* Live incidents */}
+      {p.layers.incidents &&
+        p.incidents
+          .filter((i) => i.lat != null && i.lng != null)
+          .map((i) => (
+            <CircleMarker
+              key={`inc-${i.id}`}
+              center={[i.lat as number, i.lng as number]}
+              radius={9}
+              bubblingMouseEvents={false}
+              pathOptions={{ color: "#ffffff", weight: 2, fillColor: i.kind === "closure" ? "#111827" : "#ea580c", fillOpacity: 1 }}
+            >
+              <Tooltip direction="top">
+                <div className="text-xs">
+                  <div className="font-semibold">
+                    {INCIDENT_ICON[i.kind] ?? "⚠️"} {i.title}
+                  </div>
+                  {i.detail && <div>{i.detail}</div>}
+                  <div className="text-slate-500">
+                    {i.source} · since {fmtTime(i.started_at)}
+                    {i.clears_at ? ` · expected clear ${fmtTime(i.clears_at)}` : ""}
+                  </div>
+                </div>
+              </Tooltip>
+            </CircleMarker>
+          ))}
 
       {/* Cameras */}
       {p.layers.cameras &&

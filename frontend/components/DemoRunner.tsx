@@ -7,10 +7,13 @@ export interface DemoActions {
   setClock: (hhmm: string) => Promise<void>;
   /** Point the map (not the clock) at a time of day; null = follow the clock. */
   showMapAt: (hhmm: string | null) => Promise<void>;
-  plan: (origin: string, destination: string, arriveBy: string, safe: boolean) => Promise<void>;
+  /** safetyWeight: 0 = fastest .. 1 = safest (the Faster / Safer slider) */
+  plan: (origin: string, destination: string, arriveBy: string, safetyWeight: number) => Promise<void>;
   saveTrip: () => Promise<void>;
   block: (crossingId: string, minutes: number) => Promise<void>;
   clearBlockages: () => Promise<void>;
+  incident: (segmentId: string, kind: string, title: string) => Promise<void>;
+  clearLive: () => Promise<void>;
 }
 
 interface Step {
@@ -34,7 +37,7 @@ const STEPS: Step[] = [
     narration:
       "A traffic-only app sends you down Cullen Blvd. A freight train crosses there almost every weekday around 7:40, so we route around it and tell you exactly when to leave.",
     run: async (a) => {
-      await a.plan("eastend", "medcenter", "08:00", false);
+      await a.plan("eastend", "medcenter", "08:00", 0);
       await a.showMapAt("07:40"); // show crossing predictions when you'd reach them
     },
   },
@@ -49,7 +52,7 @@ const STEPS: Step[] = [
     run: async (a) => {
       await a.showMapAt(null);
       await a.block("x_ost", 60);
-      await a.plan("eastend", "medcenter", "08:00", false);
+      await a.plan("eastend", "medcenter", "08:00", 0);
     },
   },
   {
@@ -61,16 +64,26 @@ const STEPS: Step[] = [
     title: "Evening: Downtown → Hobby Airport by 5:45",
     narration: "The fastest way is the I-45 Gulf Freeway, one of the most crash-prone stretches in our data at rush hour.",
     run: async (a) => {
-      await a.clearBlockages();
+      await a.clearLive();
       await a.setClock("16:40");
-      await a.plan("downtown", "hobby", "17:45", false);
+      await a.plan("downtown", "hobby", "17:45", 0);
       await a.showMapAt("17:15");
     },
   },
   {
-    title: "Flip on Safe Path 🛡️",
-    narration: "Safe Path trades a few minutes for a route that skips the crash-prone stretch of the Gulf Freeway.",
-    run: (a) => a.plan("downtown", "hobby", "17:45", true),
+    title: "Slide toward Safer 🛡️",
+    narration: "The Faster ↔ Safer slider trades a few minutes for a route that skips the crash-prone stretch of the Gulf Freeway.",
+    run: (a) => a.plan("downtown", "hobby", "17:45", 1),
+  },
+  {
+    title: "Live: a crash is reported on the Gulf Freeway",
+    narration:
+      "Even on Fastest, live reports beat predictions: a crash blocking two lanes on I-45 reroutes you, and the app says where that came from and how old it is.",
+    run: async (a) => {
+      await a.showMapAt(null);
+      await a.incident("I45S:gulf_ee>i45_610s", "crash", "Crash on I-45 Gulf Fwy at Telephone Rd");
+      await a.plan("downtown", "hobby", "17:45", 0);
+    },
   },
   {
     title: "That's the idea",
@@ -111,7 +124,9 @@ export default function DemoRunner({ actions, onExit }: { actions: DemoActions; 
       </div>
       <h3 className="mt-1 text-lg font-semibold">{step ? step.title : "Scripted demo"}</h3>
       <p className="mt-1 text-sm text-slate-300">
-        {step ? step.narration : "Walks through a Monday commute: predicted trains, a live blockage, the leave-now alert and Safe Path."}
+        {step
+          ? step.narration
+          : "Walks through a Monday commute: predicted trains, a live blockage, the leave-now alert, the safety slider and a live crash."}
       </p>
       {error && <p className="mt-2 rounded bg-red-900/60 p-2 text-sm">Backend error: {error}. Is the API running on :8000?</p>}
       <div className="mt-3 flex justify-end gap-2">

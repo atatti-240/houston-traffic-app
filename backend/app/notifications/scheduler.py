@@ -1,4 +1,9 @@
-"""Re-checks saved trips on every clock tick and sends plan / leave-earlier / leave-now alerts."""
+"""Re-checks saved trips and watched multi-stop plans on every clock tick.
+
+Trips (single leg, every chosen weekday): plan / leave earlier / leave later / reroute / leave now.
+Watched plans (POST /plan with watch=true): re-planned every 5 min until the first leg starts;
+alert on a new stop order or a first departure that moved >= 5 min, then "leave now" per leg.
+"""
 
 import logging
 from datetime import datetime, time, timedelta
@@ -6,13 +11,16 @@ from datetime import datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import Notification, Trip, TripState
+from app.models import Notification, SavedPlan, Trip, TripState
 from app.notifications.service import NotificationService
+from app.plan_io import plan_to_json, request_from_json
+from app.planner import plan_trip
 from app.recommender import Recommendation, recommend_departure, route_summary
 from app.routing.router import Router
 
 LOOKAHEAD = timedelta(hours=3)  # start watching a trip this long before its arrive-by time
 SHIFT_ALERT = timedelta(minutes=5)
+REPLAN_EVERY = timedelta(minutes=5)
 
 log = logging.getLogger("houston.scheduler")
 
@@ -33,7 +41,9 @@ class TripScheduler:
         self.router = router
         self.notifier = notifier
 
-    def tick(self, now: datetime) -> list[Notification]:
+    def tick(self, now: datetime, replan_now: bool = False) -> list[Notification]:
+        """replan_now: re-plan watched plans even if they were planned < 5 min ago (live
+        conditions just changed)."""
         sent: list[Notification] = []
         with self.session_factory() as session:
             trip_ids = list(session.scalars(select(Trip.id)))
@@ -48,7 +58,81 @@ class TripScheduler:
                     continue
                 if n:
                     sent.append(n)
+            plan_ids = list(session.scalars(select(SavedPlan.id).where(SavedPlan.watch, ~SavedPlan.done)))
+            for plan_id in plan_ids:
+                try:
+                    notes = self._check_plan(session, session.get(SavedPlan, plan_id), now, replan_now)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    log.exception("scheduler: skipping plan %s", plan_id)
+                    continue
+                sent.extend(notes)
         return sent
+
+    # --- watched multi-stop plans -------------------------------------------------------------
+
+    def _check_plan(self, session: Session, sp: SavedPlan, now: datetime, replan_now: bool = False) -> list[Notification]:
+        notes: list[Notification] = []
+        sent = set(sp.leave_now_sent or [])
+        result = sp.result_json
+
+        def note(kind: str, title: str, body: str) -> None:
+            notes.append(self.notifier.send(session, None, kind, title, body.strip(), now, plan_id=sp.id))
+
+        if not sp.announced:
+            leg0 = result["legs"][0]
+            leave = datetime.fromisoformat(leg0["leave_at"])
+            if leave > now:  # when it's already time to go, "leave now" below says so
+                note(
+                    "plan",
+                    f"{sp.name}: leave at {_fmt(leave)}",
+                    f"Stops: {' → '.join(result['order'])}. {(leg0['why'] or [''])[0]}",
+                )
+            sp.announced = True
+
+        # Re-plan until the trip starts; after that the legs are what the user is driving.
+        if 0 not in sent and (replan_now or now - sp.last_planned_at >= REPLAN_EVERY):
+            start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
+            plan = plan_trip(self.router, start, stops, max(depart_after, now), now, weight, buffer_min=buffer_min)
+            new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
+            old_leave = datetime.fromisoformat(result["legs"][0]["leave_at"])
+            new_leave = datetime.fromisoformat(new["legs"][0]["leave_at"])
+            why = (new["legs"][0]["why"] or [""])[0]
+            if new["order"] != result["order"]:
+                note(
+                    "order_changed",
+                    f"New stop order for {sp.name}",
+                    f"{' → '.join(new['order'])}; leave at {_fmt(new_leave)}. {why}",
+                )
+            elif old_leave <= now:
+                pass  # the old departure already came up; "leave now" below covers it
+            elif new_leave <= old_leave - SHIFT_ALERT:
+                minutes = (old_leave - new_leave).total_seconds() / 60
+                note("leave_earlier", f"Leave {minutes:.0f} min earlier for {sp.name}", f"New departure {_fmt(new_leave)}. {why}")
+            elif new_leave >= old_leave + 2 * SHIFT_ALERT:
+                minutes = (new_leave - old_leave).total_seconds() / 60
+                note("leave_later", f"You can leave {minutes:.0f} min later for {sp.name}", f"New departure {_fmt(new_leave)}.")
+            sp.result_json = result = new
+            sp.last_planned_at = now
+
+        # "Leave now" for the next leg that is due.
+        legs = result["legs"]
+        for i, leg in enumerate(legs):
+            if i in sent:
+                continue
+            if now >= datetime.fromisoformat(leg["leave_at"]):
+                eta = datetime.fromisoformat(leg["arrive_at"])
+                title = f"Leave now for {leg['to']}"
+                if leg["late_min"] > 0:
+                    title = f"Leave now, you're running late for {leg['to']}"
+                note("leave_now", title, f"Take {leg['summary']}. ETA {_fmt(eta)}. {(leg['why'] or [''])[0]}")
+                sent.add(i)
+            break
+        sp.leave_now_sent = sorted(sent)
+        if len(sent) == len(legs) and now >= datetime.fromisoformat(legs[-1]["arrive_at"]):
+            sp.done = True
+        return notes
 
     @staticmethod
     def _watched_arrival(trip: Trip, now: datetime) -> datetime | None:
@@ -76,7 +160,7 @@ class TripScheduler:
 
         # Never recommend a departure that has already passed.
         rec = recommend_departure(
-            self.router, trip.origin, trip.destination, arrive_by, trip.safe_path, earliest=now
+            self.router, trip.origin, trip.destination, arrive_by, earliest=now, safety_weight=trip.weight
         )
         reason = _top_reason(rec)
         summary = route_summary(rec.route)

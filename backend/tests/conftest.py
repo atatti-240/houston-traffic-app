@@ -66,7 +66,7 @@ def services(trained):
     with factory() as s:
         seed_network(s)
         models.store.save(s)
-    sources.trains.clear_injected()
+    sources.clear_demo_live()
     svc = Services(factory, clock=SimClock(datetime(2026, 9, 28, 6, 0), speed=0), sources=sources)
     yield svc
-    sources.trains.clear_injected()
+    sources.clear_demo_live()

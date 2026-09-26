@@ -9,6 +9,7 @@ const ICON: Record<AppNotification["kind"], string> = {
   leave_earlier: "⏰",
   leave_later: "😌",
   reroute: "🔀",
+  order_changed: "🔁",
   info: "ℹ️",
 };
 
@@ -18,6 +19,7 @@ const TONE: Record<AppNotification["kind"], string> = {
   leave_earlier: "border-amber-500",
   leave_later: "border-slate-400",
   reroute: "border-violet-600",
+  order_changed: "border-violet-600",
   info: "border-slate-400",
 };
 

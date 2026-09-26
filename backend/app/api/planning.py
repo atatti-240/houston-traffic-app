@@ -19,7 +19,9 @@ router = APIRouter(tags=["planning"])
 def route(req: RouteRequest, svc: Services = Depends(get_services)):
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     try:
-        best, alt = svc.router.route(o, d, resolve_time(svc, req.depart_at), req.safe_path)
+        best, alt = svc.router.route(
+            o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight
+        )
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
     return {"best": route_json(best), "alternative": route_json(alt)}
@@ -35,7 +37,9 @@ def recommend(req: RecommendRequest, svc: Services = Depends(get_services)):
     try:
         # earliest=now: never suggest leaving in the past. A deadline that already passed
         # comes back as "leave now" with on_time=False.
-        rec = recommend_departure(svc.router, o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now)
+        rec = recommend_departure(
+            svc.router, o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now, safety_weight=req.safety_weight
+        )
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
     return recommendation_json(rec)
@@ -50,6 +54,7 @@ def _trip_json(t: Trip) -> dict:
         "arrive_by": t.arrive_by,
         "days": t.day_list,
         "safe_path": t.safe_path,
+        "safety_weight": t.weight,
         "device_id": t.device_id,
     }
 
@@ -66,6 +71,7 @@ def create_trip(body: TripIn, svc: Services = Depends(get_services)):
             arrive_by=body.arrive_by,
             days=",".join(str(d) for d in sorted(set(body.days))),
             safe_path=body.safe_path,
+            safety_weight=body.safety_weight,
             device_id=body.device_id,
         )
         s.add(trip)
@@ -94,6 +100,7 @@ def notification_json(n: Notification) -> dict:
     return {
         "id": n.id,
         "trip_id": n.trip_id,
+        "plan_id": n.plan_id,
         "created_at": n.created_at,
         "kind": n.kind,
         "title": n.title,
