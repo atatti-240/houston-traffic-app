@@ -91,7 +91,7 @@ lambda_crash = 30 + safety_weight * (600 - 30)  s/mile   # slider: 0 = fastest, 
 A closed road is a wait: the route reaches it, waits for the closure to clear, then drives it (like a blocked crossing), so the search waits or goes around, whichever is cheaper.
 
 It returns the best route, one alternative (found by penalizing edges of the best route), a breakdown (base travel, train delay, crash exposure) and human-readable "why" reasons. To explain its choice, it also computes:
-- a **traffic-only route** (congestion-aware but blind to trains and crash risk, roughly what a typical nav app picks). Hazards on it that the chosen route skips become "Avoided X: 72% chance of a train around 7:38 AM".
+- a **traffic-only route** (congestion-aware but blind to trains and crash risk, roughly what a typical nav app picks; it sees closures but not train waits). Hazards on it that the chosen route skips become "Avoided X: 72% chance of a train around 7:38 AM".
 - when live data is in play, the route it *would* have picked on predictions alone. Roads it skips because of live data become "Rerouted around X: crash reported (demo feed, just now)" or "heavier traffic than usual right now (traffic camera, 2 min ago)".
 - when a feed is down, a first bullet saying the route is running on predictions.
 
@@ -104,8 +104,8 @@ It returns the best route, one alternative (found by penalizing edges of the bes
    - `leave_earlier` if the recommended departure moved ≥5 minutes earlier
    - `leave_later` if it moved ≥10 minutes later
    - `reroute` if the departure time held but the route changed (e.g. a live train)
-   - `leave_now` once, when `now >= departure`
-4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. A plan is marked done after the last arrival. A plan you never started whose windows have all closed gets one `info` "Missed" alert instead.
+   - `leave_now` once, when `now >= departure`. If a closed road means the best departure comes after the arrive-by time (leaving later arrives just as soon), the trip stays watched past arrive-by until that "leave now" goes out. When the trip can't be on time, the plan alert gives the ETA and how late it will be.
+4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. A plan is marked done after the last arrival. A plan you never started whose windows have all closed, and whose planned departure has passed, gets one `info` "Missed" alert instead. Re-plans keep the current stop order unless another is clearly better (on lateness, or by 3+ min), so the order doesn't flip-flop.
 5. The frontend polls `/notifications`, shows toasts, and uses web push when available.
 
 ## Data model (SQLite via SQLAlchemy)
