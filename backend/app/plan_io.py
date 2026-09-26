@@ -188,6 +188,7 @@ def plan_to_json(plan: Plan, plan_id: str, created_at: datetime | None = None, w
         "planned_at": iso(plan.now),
         "status": plan.status,
         "order": plan.order_names,
+        "order_index": plan.order_index,  # positions in the request's stops (names can repeat)
         "legs": legs,
         "late_stops": [{"name": leg.to.name, "late_min": round(leg.late_min)} for leg in plan.late_stops],
         "baseline": {

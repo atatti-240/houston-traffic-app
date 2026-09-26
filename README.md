@@ -97,7 +97,7 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 
 ## Status
 
-- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 110 backend tests
+- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 143 backend tests
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), multi-stop planner UI, OSM road graph, real web push, computer vision on camera feeds

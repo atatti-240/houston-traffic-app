@@ -23,12 +23,44 @@ from app.routing.router import Router
 LOOKAHEAD = timedelta(hours=3)  # start watching a trip this long before its arrive-by time
 SHIFT_ALERT = timedelta(minutes=5)
 REPLAN_EVERY = timedelta(minutes=5)
+DEFERRED_WATCH = timedelta(days=1)  # keep watching a trip past arrive-by this long for a deferred "leave now"
 
 log = logging.getLogger("houston.scheduler")
 
 
 def _fmt(t: datetime) -> str:
     return t.strftime("%-I:%M %p")
+
+
+def _arrival_text(rec: Recommendation, arrive_by: datetime) -> str:
+    if rec.on_time:
+        return f"Arrive by {_fmt(arrive_by)}"
+    if rec.eta <= arrive_by:
+        return f"ETA {_fmt(rec.eta)}, less than {rec.buffer_min} min to spare,"
+    late = max(1, round((rec.eta - arrive_by).total_seconds() / 60))
+    return f"ETA {_fmt(rec.eta)}, about {late} min after {_fmt(arrive_by)},"
+
+
+def _current_order(result: dict, stops) -> list[int] | None:
+    """The stored order as positions in the request's stops. Plans saved before
+    order_index existed: match names to the first unused stop with that name."""
+    if "order_index" in result:
+        return result["order_index"]
+    order, used = [], set()
+    for name in result["order"]:
+        i = next((i for i, s in enumerate(stops) if i not in used and s.place.name == name), None)
+        if i is None:
+            return None
+        used.add(i)
+        order.append(i)
+    return order
+
+
+def _order_changed(new: dict, old: dict) -> bool:
+    # Positions in the request's stops, since two stops can share a name.
+    if "order_index" in old and "order_index" in new:
+        return new["order_index"] != old["order_index"]
+    return new["order"] != old["order"]
 
 
 def _top_reason(rec: Recommendation) -> str:
@@ -82,11 +114,14 @@ class TripScheduler:
         def note(kind: str, title: str, body: str) -> None:
             notes.append(self.notifier.send(session, None, kind, title, body.strip(), now, plan_id=sp.id))
 
-        # Never left, and every stop's window has closed (e.g. the clock jumped a day): stop
-        # watching instead of re-planning into stale "running late" alerts. Stops without an
-        # end time can still be done, and once you've left the legs play out as planned.
+        # Never left, every stop's window has closed and the planned departure has passed too
+        # (e.g. the clock jumped a day): stop watching instead of re-planning into stale
+        # "running late" alerts. A plan that's late but hasn't reached its departure still
+        # gets its "leave now"; stops without an end time can still be done; and once you've
+        # left, the legs play out as planned.
         ends = [leg["window"]["end"] for leg in result["legs"]]
-        if 0 not in sent and all(ends) and now > max(map(datetime.fromisoformat, ends)):
+        windows_closed = all(ends) and now > max(map(datetime.fromisoformat, ends))
+        if 0 not in sent and windows_closed and now > datetime.fromisoformat(result["legs"][0]["leave_at"]):
             note("info", f"Missed: {sp.name}", "Its time windows have passed, so it's no longer being watched.")
             sp.done = True
             return notes
@@ -110,21 +145,26 @@ class TripScheduler:
         if 0 not in sent and not (due and sp.held) and (replan_now or due or now - sp.last_planned_at >= REPLAN_EVERY):
             try:
                 start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
-                plan = plan_trip(self.router, start, stops, max(depart_after, now), now, weight, buffer_min=buffer_min)
+                plan = plan_trip(
+                    self.router, start, stops, max(depart_after, now), now, weight,
+                    buffer_min=buffer_min, prefer_order=_current_order(result, stops),
+                )
                 new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
             except Exception:
                 # Keep the last good plan (and its "leave now" alerts); retry next tick.
                 log.warning("scheduler: re-planning %s failed; keeping the last plan", sp.id, exc_info=True)
-        if new is not None and sp.held and new["legs"][0]["leave_at"] > result["legs"][0]["leave_at"]:
-            # After a "Hold on" the departure only moves earlier; otherwise a closure with no
-            # known end would push it back forever and "leave now" would never come.
+        frozen = sp.held or windows_closed
+        if new is not None and frozen and new["legs"][0]["leave_at"] > result["legs"][0]["leave_at"]:
+            # After a "Hold on", or once every window has closed, the departure only moves
+            # earlier; otherwise a closure with no known end would push it back forever, and
+            # neither "leave now" nor "Missed" would ever come.
             new = None
             sp.last_planned_at = now
         if new is not None:
             old_leave = datetime.fromisoformat(result["legs"][0]["leave_at"])
             new_leave = datetime.fromisoformat(new["legs"][0]["leave_at"])
             why = (new["legs"][0]["why"] or [""])[0]
-            if new["order"] != result["order"]:
+            if _order_changed(new, result):
                 note(
                     "order_changed",
                     f"New stop order for {sp.name}",
@@ -174,8 +214,25 @@ class TripScheduler:
                 return arrive_by
         return None
 
+    @staticmethod
+    def _deferred_arrival(session: Session, trip: Trip, now: datetime) -> datetime | None:
+        """An arrive-by that already passed (within a day) but whose "leave now" is still to
+        come, because the departure was put at or after it (a closed road: leaving later
+        arrives just as soon)."""
+        hh, mm = map(int, trip.arrive_by.split(":"))
+        for offset in (0, -1):
+            arrive_by = datetime.combine(now.date() + timedelta(days=offset), time(hh, mm))
+            if arrive_by.weekday() not in trip.day_list or not (arrive_by <= now < arrive_by + DEFERRED_WATCH):
+                continue
+            state = session.scalar(
+                select(TripState).where(TripState.trip_id == trip.id, TripState.day == arrive_by.date())
+            )
+            if state and not state.leave_now_sent and state.last_departure and state.last_departure >= arrive_by:
+                return arrive_by
+        return None
+
     def _check_trip(self, session: Session, trip: Trip, now: datetime) -> Notification | None:
-        arrive_by = self._watched_arrival(trip, now)
+        arrive_by = self._watched_arrival(trip, now) or self._deferred_arrival(session, trip, now)
         if arrive_by is None:
             return None
 
@@ -214,7 +271,7 @@ class TripScheduler:
                 trip,
                 "plan",
                 f"{trip.name}: leave at {_fmt(rec.depart_at)}",
-                f"Arrive by {_fmt(arrive_by)} via {summary}. {reason}".strip(),
+                f"{_arrival_text(rec, arrive_by)} via {summary}. {reason}".strip(),
                 now,
             )
         elif rec.depart_at <= state.last_departure - SHIFT_ALERT:
