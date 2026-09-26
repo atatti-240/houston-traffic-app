@@ -57,18 +57,21 @@ def _windows(svc: Services, stops: list[StopIn], depart_after: datetime) -> list
         for i in passed_starts:
             ws, we = windows[i]
             windows[i] = (ws + DAY, we)
-    # Fixed-order stops are visited in typed order: an HH:MM window that would close before
-    # the previous fixed stop's window even opens is the next day's.
+    # Fixed-order stops are visited in typed order: an all-HH:MM window that would close
+    # before the previous fixed stop's window even opens is the next day's. (Only windows
+    # that close can be "before"; only windows that open set the floor; an ISO time pins
+    # the date.)
     prev_open = None
     for i, s in enumerate(stops):
-        ws, we = windows[i]
-        if not s.fixed_order or (ws is None and we is None):
+        if not s.fixed_order:
             continue
-        if prev_open is not None and (we or ws) < prev_open:
-            ws = ws + DAY if ws and is_clock_time(s.window_start) else ws
-            we = we + DAY if we and is_clock_time(s.window_end) else we
+        ws, we = windows[i]
+        all_clock = all(is_clock_time(t) for t in (s.window_start, s.window_end) if t)
+        if prev_open is not None and we is not None and we < prev_open and all_clock:
+            ws, we = (ws + DAY if ws else ws), we + DAY
             windows[i] = (ws, we)
-        prev_open = ws or we
+        if ws is not None:
+            prev_open = ws
     return windows
 
 

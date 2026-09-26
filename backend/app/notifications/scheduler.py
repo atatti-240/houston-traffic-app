@@ -41,6 +41,21 @@ def _arrival_text(rec: Recommendation, arrive_by: datetime) -> str:
     return f"ETA {_fmt(rec.eta)}, about {late} min after {_fmt(arrive_by)},"
 
 
+def _current_order(result: dict, stops) -> list[int] | None:
+    """The stored order as positions in the request's stops. Plans saved before
+    order_index existed: match names to the first unused stop with that name."""
+    if "order_index" in result:
+        return result["order_index"]
+    order, used = [], set()
+    for name in result["order"]:
+        i = next((i for i, s in enumerate(stops) if i not in used and s.place.name == name), None)
+        if i is None:
+            return None
+        used.add(i)
+        order.append(i)
+    return order
+
+
 def _order_changed(new: dict, old: dict) -> bool:
     # Positions in the request's stops, since two stops can share a name.
     if "order_index" in old and "order_index" in new:
@@ -132,7 +147,7 @@ class TripScheduler:
                 start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
                 plan = plan_trip(
                     self.router, start, stops, max(depart_after, now), now, weight,
-                    buffer_min=buffer_min, prefer_order=result.get("order_index"),
+                    buffer_min=buffer_min, prefer_order=_current_order(result, stops),
                 )
                 new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
             except Exception:

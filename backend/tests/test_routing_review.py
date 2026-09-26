@@ -572,3 +572,64 @@ def test_tight_trip_alert_does_not_say_late(client):
     client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": 49, "start": "2026-09-28T11:50:00"})
     plan_note = next(n for n in client.get("/notifications").json() if n["kind"] == "plan")
     assert "less than 5 min to spare" in plan_note["body"] and "after 12:45" not in plan_note["body"]
+
+
+# --- fifth review round -------------------------------------------------------------------------
+
+
+def test_skipping_a_closure_wait_never_makes_a_later_stop_late(client):
+    client.post("/demo/incident", json={"segment_id": HOBBY_ONLY_ROAD, "kind": "closure", "minutes": 25, "start": "2026-09-28T11:59:00"})
+    req = {
+        "start": {"place": "downtown"},
+        "buffer_min": 0,
+        "stops": [
+            {"place": "galleria", "fixed_order": True},
+            {"place": "hobby", "fixed_order": True},
+            {"place": "eastend", "fixed_order": True, "window_end": "2026-09-28T12:39:36"},
+        ],
+    }
+    assert client.post("/plan", json=req).json()["status"] == "ok"
+
+
+def test_plans_saved_before_order_index_keep_their_order(client, services):
+    from app.models import SavedPlan
+
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T11:30:00"})
+    plan = client.post("/plan", json={"name": "Errands", "start": {"place": "downtown"}, "depart_after": "12:00", "stops": [{"place": "galleria"}, {"place": "hobby"}], "watch": True}).json()
+    with services.session_factory() as s:  # as an older version stored it
+        sp = s.get(SavedPlan, plan["plan_id"])
+        sp.result_json = {k: v for k, v in sp.result_json.items() if k != "order_index"}
+        s.commit()
+    r = client.post("/demo/incident", json={"segment_id": "I69:midtown>i69_610sw", "kind": "crash", "minutes": 60, "start": "2026-09-28T11:30:00"}).json()
+    assert "order_changed" not in kinds(r["notifications"])
+    assert client.get(f"/plan/{plan['plan_id']}").json()["order"] == plan["order"]
+
+
+def test_fixed_order_windows_with_iso_times_are_taken_as_given(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T06:00:00"})
+    meeting = {"place": "medcenter", "window_start": "10:00", "window_end": "10:30", "fixed_order": True}
+    a = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [meeting, {"name": "Drop", "place": "galleria", "window_start": "08:00", "window_end": "2026-09-28T09:00:00", "fixed_order": True}]})
+    assert a.status_code == 201 and a.json()["status"] == "late"
+    b = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [meeting, {"name": "Drop", "place": "galleria", "window_start": "2026-09-28T08:00:00", "window_end": "09:00", "fixed_order": True}]}).json()
+    assert b["status"] == "late" and b["legs"][1]["window"]["end"] == "2026-09-28T09:00:00"
+
+
+def test_fixed_order_start_only_and_end_only_windows_stay_today(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T06:00:00"})
+    plan = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [
+        {"name": "School drop", "place": "medcenter", "window_start": "08:00", "window_end": "08:30", "fixed_order": True},
+        {"name": "Store", "place": "galleria", "window_start": "07:00", "fixed_order": True},
+    ]}).json()
+    assert plan["legs"][1]["window"]["start"] == "2026-09-28T07:00:00" and plan["legs"][1]["arrive_at"] < "2026-09-28T10:00"
+    deadlines = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [
+        {"name": "Bank", "place": "medcenter", "window_end": "12:00", "fixed_order": True},
+        {"name": "Post office", "place": "galleria", "window_end": "10:00", "fixed_order": True},
+    ]}).json()
+    assert deadlines["legs"][1]["window"]["end"] == "2026-09-28T10:00:00"
+
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T21:00:00"})
+    evening = client.post("/plan", json={"start": {"place": "downtown"}, "stops": [
+        {"name": "Pharmacy", "place": "medcenter", "window_end": "23:30", "fixed_order": True},
+        {"name": "Kid pickup", "place": "galleria", "window_start": "22:00", "window_end": "22:30", "fixed_order": True},
+    ]}).json()
+    assert evening["legs"][1]["window"]["start"] == "2026-09-28T22:00:00" and evening["status"] == "ok"
