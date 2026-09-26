@@ -123,15 +123,32 @@ def latest_same_arrival(
     step: timedelta = timedelta(minutes=STEP_MIN),
     slack: timedelta = timedelta(minutes=1),
 ) -> datetime:
-    """If leaving at depart_at means waiting at a closed road, the latest departure (in
-    `step`s) that still arrives within `slack` of that arrival; otherwise depart_at."""
+    """If leaving at depart_at means waiting at a closed road, the latest departure that
+    still arrives within `slack` of that arrival; otherwise depart_at."""
     r0 = router.best_route(origin, destination, depart_at, safety_weight=safety_weight, view=view)
-    best = depart_at
-    for k in range(1, int(r0.closure_wait_s // step.total_seconds()) + 1):
-        t = depart_at + step * k
-        if router.best_route(origin, destination, t, safety_weight=safety_weight, view=view).arrive_at <= r0.arrive_at + slack:
-            best = t
-    return best
+    return latest_departure_for(
+        lambda t: router.best_route(origin, destination, t, safety_weight=safety_weight, view=view),
+        r0,
+        depart_at,
+        step,
+        slack,
+    )
+
+
+def latest_departure_for(route_at, r0: Route, depart_at: datetime, step: timedelta, slack: timedelta) -> datetime:
+    """Scan down from r0's arrival in `step`s (on the clock's step marks) for the latest
+    departure that arrives no later than r0 + slack. Only when r0 waits at a closure: then
+    leaving later can arrive just as soon. A handful of probes (about the drive time / step)."""
+    if r0.closure_wait_s <= 0:
+        return depart_at
+    step_min = max(1, int(step.total_seconds() // 60))
+    t = r0.arrive_at.replace(second=0, microsecond=0)
+    t -= timedelta(minutes=t.minute % step_min)  # on the clock's step marks, so probes repeat
+    while t > depart_at:
+        if route_at(t).arrive_at <= r0.arrive_at + slack:
+            return t
+        t -= step
+    return depart_at
 
 
 def route_summary(route: Route) -> str:

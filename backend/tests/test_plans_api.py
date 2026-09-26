@@ -100,31 +100,31 @@ def test_watched_plan_alerts_reorder_leave_now_and_done(client):
         "name": "Errands",
         "start": {"place": "downtown"},
         "depart_after": "12:20",
-        "stops": [{"place": "galleria"}, {"place": "medcenter"}],
+        "stops": [{"place": "greenspoint"}, {"place": "hobby"}],
         "watch": True,
     }
     plan = client.post("/plan", json=req).json()
-    assert plan["order"] == ["Texas Medical Center", "Galleria / Uptown"]
+    assert plan["order"] == ["Hobby Airport", "Greenspoint"]
     assert kinds(plan["notifications"]) == ["plan"]
     assert plan["notifications"][0]["plan_id"] == plan["plan_id"]
 
-    # A closure right on the first leg: the watched plan is re-planned immediately.
-    r = client.post("/demo/incident", json={"segment_id": "I69:downtown>midtown", "kind": "closure", "minutes": 90}).json()
+    # The only road into Hobby closes for 90 min: re-planned immediately, Greenspoint first.
+    r = client.post("/demo/incident", json={"segment_id": "I45S:i45_610s>hobby", "kind": "closure", "minutes": 90}).json()
     assert kinds(r["notifications"]) == ["order_changed"]
     updated = client.get(f"/plan/{plan['plan_id']}").json()
-    assert updated["order"] == ["Galleria / Uptown", "Texas Medical Center"]
+    assert updated["order"] == ["Greenspoint", "Hobby Airport"]
     assert updated["created_at"] == plan["created_at"] == updated["planned_at"]  # same simulated minute
 
     leave0 = updated["legs"][0]["leave_at"]
     r = client.post("/demo/advance-clock", json={"to": leave0}).json()
     assert kinds(r["notifications"]) == ["leave_now"]
-    assert "Galleria" in r["notifications"][0]["title"]
+    assert "Greenspoint" in r["notifications"][0]["title"]
 
     leave1 = client.get(f"/plan/{plan['plan_id']}").json()["legs"][1]["leave_at"]
     r = client.post("/demo/advance-clock", json={"to": leave1}).json()
-    assert kinds(r["notifications"]) == ["leave_now"] and "Medical Center" in r["notifications"][0]["title"]
+    assert kinds(r["notifications"]) == ["leave_now"] and "Hobby" in r["notifications"][0]["title"]
 
-    client.post("/demo/advance-clock", json={"minutes": 90})
+    client.post("/demo/advance-clock", json={"minutes": 120})
     assert client.get(f"/plan/{plan['plan_id']}").json()["done"] is True
     assert client.post("/demo/advance-clock", json={"minutes": 30}).json()["notifications"] == []
 

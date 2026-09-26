@@ -32,7 +32,7 @@ from itertools import permutations
 
 from app.conditions.live import CONFIDENCE_RANK, Confidence
 from app.conditions.provider import ConditionsView
-from app.recommender import SAFE_MARGIN_MIN, route_confidence
+from app.recommender import SAFE_MARGIN_MIN, latest_departure_for, route_confidence
 from app.routing.router import Route, Router, resolve_safety
 
 MAX_STOPS = 3
@@ -45,6 +45,7 @@ WAIT_WEIGHT = 0.5
 DELAY_WEIGHT = 0.3
 FAR_SNAP_KM = 1.0
 CLOSURE_SLACK = timedelta(minutes=1)
+ORDER_SWITCH_MIN = 3.0  # a watched plan changes stop order only for at least this much gain
 
 
 @dataclass(frozen=True)
@@ -202,15 +203,10 @@ class _Planner:
         return ready
 
     def skip_closure_wait(self, frm: Place, stop: StopRequest, dep: datetime) -> datetime:
-        """If leaving at dep means waiting at a closed road, the latest departure (5-min
-        steps) that still arrives within a minute of it."""
+        """If leaving at dep means waiting at a closed road, the latest departure (on 5-min
+        marks) that still arrives within a minute of it."""
         r0 = self.best(frm.node, stop.place.node, dep)
-        best = dep
-        for k in range(1, int(r0.closure_wait_s // LEG_STEP.total_seconds()) + 1):
-            t = dep + LEG_STEP * k
-            if self.best(frm.node, stop.place.node, t).arrive_at <= r0.arrive_at + CLOSURE_SLACK:
-                best = t
-        return best
+        return latest_departure_for(lambda t: self.best(frm.node, stop.place.node, t), r0, dep, LEG_STEP, CLOSURE_SLACK)
 
     def simulate(self, start: Place, order: tuple[StopRequest, ...], d0: datetime, earliest: datetime) -> _Sim:
         loc, ready = start, d0
@@ -241,10 +237,15 @@ class _Planner:
 
 
 def _first_departures(order: tuple[StopRequest, ...], earliest: datetime, buffer: timedelta) -> list[datetime]:
-    """Every 15 min for 2 h from the earliest departure, and every 15 min in the 2 h before
-    each stop's target, so a window hours away still gets a departure close to it."""
+    """The earliest departure, every quarter hour on the clock for 2 h after it, and every
+    15 min in the 2 h before each stop's target (so a window hours away still gets a
+    departure close to it). Clock-anchored, so re-planning a minute later tries the same
+    times and doesn't flip between near-equal plans."""
     n = int(FIRST_HORIZON / FIRST_STEP)
-    times = {earliest + FIRST_STEP * k for k in range(n + 1)}
+    first_mark = earliest.replace(minute=0, second=0, microsecond=0)
+    while first_mark <= earliest:
+        first_mark += FIRST_STEP
+    times = {earliest} | {first_mark + FIRST_STEP * k for k in range(n) if first_mark + FIRST_STEP * k <= earliest + FIRST_HORIZON}
     for stop in order:
         target = stop.target(buffer)
         if target is not None and target > earliest + FIRST_HORIZON:
@@ -262,7 +263,11 @@ def plan_trip(
     safe_path: bool = False,
     buffer_min: int = 5,
     view: ConditionsView | None = None,
+    prefer_order: list[str] | None = None,
 ) -> Plan:
+    """prefer_order: stop names in the order currently planned (re-planning a watched plan).
+    It is kept unless another order is better on lateness or saves ORDER_SWITCH_MIN of cost,
+    so a re-plan doesn't flip between near-equal orders."""
     if not stops:
         raise ValueError("add at least one stop")
     if len(stops) > MAX_STOPS:
@@ -273,15 +278,21 @@ def plan_trip(
     earliest = max(depart_after, now)
     p = _Planner(router, view, w, buffer)
 
-    orders = stop_orders(stops)
-    sims = [p.simulate(start, order, d, earliest) for order in orders for d in _first_departures(order, earliest, buffer)]
-    best = min(sims, key=lambda s: s.key)
-    center, order = best.first_departure, best.order
     steps = int(REFINE_SPAN / REFINE_STEP)
-    for k in range(-steps, steps + 1):
-        d = center + REFINE_STEP * k
-        if k and d >= earliest:
-            best = min(best, p.simulate(start, order, d, earliest), key=lambda s: s.key)
+    per_order = []
+    for order in stop_orders(stops):
+        best = min((p.simulate(start, order, d, earliest) for d in _first_departures(order, earliest, buffer)), key=lambda s: s.key)
+        center = best.first_departure
+        for k in range(-steps, steps + 1):
+            d = center + REFINE_STEP * k
+            if k and d >= earliest:
+                best = min(best, p.simulate(start, order, d, earliest), key=lambda s: s.key)
+        per_order.append(best)
+    best = min(per_order, key=lambda s: s.key)
+    if prefer_order:
+        kept = next((s for s in per_order if [x.place.name for x in s.order] == list(prefer_order)), None)
+        if kept is not None and kept.key[:3] == best.key[:3] and kept.cost - best.cost < ORDER_SWITCH_MIN:
+            best = kept
 
     legs = []
     for frm, stop, ready, leave, _ in best.legs:
