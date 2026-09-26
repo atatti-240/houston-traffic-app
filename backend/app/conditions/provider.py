@@ -18,13 +18,19 @@ Road speed (entering at time T)
   - Otherwise the prediction from history.
 
 Incidents
-  - A closure removes the road. Other incidents slow it down (crash x1.6, roadwork x1.3,
-    stall/hazard x1.2, +0.25 per extra blocked lane, max x3) until they clear. Without a
-    clear time we assume 45 min from the start, and at least 15 more min from now.
+  - A closure shuts the road until it clears (the router waits for it to reopen or goes
+    around). Other incidents slow it down (crash x1.6, roadwork x1.3, stall/hazard x1.2,
+    +0.25 per extra blocked lane, max x3) until they clear. Without a clear time we assume
+    45 min from the start, and at least 15 more min from now.
 
 Feeds down
   - A live source that raises is marked down; everything falls back to predictions and the
-    affected inputs within the next 30 min are marked low confidence.
+    affected inputs within the next 30 min are marked low confidence (a down incident feed
+    marks every road low, since crashes and closures may be missing).
+
+Past times
+  - Live data describes the present. For times more than 15 min before now (e.g. the map's
+    time slider scrubbed back) only predictions are used.
 """
 
 from collections import defaultdict
@@ -48,6 +54,7 @@ CONF_FACTOR: dict[str, float] = {"high": 1.0, "medium": 0.75, "low": 0.5}
 MAX_LIVE_AGE = {"freeway": timedelta(minutes=10), "arterial": timedelta(minutes=30)}
 CROSSING_STATUS_MAX_AGE = timedelta(minutes=15)
 CLEAR_TRUST = timedelta(minutes=5)
+PAST_LIVE_TOLERANCE = timedelta(minutes=15)  # live data still applies this far before now
 INCIDENT_DEFAULT = timedelta(minutes=45)
 INCIDENT_MIN_REMAINING = timedelta(minutes=15)
 INCIDENT_SLOWDOWN = {"crash": 1.6, "roadwork": 1.3, "stall": 1.2, "hazard": 1.2, "other": 1.2}
@@ -87,6 +94,7 @@ class CrossingCondition:
     confidence: Confidence
     source: str  # "history" or the live source name
     updated_at: datetime | None
+    clears_at: datetime | None = None  # live blockage: when it's expected to clear
 
 
 @dataclass
@@ -127,13 +135,14 @@ class ConditionsView:
         now = self.now
         pred = models.congestion.get_score(seg.id, enter_at)
         ahead = enter_at - now
+        recent = -PAST_LIVE_TOLERANCE <= ahead <= LIVE_WINDOW  # live data applies
 
         congestion, source, weight, updated, detail = pred, "history", 0.0, None, ""
         confidence: Confidence = "medium" if models.congestion.has_history(seg.id, enter_at) else "low"
 
         max_age = MAX_LIVE_AGE.get(seg.road_class, MAX_LIVE_AGE["arterial"])
         fresh = [r for r in self.live.traffic.get(seg.id, ()) if timedelta(0) <= now - r.observed_at <= max_age]
-        if fresh and ahead <= LIVE_WINDOW:
+        if fresh and recent:
             total = sum(CONF_FACTOR[r.confidence] for r in fresh)
             live_val = sum(CONF_FACTOR[r.confidence] * min(1.0, max(0.0, r.congestion)) for r in fresh) / total
             best = max(fresh, key=lambda r: (CONFIDENCE_RANK[r.confidence], r.observed_at))
@@ -147,8 +156,10 @@ class ConditionsView:
                 confidence = "low"
             elif weight >= STRONG_LIVE_WEIGHT:
                 confidence = "high"
-        elif self.live.feed_down("traffic") and ahead <= LIVE_WINDOW:
+        elif self.live.feed_down("traffic") and recent:
             confidence = "low"
+        if self.live.feed_down("incidents") and recent:
+            confidence = "low"  # a crash or closure here could be missing
 
         incident, slowdown, closed = self._incident(seg.id, enter_at)
         travel = models.congestion.travel_time_for_score(seg.id, congestion) * slowdown
@@ -176,8 +187,10 @@ class ConditionsView:
 
     def _incident(self, segment_id: str, at: datetime) -> tuple[Incident | None, float, bool]:
         worst_inc, slowdown = None, 1.0
+        # Shortly before now, what's reported now applies; well before now, only what had started.
+        moment = max(at, self.now) if at >= self.now - PAST_LIVE_TOLERANCE else at
         for inc in self.live.incidents_on.get(segment_id, ()):
-            if not (inc.started_at <= max(at, self.now) < self.incident_end(inc)):
+            if not (inc.started_at <= moment < self.incident_end(inc)):
                 continue
             if inc.kind == "closure":
                 return inc, 1.0, True
@@ -195,22 +208,27 @@ class ConditionsView:
         p_pred = train.get_block_probability(c.id, arrive_at)
         avg_min = train.get_avg_block_minutes(c.id, arrive_at)
 
-        st = self.live.crossings.get(c.id)
+        ahead = arrive_at - now
+        recent = -PAST_LIVE_TOLERANCE <= ahead <= LIVE_WINDOW
+        # The live status describes now; well before now only the prediction applies.
+        st = self.live.crossings.get(c.id) if ahead >= -PAST_LIVE_TOLERANCE else None
         stale = st is not None and now - st.updated_at > CROSSING_STATUS_MAX_AGE
         if st is not None and not stale:
             conf: Confidence = "high" if st.sensor_up else "low"
             if st.blocked:
                 clears = st.clears_at or now + timedelta(minutes=avg_min * 0.5)
                 if arrive_at < clears:
+                    # Wait from when you'd be there, but never count time before now.
+                    wait = (clears - max(arrive_at, now)).total_seconds()
                     return CrossingCondition(
-                        c.id, arrive_at, 1.0, (clears - arrive_at).total_seconds(), True,
-                        st.sensor_up, conf, st.source, st.updated_at,
+                        c.id, arrive_at, 1.0, max(0.0, wait), True,
+                        st.sensor_up, conf, st.source, st.updated_at, clears_at=clears,
                     )
-            elif st.sensor_up and arrive_at - now <= CLEAR_TRUST:
+            elif st.sensor_up and ahead <= CLEAR_TRUST:
                 return CrossingCondition(c.id, arrive_at, 0.0, 0.0, True, True, "high", st.source, st.updated_at)
 
         conf = "medium"
-        soon = arrive_at - now <= LIVE_WINDOW
+        soon = recent
         if st is not None and (stale or not st.sensor_up):
             conf = "low"
         elif soon and self.live.feed_down("trains"):

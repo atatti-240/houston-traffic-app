@@ -1,5 +1,7 @@
 """Wires the app together: network + models + router + scheduler, sharing one clock."""
 
+import threading
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters import DataSources, build_sources
@@ -26,6 +28,10 @@ class Services:
         self.clock = clock or SimClock(settings.sim_start, settings.clock_speed)
         self.sources = sources or build_sources(settings.data_source, session_factory, settings.synthetic_seed)
         self.notifier = notifier or build_notifier(settings.notification_channel)
+        # One tick at a time: the background loop and request handlers both tick, and two
+        # at once would both send the same alert. Lives here, not on the scheduler, because
+        # _install() swaps schedulers.
+        self._tick_lock = threading.Lock()
         self.reload()
 
     def reload(self) -> None:
@@ -54,4 +60,5 @@ class Services:
         return days
 
     def tick(self, replan_now: bool = False):
-        return self.scheduler.tick(self.clock.now(), replan_now)
+        with self._tick_lock:
+            return self.scheduler.tick(self.clock.now(), replan_now)

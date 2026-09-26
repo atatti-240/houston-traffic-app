@@ -2,14 +2,19 @@
 
 Search
   - Every stop order (at most 3 stops -> 6 orders; stops marked fixed_order keep their place)
-  - x first departures every 15 min for the next 2 h, then the best one refined to 5 min.
-  - Later legs leave the previous stop as late as useful: aiming to arrive at the next
-    stop's window start (or its end minus the buffer when only an end is given), never
-    before you're ready (arrival + dwell).
+  - x first departures every 15 min for the next 2 h, plus every 15 min in the 2 h before
+    the first stop's target time (so a window later in the day gets a departure near it),
+    then the best one refined to 5 min.
+  - The first departure aims to arrive at the first stop's window start (or its end minus
+    the buffer when only an end is given): time at home beats time waiting at a stop.
+  - Later legs leave when you're ready (arrival + dwell), later only to avoid arriving
+    before a stop's window opens. Arriving early for an end-only window costs nothing, so
+    waiting it out at the previous stop would only risk the stops after it.
   - Each leg is routed by the router on ONE snapshot of live conditions.
 
 Cost (minutes, lower is better)
-    sum(route cost: drive + train delay + crash penalty) + 0.5 x wait at stops
+    sum(route cost: drive + closure wait + train delay + crash penalty) + 0.5 x wait
+    (first stop: early arrival before its target; later stops: waiting for a window to open)
     + 0.3 x minutes the first departure is later than the earliest possible one
 
 Ranking: fewest stops missed (arrive after window end), then fewest "tight" stops (inside
@@ -172,8 +177,8 @@ class _Planner:
         return self._cache[key]
 
     def leg_departure(self, frm: Place, stop: StopRequest, ready: datetime) -> datetime:
-        """Latest useful departure: arrive at the stop's target time, never before ready."""
-        target = stop.target(self.buffer)
+        """For a later leg: leave when ready, or later to arrive as the stop's window opens."""
+        target = stop.window_start
         if target is None:
             return ready
         slack = target - self.best(frm.node, stop.place.node, ready).arrive_at
@@ -195,7 +200,9 @@ class _Planner:
             leave = d0 if i == 0 else self.leg_departure(loc, stop, ready)
             r = self.best(loc.node, stop.place.node, leave)
             arrive = r.arrive_at
-            target = stop.target(self.buffer)
+            # First stop: arriving before its target is time better spent at home. Later
+            # stops: only waiting for a window to open is wasted.
+            target = stop.target(self.buffer) if i == 0 else stop.window_start
             wait = max(0.0, (target - arrive).total_seconds() / 60) if target else 0.0
             if stop.window_end is not None:
                 over = (arrive - stop.window_end).total_seconds() / 60
@@ -211,6 +218,17 @@ class _Planner:
             loc = stop.place
         cost += DELAY_WEIGHT * max(0.0, (d0 - earliest).total_seconds() / 60)
         return _Sim(order, d0, legs, late, tight, late_min, cost)
+
+
+def _first_departures(order: tuple[StopRequest, ...], earliest: datetime, buffer: timedelta) -> list[datetime]:
+    """Every 15 min for 2 h from the earliest departure, and every 15 min in the 2 h before
+    the first stop's target, so a window hours away still gets a departure close to it."""
+    n = int(FIRST_HORIZON / FIRST_STEP)
+    times = {earliest + FIRST_STEP * k for k in range(n + 1)}
+    target = order[0].target(buffer)
+    if target is not None and target > earliest + FIRST_HORIZON:
+        times |= {target - FIRST_STEP * k for k in range(n + 1) if target - FIRST_STEP * k >= earliest}
+    return sorted(times)
 
 
 def plan_trip(
@@ -235,14 +253,14 @@ def plan_trip(
     p = _Planner(router, view, w, buffer)
 
     orders = stop_orders(stops)
-    grid = [earliest + FIRST_STEP * k for k in range(int(FIRST_HORIZON / FIRST_STEP) + 1)]
-    sims = [p.simulate(start, order, d, earliest) for order in orders for d in grid]
+    sims = [p.simulate(start, order, d, earliest) for order in orders for d in _first_departures(order, earliest, buffer)]
     best = min(sims, key=lambda s: s.key)
+    center, order = best.first_departure, best.order
     steps = int(REFINE_SPAN / REFINE_STEP)
     for k in range(-steps, steps + 1):
-        d = best.first_departure + REFINE_STEP * k
+        d = center + REFINE_STEP * k
         if k and d >= earliest:
-            best = min(best, p.simulate(start, best.order, d, earliest), key=lambda s: s.key)
+            best = min(best, p.simulate(start, order, d, earliest), key=lambda s: s.key)
 
     legs = []
     for frm, stop, ready, leave, _ in best.legs:

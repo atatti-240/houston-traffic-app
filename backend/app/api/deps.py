@@ -1,5 +1,5 @@
 import math
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from fastapi import HTTPException, Request
 
@@ -43,17 +43,25 @@ def is_clock_time(value: object) -> bool:
     return isinstance(value, str) and len(value) == 5 and value[2] == ":"
 
 
+MAX_TIME_OFFSET = timedelta(days=366)
+
+
 def resolve_time(svc: Services, value: datetime | str | None, day: date | None = None) -> datetime:
-    """None -> simulated now; 'HH:MM' -> that time on `day` (default: the simulated today); else ISO."""
+    """None -> simulated now; 'HH:MM' -> that time on `day` (default: the simulated today); else ISO.
+    Anything more than a year from the simulated now is rejected (422)."""
     now = svc.clock.now()
     if value is None:
         return now
-    if isinstance(value, datetime):
-        return to_local_naive(value)
     try:
-        if is_clock_time(value):
+        if isinstance(value, datetime):
+            t = to_local_naive(value)
+        elif is_clock_time(value):
             hh, mm = map(int, value.split(":"))
-            return datetime.combine(day or now.date(), time(hh, mm))
-        return to_local_naive(datetime.fromisoformat(value))
-    except ValueError as e:
+            t = datetime.combine(day or now.date(), time(hh, mm))
+        else:
+            t = to_local_naive(datetime.fromisoformat(value))
+    except (ValueError, OverflowError) as e:
         raise HTTPException(422, f"Bad time {value!r}: use ISO or HH:MM") from e
+    if abs(t - now) > MAX_TIME_OFFSET:
+        raise HTTPException(422, f"Time {value!s} is more than a year from now")
+    return t
