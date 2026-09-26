@@ -36,7 +36,15 @@ class CongestionModel:
         entry = self.store.get(MODEL, segment_id, fine_bucket(at))
         return entry.value if entry else DEFAULT_SCORE
 
+    def has_history(self, segment_id: str, at: datetime) -> bool:
+        entry = self.store.get(MODEL, segment_id, fine_bucket(at))
+        return bool(entry and entry.n_obs)
+
+    def travel_time_for_score(self, segment_id: str, score: float) -> float:
+        """Seconds to traverse the segment at a given congestion score (0..1)."""
+        seg = self.network.segments[segment_id]
+        return seg.free_flow_seconds / (1 - SLOWDOWN * min(1.0, max(0.0, score)))
+
     def get_segment_travel_time(self, segment_id: str, at: datetime) -> float:
         """Predicted seconds to traverse the segment if you enter it at `at`."""
-        seg = self.network.segments[segment_id]
-        return seg.free_flow_seconds / (1 - SLOWDOWN * self.get_score(segment_id, at))
+        return self.travel_time_for_score(segment_id, self.get_score(segment_id, at))

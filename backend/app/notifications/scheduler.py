@@ -76,7 +76,7 @@ class TripScheduler:
 
         # Never recommend a departure that has already passed.
         rec = recommend_departure(
-            self.router, trip.origin, trip.destination, arrive_by, trip.safe_path, earliest=now
+            self.router, trip.origin, trip.destination, arrive_by, earliest=now, safety_weight=trip.weight
         )
         reason = _top_reason(rec)
         summary = route_summary(rec.route)
