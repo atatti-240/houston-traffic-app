@@ -1,91 +1,55 @@
 "use client";
 
+/** My alerts (trip / plan / road-cleared) as dark toast cards. */
+
+import { Icon } from "@/components/ui";
 import { fmtTime } from "@/lib/format";
+import { C, ICON } from "@/lib/theme";
 import type { AppNotification } from "@/lib/types";
 
-const ICON: Record<AppNotification["kind"], string> = {
-  plan: "🗓️",
-  leave_now: "🚗",
-  leave_earlier: "⏰",
-  leave_later: "😌",
-  reroute: "🔀",
-  order_changed: "🔁",
-  info: "ℹ️",
+export const NOTE_STYLE: Record<AppNotification["kind"], { icon: string; color: string }> = {
+  plan: { icon: ICON.clock, color: C.accent },
+  leave_now: { icon: ICON.car, color: C.light },
+  leave_earlier: { icon: "M12 5v7l-4 2M12 21a9 9 0 1 1 0-18a9 9 0 0 1 0 18z", color: C.moderate },
+  leave_later: { icon: ICON.clock, color: C.muted },
+  reroute: { icon: "M4 7h11l-3-3M20 17H9l3 3", color: "#B07CE8" },
+  order_changed: { icon: "M4 7h11l-3-3M20 17H9l3 3", color: "#B07CE8" },
+  cleared: { icon: ICON.check, color: C.light },
+  info: { icon: "M12 8v.01M11 12h1v5h1M12 21a9 9 0 1 1 0-18a9 9 0 0 1 0 18z", color: C.muted },
 };
 
-const TONE: Record<AppNotification["kind"], string> = {
-  plan: "border-blue-500",
-  leave_now: "border-green-600",
-  leave_earlier: "border-amber-500",
-  leave_later: "border-slate-400",
-  reroute: "border-violet-600",
-  order_changed: "border-violet-600",
-  info: "border-slate-400",
-};
-
-function Card({ n, onClose }: { n: AppNotification; onClose?: () => void }) {
+export function NoteCard({ n, onClose }: { n: AppNotification; onClose?: () => void }) {
+  const st = NOTE_STYLE[n.kind] ?? NOTE_STYLE.info;
   return (
-    <div className={`rounded-lg border-l-4 bg-white p-3 shadow ${TONE[n.kind]}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="text-sm font-semibold">
-          {ICON[n.kind]} {n.title}
+    <div className="flex gap-3 rounded-[16px] border border-pop-line bg-pop p-3.5" style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: st.color }}>
+        <Icon d={st.icon} size={18} color={C.onAccent} />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-[15px] font-semibold text-ink">{n.title}</span>
+          {onClose ? (
+            <button type="button" onClick={onClose} aria-label="Dismiss" className="cursor-pointer text-muted hover:text-ink">
+              <Icon d={ICON.close} size={16} />
+            </button>
+          ) : (
+            <span className="font-num shrink-0 text-[12px] text-muted">{fmtTime(n.created_at)}</span>
+          )}
         </div>
-        {onClose && (
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="Dismiss">
-            ✕
-          </button>
-        )}
+        <span className="text-[13px] leading-snug text-soft">{n.body}</span>
       </div>
-      <div className="mt-1 text-sm text-slate-700">{n.body}</div>
-      <div className="mt-1 text-[11px] text-slate-400">{fmtTime(n.created_at)}</div>
     </div>
   );
 }
 
 export function Toasts({ toasts, dismiss }: { toasts: AppNotification[]; dismiss: (id: number) => void }) {
   return (
-    <div className="pointer-events-none fixed right-3 top-32 z-[1200] md:top-16 flex w-[min(92vw,360px)] flex-col gap-2">
+    <div className="pointer-events-none fixed top-3 right-3 z-[1400] flex w-[min(92vw,380px)] flex-col gap-2">
       {toasts.map((n, i) => (
         <div key={n.id} className={`toast-in pointer-events-auto ${i > 0 ? "hidden md:block" : ""}`}>
-          <Card n={n} onClose={() => dismiss(n.id)} />
+          <NoteCard n={n} onClose={() => dismiss(n.id)} />
         </div>
       ))}
-    </div>
-  );
-}
-
-export function NotificationDrawer(props: {
-  open: boolean;
-  onClose: () => void;
-  items: AppNotification[];
-  pushState: NotificationPermission | "unsupported";
-  onEnablePush: () => void;
-}) {
-  if (!props.open) return null;
-  return (
-    <div className="fixed inset-0 z-[1300] flex justify-end bg-black/20" onClick={props.onClose}>
-      <aside className="h-full w-[min(92vw,380px)] overflow-y-auto bg-slate-50 p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Alerts</h2>
-          <button onClick={props.onClose} className="text-slate-500" aria-label="Close">
-            ✕
-          </button>
-        </div>
-        {props.pushState === "default" && (
-          <button onClick={props.onEnablePush} className="mb-3 w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white">
-            Enable phone/desktop notifications
-          </button>
-        )}
-        {props.pushState === "denied" && (
-          <p className="mb-3 text-xs text-slate-500">Browser notifications are blocked; alerts still show here.</p>
-        )}
-        <div className="flex flex-col gap-2">
-          {props.items.length === 0 && <p className="text-sm text-slate-500">No alerts yet. Save a trip to get them.</p>}
-          {props.items.map((n) => (
-            <Card key={n.id} n={n} />
-          ))}
-        </div>
-      </aside>
     </div>
   );
 }
