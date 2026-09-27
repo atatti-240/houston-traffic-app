@@ -24,17 +24,32 @@ const Z = 14;
 const TIMEOUT_MS = 10000;
 const PARALLEL = 6;
 
-export const POI: Record<PoiKind, { label: string; one: string; color: string; icon: string }> = {
+/** `color`: the icon disc (a white glyph on it, in both themes). `text`: the name next to it on the light / dark map. */
+export const POI: Record<PoiKind, { label: string; one: string; color: string; text: { light: string; dark: string }; icon: string }> = {
   fuel: {
     label: "Gas",
     one: "Gas station",
-    color: "#F29D38",
+    color: "#e8710a",
+    text: { light: "#c26401", dark: "#fcad70" },
     // pump + hose
     icon: "M5 20V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v15M4 20h11M5 10h9M14 8l3 2.5V16a1.5 1.5 0 0 0 3 0V9l-2.5-3",
   },
-  ev: { label: "EV charging", one: "EV charger", color: "#34C9A0", icon: "M13 3L6 13.5h5L10 21l7-10.5h-5z" },
-  parking: { label: "Parking", one: "Parking", color: "#5B8DEF", icon: "M8 20V4h5a4.5 4.5 0 0 1 0 9H8" },
+  ev: {
+    label: "EV charging",
+    one: "EV charger",
+    color: "#00897b",
+    text: { light: "#00796b", dark: "#6fcfc2" },
+    icon: "M13 3L6 13.5h5L10 21l7-10.5h-5z",
+  },
+  parking: {
+    label: "Parking",
+    one: "Parking",
+    color: "#4285f4",
+    text: { light: "#1967d2", dark: "#8ab4f8" },
+    icon: "M8 20V4h5a4.5 4.5 0 0 1 0 9H8",
+  },
 };
+
 export const POI_KINDS: PoiKind[] = ["fuel", "ev", "parking"];
 
 export interface Poi {

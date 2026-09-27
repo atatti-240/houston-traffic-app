@@ -11,7 +11,7 @@ import { useApp } from "@/components/app/AppContext";
 import ReportButton from "@/components/reports/ReportButton";
 import { Icon } from "@/components/ui";
 import { REPORT_KINDS, selectReport, useReports, type DriverReport } from "@/lib/reports";
-import { C } from "@/lib/theme";
+import { C, tint } from "@/lib/theme";
 import type { PlanResult, Recommendation, Route } from "@/lib/types";
 
 /** What the Trip screen shows: one route, a recommendation, or a multi-stop plan. */
@@ -88,7 +88,7 @@ function HeadsUp({ reports }: { reports: DriverReport[] }) {
 
 function FloodWarning({ floods }: { floods: Flood[] }) {
   return (
-    <div className="flex items-start gap-3 rounded-[14px] px-3.5 py-3" style={{ background: "rgba(255,77,77,0.12)" }} role="status">
+    <div className="flex items-start gap-3 rounded-[14px] px-3.5 py-3" style={{ background: tint(C.heavy, 12) }} role="status">
       <span className="mt-px flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: REPORT_KINDS.flooding.color }}>
         <Icon d={REPORT_KINDS.flooding.icon} size={18} color={REPORT_KINDS.flooding.ink} width={2.3} />
       </span>

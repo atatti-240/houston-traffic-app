@@ -43,7 +43,7 @@ export function GasOnTheWay({ route, toName }: { route: LatLngTuple[] | null | u
       className="flex cursor-pointer items-center gap-2 self-start text-[14px] font-medium text-accent"
     >
       <span className="flex h-6 w-6 items-center justify-center rounded-full" style={{ background: POI.fuel.color }}>
-        <Icon d={POI.fuel.icon} size={14} color={C.onAccent} width={2.4} />
+        <Icon d={POI.fuel.icon} size={14} color="#ffffff" width={2.4} />
       </span>
       Gas on the way →
     </button>

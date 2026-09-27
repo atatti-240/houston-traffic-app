@@ -63,7 +63,7 @@ function Hours({ hours }: { hours: PlaceHours }) {
       </div>
     );
   }
-  const color = hours.open ? C.light : C.heavyText;
+  const color = hours.open ? C.lightText : C.heavyText;
   return (
     <div className="flex flex-col gap-1">
       <button
@@ -121,7 +121,7 @@ export default function PlaceCard({ place, onDirections, compact, distance, arri
   const cuisine = details?.cuisine && details.cuisine !== kind ? details.cuisine : null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 text-left" style={{ fontFamily: "var(--font-grotesk), system-ui, sans-serif" }}>
+    <div className="flex min-w-0 flex-col gap-2 text-left" style={{ fontFamily: "inherit" }}>
       {!compact && (
         <div className="flex items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -165,7 +165,7 @@ export default function PlaceCard({ place, onDirections, compact, distance, arri
         </span>
       )}
       {closingOnArrival && (
-        <span className="text-[13px] leading-snug font-medium" style={{ color: C.moderate }}>
+        <span className="text-[13px] leading-snug font-medium" style={{ color: C.moderateText }}>
           Closes at {fmtTime(closingOnArrival)}, soon after you get there ({fmtTime(arriveAt as string)})
         </span>
       )}

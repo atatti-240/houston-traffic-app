@@ -82,7 +82,7 @@ export function TollLine({ roads, small = false }: { roads?: string[]; small?: b
   return (
     <span
       className={`flex items-center gap-1.5 font-medium ${small ? "text-[12px]" : "text-[13px]"}`}
-      style={{ color: C.moderate }}
+      style={{ color: C.moderateText }}
       title={roads?.length ? roads.join(", ") : undefined}
     >
       <Icon d={TOLL_ICON} size={small ? 14 : 16} />

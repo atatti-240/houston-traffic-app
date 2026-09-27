@@ -13,7 +13,7 @@ import { FilterChip, Icon } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtTime, parseSim } from "@/lib/format";
 import { avoidParam } from "@/lib/roadrules";
-import { ALERT_GROUP, CAUSE, C, ICON, type AlertGroup } from "@/lib/theme";
+import { ALERT_GROUP, CAUSE, C, ICON, SHADOW, type AlertGroup } from "@/lib/theme";
 import type { AppNotification, TrafficAlert } from "@/lib/types";
 
 type Filter = "all" | "mine" | AlertGroup;
@@ -73,8 +73,8 @@ const alertColor = (a: TrafficAlert) => ALERT_GROUP[a.group]?.color ?? CAUSE[a.k
 
 const CARD = "flex w-full gap-3.5 rounded-2xl bg-card p-3.5 text-left text-ink";
 
-/** 40px colored circle with a white icon. */
-function Dot({ color, icon, iconColor = "#FFFFFF" }: { color: string; icon: string; iconColor?: string }) {
+/** 40px colored circle with its icon (white on the light theme, dark on the dark one). */
+function Dot({ color, icon, iconColor = C.onDot }: { color: string; icon: string; iconColor?: string }) {
   return (
     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: color }}>
       <Icon d={icon} size={18} color={iconColor} width={2.2} />
@@ -145,7 +145,7 @@ function AlertCard({ a }: { a: TrafficAlert }) {
   );
 }
 
-/** One of my notifications, in the same card style (dark icon: the note colors are light).
+/** One of my notifications, in the same card style.
  * Trip alerts open that trip. */
 function NoteRow({ n }: { n: AppNotification }) {
   const { go, clock } = useApp();
@@ -156,7 +156,7 @@ function NoteRow({ n }: { n: AppNotification }) {
   if (n.trip_id == null || state === "gone") {
     return (
       <div className={CARD}>
-        <Dot color={st.color} icon={st.icon} iconColor={C.onAccent} />
+        <Dot color={st.color} icon={st.icon} />
         {text}
       </div>
     );
@@ -183,7 +183,7 @@ function NoteRow({ n }: { n: AppNotification }) {
   };
   return (
     <button type="button" onClick={openTrip} aria-busy={state === "busy"} className={`${CARD} cursor-pointer hover:bg-card-hi ${state === "busy" ? "opacity-70" : ""}`}>
-      <Dot color={st.color} icon={st.icon} iconColor={C.onAccent} />
+      <Dot color={st.color} icon={st.icon} />
       {text}
     </button>
   );
@@ -239,7 +239,7 @@ function ForYouChip({ selected, count, onClick }: { selected: boolean; count: nu
       className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-[18px] px-3.5 text-[14px] font-medium whitespace-nowrap"
       style={
         selected
-          ? { background: C.ink, color: "#11141A", border: `1px solid ${C.ink}` }
+          ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` }
           : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` }
       }
     >
@@ -339,7 +339,7 @@ function Settings({ onClose }: { onClose: () => void }) {
 
   const status =
     perm === "granted"
-      ? { text: "On", color: C.light }
+      ? { text: "On", color: C.lightText }
       : perm === "denied"
         ? { text: "Blocked", color: C.heavyText }
         : perm === "unsupported"
@@ -350,8 +350,8 @@ function Settings({ onClose }: { onClose: () => void }) {
     <div
       role="dialog"
       aria-label="Alert settings"
-      className="fade-in absolute top-[52px] right-0 z-[1200] flex w-[300px] max-w-[calc(100vw-40px)] flex-col gap-3 rounded-[16px] border border-pop-line bg-pop p-4 text-left"
-      style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      className="fade-in absolute top-[52px] right-0 z-[1200] flex w-[300px] max-w-[calc(100vw-40px)] flex-col gap-3 rounded-[16px] bg-pop p-4 text-left"
+      style={{ boxShadow: SHADOW[2] }}
     >
       <div className="flex items-center justify-between">
         <span className="text-[15px] font-semibold text-ink">Alert settings</span>
@@ -411,7 +411,7 @@ function Settings({ onClose }: { onClose: () => void }) {
         >
           {tested === "sent" ? (
             <>
-              <Icon d={ICON.check} size={16} color={C.light} /> Sent
+              <Icon d={ICON.check} size={16} color={C.lightText} /> Sent
             </>
           ) : tested === "failed" ? (
             "Couldn't send. Try again"

@@ -11,7 +11,7 @@ import { Marker, Pane, Polyline, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapScene } from "@/components/app/AppContext";
 import type { LatLngTuple } from "@/lib/types";
-import { C } from "@/lib/theme";
+import { C, SHADOW } from "@/lib/theme";
 
 type SceneRoute = NonNullable<MapScene["routes"]>[number];
 
@@ -66,14 +66,14 @@ function bubble(time: string | undefined, label: string, on: boolean) {
         padding: "4px 10px",
         borderRadius: 12,
         whiteSpace: "nowrap",
-        fontFamily: "var(--font-grotesk), system-ui, sans-serif",
+        fontFamily: "var(--font-figtree), system-ui, sans-serif",
         fontSize: 12,
         fontWeight: 500,
         cursor: "pointer",
         background: on ? C.accent : C.pop,
         color: on ? C.onAccent : C.soft,
         border: `1px solid ${on ? C.accent : C.popLine}`,
-        boxShadow: "0 3px 10px rgba(0,0,0,0.55)",
+        boxShadow: SHADOW[1],
       }}
     >
       {time && <b style={{ fontWeight: 700, color: on ? C.onAccent : C.ink }}>{time}</b>}
@@ -104,8 +104,8 @@ export default function RouteOptions() {
           .filter((r) => !r.selected)
           .map((r) => (
             <Fragment key={r.id}>
-              <Polyline positions={r.geometry} pathOptions={{ color: "#0E1015", weight: 9, opacity: 0.55 }} interactive={false} />
-              <Polyline positions={r.geometry} pathOptions={{ color: C.muted, weight: 5, opacity: 0.95, dashArray: "8 8" }} interactive={false} />
+              <Polyline positions={r.geometry} pathOptions={{ color: C.halo, weight: 9, opacity: 0.9 }} interactive={false} />
+              <Polyline positions={r.geometry} pathOptions={{ color: C.alt, weight: 5, opacity: 0.95 }} interactive={false} />
               {/* An invisible wide line, easy to tap */}
               <Polyline
                 positions={r.geometry}
