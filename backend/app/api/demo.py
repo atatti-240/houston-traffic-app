@@ -136,6 +136,7 @@ def feed(req: FeedRequest, svc: Services = Depends(get_services)):
 def clear_live(svc: Services = Depends(get_services)):
     """Drop every injected blockage, sensor outage, live reading and incident; feeds back up."""
     svc.sources.clear_demo_live()
+    svc.reports.clear(demo_only=True)
     return {"ok": True, "notifications": _notes(svc)}
 
 
@@ -147,6 +148,7 @@ def scenario(name: str, svc: Services = Depends(get_services)):
         raise HTTPException(404, f"unknown scenario {name!r}; try {', '.join(demo_scenarios.SCENARIOS)}")
     _mock(svc.sources.incidents, "inject")
     svc.clock.set(demo_scenarios.run(name, svc.sources, settings.sim_start))
+    demo_scenarios.add_reports(name, svc.reports, svc.clock.now())
     return {**_clock_json(svc), "notifications": _notes(svc)}
 
 
@@ -167,11 +169,12 @@ def replay(days: int | None = None, svc: Services = Depends(get_services)):
 
 @router.post("/demo/reset")
 def reset(svc: Services = Depends(get_services)):
-    """Back to Monday 7:15 AM with no trips, plans, notifications or live data."""
+    """Back to Monday 7:15 AM with no trips, plans, notifications, driver reports or live data."""
     with svc.session_factory() as s:
         for model in (Notification, TripState, Trip, SavedPlan, SlowdownWatch):
             s.execute(delete(model))
         s.commit()
     svc.sources.clear_demo_live()
+    svc.reports.clear()
     svc.clock.set(settings.sim_start)
     return _clock_json(svc)

@@ -2,7 +2,10 @@
 
 "evening": a Monday around 5 PM with every kind of cause on the map at once, like the design:
 rush hour, a concert at Toyota Center, a crash on the Gulf Fwy, a freight train in the East End,
-lane closures on I-69 at Kirby, heavy rain on the West Loop and I-45 construction.
+lane closures on I-69 at Kirby, heavy rain on the West Loop and I-45 construction. Plus a few
+driver reports (demo data, labeled "Demo report"): flooding on Westheimer into the Galleria, a
+stalled car on the North Fwy, police on SH-288 and a pothole on Main St that one driver already
+says is gone.
 """
 
 from datetime import datetime, timedelta
@@ -44,6 +47,22 @@ def evening(sources, day: datetime) -> datetime:
         LiveTraffic("I10W:downtown>i10_610w", 0.85, "camera", now - timedelta(minutes=2), "high", "31 vehicles vs 19 usual")
     )
     return now
+
+
+def add_reports(name: str, reports, now: datetime) -> None:
+    """The driver reports that go with a scenario (replacing the demo's earlier ones)."""
+    reports.clear(demo_only=True)
+    if name != "evening":
+        return
+    at = lambda h, m=0: now.replace(hour=h, minute=m, second=0, microsecond=0)  # noqa: E731
+    reports.add_demo(
+        "flooding", "WHMR:i69_610sw>galleria", at(16, 44), still_there=3,
+        note="Water over the curb by the mall entrance",
+    )
+    reports.add_demo("stalled", "I45N:i45_610n>i45_bw8n", at(16, 52), still_there=1)
+    reports.add_demo("police", "SH288:midtown>tmc_288", at(16, 48), still_there=2)
+    # One "not there" already: one more takes it down.
+    reports.add_demo("pothole", "MAIN:midtown>medcenter", at(16, 20), not_there=1)
 
 
 def run(name: str, sources, day: datetime) -> datetime:

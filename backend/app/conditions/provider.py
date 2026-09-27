@@ -20,8 +20,8 @@ Road speed (entering at time T)
 Incidents
   - A closure shuts the road until it clears (the router waits for it to reopen or goes
     around). Other incidents slow it down (crash x1.6, lane closure x1.5, weather x1.35,
-    roadwork / event x1.3, stall/hazard x1.2, +0.25 per extra blocked lane, max x3) until
-    they clear. Without a clear time we assume
+    roadwork / event x1.3, stall/hazard x1.2, flooding x2, police / pothole none, +0.25 per
+    extra blocked lane, max x3) until they clear. Without a clear time we assume
     45 min from the start, and at least 15 more min from now.
 
 Feeds down
@@ -37,6 +37,7 @@ Past times
     incidents that had started and readings taken by T, however close T is to now.
 """
 
+import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -51,6 +52,8 @@ from app.conditions.live import (
     LiveTraffic,
 )
 from app.graph import CrossingInfo, Network, SegmentInfo
+
+log = logging.getLogger("houston")
 
 LIVE_WINDOW = timedelta(minutes=30)
 LIVE_WEIGHT_MAX = 0.8
@@ -70,6 +73,9 @@ INCIDENT_SLOWDOWN = {
     "stall": 1.2,
     "hazard": 1.2,
     "other": 1.2,
+    "flooding": 2.0,
+    "police": 1.0,  # heads-up only
+    "pothole": 1.0,
 }
 EXTRA_LANE_SLOWDOWN = 0.25
 MAX_INCIDENT_SLOWDOWN = 3.0
@@ -310,11 +316,19 @@ class ConditionsView:
 
 
 class ConditionsProvider:
-    def __init__(self, network: Network, models, sources=None, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        network: Network,
+        models,
+        sources=None,
+        now: Callable[[], datetime] | None = None,
+        reports: Callable[[datetime], list[Incident]] | None = None,
+    ) -> None:
         self.network = network
         self.models = models
         self.sources = sources
         self._now = now
+        self.reports = reports  # driver reports as incidents (app.reports)
 
     @property
     def has_clock(self) -> bool:
@@ -348,6 +362,8 @@ class ConditionsProvider:
         statuses = pull("trains", self.sources.trains.crossing_status)
         traffic = pull("traffic", self.sources.live_traffic.current)
         incidents = pull("incidents", self.sources.incidents.active)
+        # Driver reports aren't the incidents feed: they still count while it's down.
+        incidents = incidents + self._driver_reports(now)
 
         by_seg: dict[str, list[LiveTraffic]] = defaultdict(list)
         for r in traffic:
@@ -367,3 +383,12 @@ class ConditionsProvider:
             crossings=crossings,
             feeds=feeds,
         )
+
+    def _driver_reports(self, now: datetime) -> list[Incident]:
+        if self.reports is None:
+            return []
+        try:
+            return list(self.reports(now))
+        except Exception:  # our own table; never let it take routing down
+            log.exception("driver reports unavailable")
+            return []
