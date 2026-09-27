@@ -45,7 +45,7 @@ const STEPS: Step[] = [
     narration:
       "A traffic-only app sends you down Cullen Blvd. A freight train crosses there most weekday mornings around 7:40, so BlindSpot routes around it and tells you exactly when to leave.",
     run: async (a) => {
-      a.go({ name: "trip", from: "eastend", fromName: "East End", to: "medcenter", toName: "Texas Medical Center", arriveBy: "08:00", safety: 0 });
+      a.go({ name: "trip", from: "eastend", fromName: "East End", to: "medcenter", toName: "Texas Medical Center", arriveBy: "08:00", safety: 0, avoid: "" });
     },
   },
   {
@@ -111,7 +111,7 @@ const STEPS: Step[] = [
     narration:
       "The Gulf Freeway is the usual way to Hobby. With the crash on it, BlindSpot goes around and says why. Slide toward Safer and it stays off crash-prone stretches even on a normal day.",
     run: async (a) => {
-      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 0 });
+      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 0, avoid: "" });
     },
   },
   {

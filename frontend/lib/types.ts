@@ -22,6 +22,9 @@ export interface Segment {
   to_node: string;
   miles: number;
   free_flow_mph: number;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
+  toll?: boolean;
   geometry: LatLngTuple[];
 }
 
@@ -73,6 +76,9 @@ export interface RouteSegment {
   id: string;
   name: string;
   road_class: string;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
+  toll?: boolean;
   enter_at: string;
   travel_min: number;
   train_delay_min: number;
@@ -129,6 +135,15 @@ export interface RouteCrossing {
   updated_at: string | null;
 }
 
+/** A stretch of a route on one road at one posted limit (null = not known). */
+export interface SpeedLimitRun {
+  road: string;
+  speed_limit_mph: number | null;
+  from_mile: number;
+  miles: number;
+  segment_ids: string[];
+}
+
 export interface Route {
   origin: string;
   destination: string;
@@ -152,6 +167,10 @@ export interface Route {
   };
   reasons: string[];
   hazards: Hazard[];
+  uses_toll?: boolean;
+  toll_roads?: string[];
+  /** The route as stretches of one road at one posted limit, in driving order */
+  speed_limits?: SpeedLimitRun[];
   geometry: LatLngTuple[];
   segments: RouteSegment[];
   crossings: RouteCrossing[];
@@ -182,6 +201,8 @@ export interface Trip {
   days: number[];
   safe_path: boolean;
   safety_weight?: number | null;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
 }
 
 export interface AppNotification {
@@ -292,6 +313,8 @@ export interface TripPlanRequest {
   stops: StopIn[];
   safe_path?: boolean;
   safety_weight?: number;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
   buffer_min?: number;
   watch?: boolean;
 }
@@ -310,6 +333,9 @@ export interface PlanLeg {
   hazards: Hazard[];
   why: string[];
   summary: string;
+  uses_toll?: boolean;
+  toll_roads?: string[];
+  speed_limits?: SpeedLimitRun[];
   window: { start: string | null; end: string | null };
   dwell_min: number;
   wait_min: number;
@@ -336,6 +362,8 @@ export interface PlanResult {
   watch: boolean;
   done?: boolean;
   safety_weight: number;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
   buffer_min: number;
   drive_min: number;
   warnings: string[];
@@ -374,6 +402,8 @@ export interface Slowdown {
   speed_mph: number;
   free_flow_mph: number;
   usual_mph: number;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
   /** Marker position (segment middle, offset to the right of travel like the map line) */
   lat: number;
   lng: number;
