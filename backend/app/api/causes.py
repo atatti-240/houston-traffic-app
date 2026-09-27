@@ -63,6 +63,7 @@ def slowdown_json(s: Slowdown) -> dict:
         "speed_mph": round(s.speed_mph),
         "free_flow_mph": round(s.free_flow_mph),
         "usual_mph": round(s.usual_mph),
+        "speed_limit_mph": s.segment.speed_limit_mph,  # posted limit (OpenStreetMap); None = not known
         "lat": s.lat,
         "lng": s.lng,
         "highlight": s.highlight,

@@ -1,4 +1,4 @@
-.PHONY: setup seed roads dev backend frontend test cv-fake dev-cv
+.PHONY: setup seed roads limits dev backend frontend test cv-fake dev-cv
 
 setup:
 	cd backend && uv sync
@@ -11,6 +11,10 @@ seed:
 # Re-trace every road segment along the real streets (OpenStreetMap via the public OSRM router).
 roads:
 	cd backend && uv run python scripts/fetch_road_shapes.py
+
+# Look up each segment's speed limit and toll status in OpenStreetMap (Nominatim, ~6 min).
+limits:
+	cd backend && uv run python scripts/fetch_road_limits.py
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000

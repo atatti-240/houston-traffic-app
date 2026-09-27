@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.planner import Place, Plan, StopRequest
 from app.recommender import route_summary
+from app.routing.limits import road_rules_json
 from app.routing.router import CRASH_REASON_RISK, LIVE_REASON_EXTRA, TRAIN_REASON_P, Route
 from app.timeutil import iso
 
@@ -170,6 +171,7 @@ def plan_to_json(plan: Plan, plan_id: str, created_at: datetime | None = None, w
                 "why": r.reasons,
                 # beyond the contract
                 "summary": route_summary(r),
+                **road_rules_json(r),
                 "window": {"start": iso(leg.stop.window_start), "end": iso(leg.stop.window_end)},
                 "dwell_min": leg.stop.dwell_min,
                 "wait_min": round(leg.wait_min),

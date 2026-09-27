@@ -45,6 +45,8 @@ export type Screen =
       safety?: number;
       /** A real place (search result, map dot, saved place): shows its card (hours, phone...) */
       toPlace?: { osm?: string | null; address?: string | null; kind?: string | null };
+      /** "tolls", "highways" or "tolls,highways"; omitted = what this device chose last */
+      avoid?: string;
     }
   | { name: "map" }
   /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
@@ -84,6 +86,7 @@ function screenUrl(s: Screen): string {
     if (typeof s.from === "string") q.set("from", s.from);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
+    if (s.avoid !== undefined) q.set("avoid", s.avoid);
   }
   if (s.name === "nearby") q.set("kind", s.kind);
   return `${window.location.pathname}?${q}`;
@@ -108,6 +111,7 @@ function parseScreen(search: string): Screen | null {
       from: q.get("from") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      avoid: q.get("avoid") ?? undefined,
     };
   return null;
 }
