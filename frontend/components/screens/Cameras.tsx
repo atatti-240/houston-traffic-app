@@ -13,13 +13,13 @@ import LiveFeedPanel, { FeedOffline } from "@/components/screens/Cameras/LiveFee
 import LiveVideo from "@/components/screens/Cameras/LiveVideo";
 import { useLiveFeed } from "@/components/screens/Cameras/liveFeed";
 import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
-import { camName, parseSim } from "@/lib/format";
+import { camName, hasLiveVideo, parseSim } from "@/lib/format";
 import { C, ICON, LEVEL, type Level } from "@/lib/theme";
 
 const RANK: Record<Level, number> = { heavy: 2, moderate: 1, light: 0 };
 
 /** Has live video from the camera AI (or will once it's connected). */
-const hasFeed = (c: LiveCam) => !!c.live_feed && c.live_feed.status !== "offline" && c.live_feed.status !== "missing";
+const hasFeed = (c: LiveCam) => hasLiveVideo(c.live_feed);
 
 type Pick = { area?: string; cam?: string };
 /** What each cameras screen (stack entry) was showing, so "Back" from "Why it's slow" returns to
@@ -179,8 +179,15 @@ export default function Cameras() {
 
   // A camera with a live AI feed: its video, boxes, counts and incident check (polled while shown).
   const feedState = useLiveFeed(cam?.live_feed ? cam.id : null);
-  const feed = cam?.live_feed ? (feedState.detail ?? cam.live_feed) : null;
-  const videoOn = !!feed && feed.status !== "offline" && feed.status !== "missing";
+  // Right after switching cameras it still holds the previous camera's answer: not this one's. Until
+  // this camera's own answer comes (right away), its summary from /live can be minutes old (the camera
+  // AI may have moved to another camera since), so it doesn't start the video.
+  const detail = feedState.detail?.camera_id === cam?.id ? feedState.detail : null;
+  const summary = cam?.live_feed;
+  const feed = summary
+    ? (detail ?? (summary.status === "live" ? { ...summary, status: "connecting" as const } : summary))
+    : null;
+  const videoOn = hasLiveVideo(feed);
 
   // Once a camera is showing, keep it: a data refresh that re-sorts the list updates its picture
   // but doesn't switch to another camera (or drop pause / full screen).
@@ -292,7 +299,7 @@ export default function Cameras() {
             feed={feed}
             track={feedState.track}
             offset={feedState.offset}
-            delayMs={feedState.detail?.video_delay_ms ?? 2500}
+            delayMs={detail?.video_delay_ms ?? 2500}
           />
         ) : (
           <>
@@ -318,7 +325,7 @@ export default function Cameras() {
         )}
       </div>
 
-      {videoOn && feed && <LiveFeedPanel feed={feed} detail={feedState.detail} />}
+      {videoOn && feed && <LiveFeedPanel feed={feed} detail={detail} />}
 
       <div className="mt-1 flex items-baseline justify-between gap-3">
         <h2 className="m-0 min-w-0 text-[16px] font-semibold">Cameras in {area.label}</h2>

@@ -1,3 +1,5 @@
+import type { LiveFeed } from "@/lib/types";
+
 /** Backend sends naive ISO datetimes in simulated Houston time; treat them as wall-clock. */
 export function parseSim(iso: string): Date {
   const [d, t = "00:00:00"] = iso.split("T");
@@ -66,4 +68,9 @@ export function camName(raw: string): string {
     out.push(p);
   }
   return out.join(" at ");
+}
+
+/** A camera's live AI feed has video (or will once the camera AI starts it): not offline or missing. */
+export function hasLiveVideo(feed: LiveFeed | null | undefined): boolean {
+  return !!feed && feed.status !== "offline" && feed.status !== "missing";
 }

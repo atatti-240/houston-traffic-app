@@ -123,6 +123,8 @@ export default function LiveVideo({
   const [boxesOn, setBoxesOn] = useState(true);
   const [nonce, setNonce] = useState(0);
   const [failed, setFailed] = useState(false);
+  // No video in a hidden tab: holding it open counts as watching (see useLiveFeed)
+  const [hidden, setHidden] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const { full, pseudoFull, toggle: toggleFull } = useFullscreen(cardRef);
   const live = feed.status === "live";
@@ -132,13 +134,15 @@ export default function LiveVideo({
       if (localStorage.getItem(BOXES_KEY) === "off") setBoxesOn(false);
     } catch {}
   }, []);
-
-  // A fresh stream when the feed comes back live, a few seconds after an error, and every 25 min.
-  const wasLive = useRef(live);
   useEffect(() => {
-    if (live && !wasLive.current) setNonce((n) => n + 1);
-    wasLive.current = live;
-  }, [live]);
+    const on = () => setHidden(document.hidden);
+    on();
+    document.addEventListener("visibilitychange", on);
+    return () => document.removeEventListener("visibilitychange", on);
+  }, []);
+
+  // A fresh stream a few seconds after an error and every 25 min. (While the feed isn't live there's
+  // no stream at all, so a new one starts by itself when it's back.)
   useEffect(() => {
     if (!failed) return;
     const id = setTimeout(() => {
@@ -166,7 +170,7 @@ export default function LiveVideo({
     } catch {}
   };
 
-  const streaming = live && !paused && !failed;
+  const streaming = live && !paused && !failed && !hidden;
   const still = paused && pausedAt !== null;
   const badge = paused ? "PAUSED" : !live ? "STARTING" : feed.replay ? "REPLAY" : "LIVE";
   const message = paused
