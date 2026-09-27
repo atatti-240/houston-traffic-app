@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import Reports from "@/components/map/Reports";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import PlacesLayer from "@/components/places/PlacesLayer";
 import { camName, hasLiveVideo } from "@/lib/format";
@@ -425,6 +426,7 @@ export default function TrafficMap({
       {interactive && <CauseMarkers />}
       {/* Home, Work, favorites, the nearby list, and the card of any place you tap */}
       {interactive && <PlacesLayer />}
+      {interactive && <Reports />}
     </MapContainer>
   );
 }

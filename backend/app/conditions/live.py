@@ -35,7 +35,8 @@ class LiveTraffic:
 
 
 IncidentKind = Literal[
-    "crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other"
+    "crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other",
+    "flooding", "police", "pothole",
 ]
 
 

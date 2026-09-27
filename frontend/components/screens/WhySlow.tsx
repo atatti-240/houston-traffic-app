@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useApp } from "@/components/app/AppContext";
+import RoadReports from "@/components/reports/RoadReports";
 import { BackHeader, Card, PillButton, Title } from "@/components/ui";
 import { api } from "@/lib/api";
 import { parseSim } from "@/lib/format";
@@ -332,6 +333,7 @@ export default function WhySlow() {
           d.causes.map((c, i) => <CauseBar key={`${c.kind}-${i}`} c={c} />)
         )}
       </Card>
+      <RoadReports segmentId={d.id} />
 
       {showNotify && (
         <PillButton variant={watching ? "outline" : "primary"} aria-busy={busy} onClick={toggleWatch}>

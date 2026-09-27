@@ -5,6 +5,7 @@
 import { useState } from "react";
 
 import { useApp, type AppValue } from "@/components/app/AppContext";
+import { showDemoReport } from "@/components/reports/demo";
 import { api } from "@/lib/api";
 import { C } from "@/lib/theme";
 
@@ -105,6 +106,19 @@ const STEPS: Step[] = [
     narration: "Incidents, roadwork, events, weather, trains and roads busier than usual, each with how much time it costs you.",
     run: async (a) => {
       a.go({ name: "alerts" });
+    },
+  },
+  {
+    title: "Drivers report what they see",
+    narration:
+      "Crashes, police, hazards, potholes, stalled cars and flooding, reported from the road. Other drivers tap Still there or Not there, so stale reports drop off. Water on Westheimer slows the way into the Galleria.",
+    run: (a) => showDemoReport(a, "flooding"),
+  },
+  {
+    title: "Downtown → Galleria, flooding ahead",
+    narration: "A trip that crosses a flooded road gets a warning. Turn around, don't drown.",
+    run: async (a) => {
+      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "galleria", toName: "Galleria / Uptown" });
     },
   },
   {

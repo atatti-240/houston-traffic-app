@@ -36,6 +36,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Routing engine | `backend/app/routing/` | Time-dependent Dijkstra-style search over the road graph with a blended cost and a 0-1 safety weight (the Faster ↔ Safer slider). It keeps several labels per node (time so far vs. penalty so far), because once roads can be waited on, reaching one later can be the better choice. |
 | Causes engine | `backend/app/causes.py`, `api/causes.py` | "Why is it slow?" Splits every road's delay into causes (rush hour, busier than usual, crash, construction, closure, event, weather, train) and powers the map's cause icons, the "Why it's slow" screen, traffic alerts and "notify me when it clears". See [Why it's slow](#why-its-slow). |
 | Live AI camera feeds | `backend/app/cv/`, `api/cv.py` | Bridge to the team's computer-vision app (blindspot-cv, its own process, `CV_URL`): follows its live stream, keeps each camera's recent frames, vehicle boxes and incident check, serves the video as MJPEG, and turns camera-confirmed incidents into live incidents on our roads. See [Live AI camera feeds](#live-ai-camera-feeds). |
+| Driver reports | `backend/app/reports.py`, `api/reports.py` | Crash, police, hazard, pothole, stalled car and flooding reports from drivers, snapped to the road direction they're on, with Still there / Not there votes, expiry and per-client limits. Reports on our roads are incidents in the road-conditions layer (they count even when the incidents feed is down). See [docs/driver-reports.md](docs/driver-reports.md). |
 | Departure recommender | `backend/app/recommender.py` | Tries departures every 5 minutes and picks the latest one that still arrives on time. Also returns a `leave_at_safe` with a margin that grows as confidence drops. |
 | Multi-stop planner | `backend/app/planner.py`, `plan_io.py` | Up to 3 stops with time windows, dwell and fixed-order stops. Picks the stop order and every departure time, and compares the result against a leave-now baseline in the typed order. |
 | Notifications | `backend/app/notifications/` | `NotificationService` interface (mock = stored in DB, WebPush = stub) + a scheduler that re-checks saved trips and watched plans on each clock tick. |
@@ -74,7 +75,7 @@ The team's first idea was `score += today * factor`, which grows without bound. 
 | Crossing reported clear, sensor up | No wait if you arrive within 5 min. After that, back to the prediction |
 | Crossing sensor down or status older than 15 min | Prediction, low confidence |
 | Live congestion reading | Only while fresh (10 min freeway, 30 min street). Blend weight `0.8 × (1 − minutes_ahead/30) × confidence factor` |
-| Incident | A closure shuts the road until it clears (the router waits or goes around). Crash ×1.6, lane closure ×1.5, weather ×1.35, roadwork or event ×1.3, stall, hazard or other ×1.2, +0.25 per extra lane, max ×3, until it clears (default 45 min) |
+| Incident | A closure shuts the road until it clears (the router waits or goes around). Crash ×1.6, lane closure ×1.5, weather ×1.35, roadwork or event ×1.3, stall, hazard or other ×1.2, flooding ×2, police or pothole none, +0.25 per extra lane, max ×3, until it clears (default 45 min). Driver reports on our roads count as incidents too |
 | Camera-confirmed incident | The same as an incident (one lane, kind read from the model's description), on the camera's road, while the camera AI keeps it confirmed; possible (unconfirmed) ones are ignored. Never marks a feed down |
 | Feed down | Predictions only, low confidence for the next 30 min (every road when the traffic or incident feed is down, crossings when the train feed is), and the route says so |
 | Time more than 15 min before now | Live traffic and crossing status ignored; incidents count only if they had started by then (live data describes the present) |
@@ -107,7 +108,7 @@ Maps paint a road red. `CausesEngine` (`app/causes.py`) says why. It reads the s
 |---|---|---|
 | Usual | predicted travel time − free flow | **Rush hour** on weekdays 6:00-9:30 and 15:30-19:00, otherwise **Usual traffic** |
 | Volume | live-blended travel time − predicted | **Higher than usual volume** (camera counts, TranStar) |
-| Incident | live travel time × (incident factor − 1) | crash, stall or hazard → **Crash**, roadwork → **Construction**, lane closure or closure → **Closure**, **Event**, **Weather** |
+| Incident | live travel time × (incident factor − 1) | crash, stall or hazard → **Crash**, roadwork → **Construction**, lane closure or closure → **Closure**, **Event**, **Weather**, flooding → **Weather** ("Flooding") |
 | Closure | wait until a closed road reopens | **Road closure** |
 | Train | expected wait at the road's rail crossings | **Train** |
 
@@ -188,6 +189,8 @@ The CV app (blindspot-cv, [its README](https://github.com/qian-json/blindspot-cv
 - `TripState`: trip_id, day, last_departure, last_route, leave_now_sent
 - `SavedPlan`: id, name, device_id, request_json, result_json (the `plan_result.json` shape), watch, announced, leave_now_sent (leg indexes), held ("Hold on" sent), done, created_at, last_planned_at
 - `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
+- `DriverReport`: id, kind, lat, lng (where reported), pin_lat, pin_lng (on its direction's line), segment_id (null: a pin only), note, source (`drivers` / `demo_drivers`), reporter (hashed client), created_at, expires_at (sim time), still_there, not_there, removed_at
+- `DriverReportVote`: report_id, voter (hashed client), still_there, at; one per client per report
 - `Notification`: id, trip_id or plan_id, created_at (sim time), title, body, kind (`plan`, `leave_now`, `leave_earlier`, `leave_later`, `reroute`, `order_changed`, `cleared`, `info`)
 - `GeoCache`: key (`search|<query>|<area>`, `place|W123`, `find|<name>|<point>`), value (Nominatim's raw rows), fetched_at (real UTC time)
 - `Share` (in `app/shares.py`): id (the link), origin_name, destination_name, main_road, segment_ids, geometry, end_point, miles, depart_at, shared_eta, eta (latest), created_at (sim time), created_wall and expires_at (real time, UTC), extra (JSON: `enter_at`, when the latest ETA has them reach each segment; room for fields added later)
@@ -212,6 +215,7 @@ backend/
     planner.py         multi-stop plans
     plan_io.py         plan request/result JSON (docs/contracts shapes)
     causes.py          why it's slow: delay split into causes, slowdowns, speed history
+    reports.py         driver reports: table, snapping, votes, expiry, limits, as incidents
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
     geo/               place search and details (Nominatim client, cache, rate limit), opening hours
     cv/                live AI camera feeds: bridge to the CV app, camera-confirmed incidents
