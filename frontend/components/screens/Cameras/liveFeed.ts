@@ -147,7 +147,8 @@ export interface LiveFeedState {
   offset: { current: number | null };
 }
 
-/** Poll a camera's live AI feed while it's on screen (null camera: off). */
+/** Poll a camera's live AI feed while it's on screen (null camera: off). Not while the tab is hidden:
+ * asking counts as watching, and a forgotten tab would keep the camera AI on this camera. */
 export function useLiveFeed(cameraId: string | null): LiveFeedState {
   const [detail, setDetail] = useState<LiveFeedDetail | null>(null);
   const track = useRef(new BoxTrack());
@@ -163,6 +164,10 @@ export function useLiveFeed(cameraId: string | null): LiveFeedState {
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      if (document.hidden) {
+        timer = setTimeout(poll, 1000);
+        return;
+      }
       const t0 = Date.now();
       let live = false;
       try {
