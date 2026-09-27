@@ -63,7 +63,9 @@ export const api = {
   }) => post<Recommendation>("/recommend", body),
   live: () => call<LiveConditions>("/live"),
   cvStatus: () => call<CvStatus>("/cv/status"),
-  cvCamera: (id: string) => call<LiveFeedDetail>(`/cv/cameras/${encodeURIComponent(id)}`),
+  /** A camera's live AI feed; `since` (ms): only vehicle boxes newer than that */
+  cvCamera: (id: string, since?: number) =>
+    call<LiveFeedDetail>(`/cv/cameras/${encodeURIComponent(id)}${since ? `?since=${since}` : ""}`),
   slowdowns: () => call<SlowdownList>("/slowdowns"),
   slowdown: (id: string) => call<SlowdownDetail>(`/slowdowns/${encodeURIComponent(id)}`),
   watchSlowdown: (id: string) => post<{ id: number; watching: boolean }>(`/slowdowns/${encodeURIComponent(id)}/watch`),

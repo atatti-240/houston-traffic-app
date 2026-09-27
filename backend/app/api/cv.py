@@ -55,13 +55,14 @@ def cv_status(svc: Services = Depends(get_services)):
 
 
 @router.get("/cv/cameras/{camera_id}")
-def cv_camera(camera_id: str, svc: Services = Depends(get_services)):
+def cv_camera(camera_id: str, since: float | None = None, svc: Services = Depends(get_services)):
     """One of our cameras' live AI feed: status, vehicle counts, rough speed (flowing / slow /
-    stopped), the incident check and the recent vehicle boxes. Watching it (polling this or the
-    video) makes the CV app process this camera when CV_VIEW=follow."""
+    stopped), the incident check and the recent vehicle boxes (only those after `since`, epoch
+    ms, when given). Watching it (polling this or the video) makes the CV app process this
+    camera when CV_VIEW=follow."""
     bridge = _mapped(svc, camera_id)
     bridge.touch(camera_id)
-    return bridge.detail(camera_id)
+    return bridge.detail(camera_id, since_ms=since)
 
 
 @router.get("/cv/cameras/{camera_id}/frame.jpg")

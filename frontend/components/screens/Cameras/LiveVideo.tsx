@@ -133,9 +133,11 @@ export default function LiveVideo({
     } catch {}
   }, []);
 
-  // A fresh stream when the feed comes (back) live, a few seconds after an error, and every 25 min.
+  // A fresh stream when the feed comes back live, a few seconds after an error, and every 25 min.
+  const wasLive = useRef(live);
   useEffect(() => {
-    if (live) setNonce((n) => n + 1);
+    if (live && !wasLive.current) setNonce((n) => n + 1);
+    wasLive.current = live;
   }, [live]);
   useEffect(() => {
     if (!failed) return;
