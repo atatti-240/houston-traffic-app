@@ -41,7 +41,8 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here. It runs at `CLOCK_SPEED` × real time from `SIM_START` (a Monday 7:15 AM), and the demo can jump it. |
 | Services | `backend/app/services.py` | Wires network + models + router + scheduler + clock together for the API. |
 | REST API | `backend/app/api/` | FastAPI routers. |
-| Frontend | `frontend/` | Next.js PWA, dark theme. One Leaflet map (over a free MapLibre vector street map from OpenFreeMap) stays mounted under every screen: Where to, Trip, Live map, Causes, Why it's slow, Alerts and Live cams. Full-screen panels on a phone, a 420px side panel next to the map on desktop. Plus the scripted demo. |
+| Places | `backend/app/geo/`, `api/geo.py`, `frontend/components/places/` | Real places from OpenStreetMap: address and business search, place details and opening hours (through Nominatim), saved places, and gas / EV / parking from the street map's tiles. See [Places](#places). |
+| Frontend | `frontend/` | Next.js PWA, dark theme. One Leaflet map (over a free MapLibre vector street map from OpenFreeMap) stays mounted under every screen: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams and Nearby. Full-screen panels on a phone (Trip and Nearby: a sheet over the map), a 420px side panel next to the map on desktop. Plus the scripted demo. |
 
 ## Time buckets
 
@@ -119,6 +120,18 @@ Endpoints: `GET /slowdowns` (every slowdown, worst first), `GET /slowdowns/{segm
 
 A watch on a road with something unusual (a non-routine cause of at least a minute: a crash, a live train, rain...) clears when nothing unusual is left, even if it's still rush hour. A watch on any other road clears when it's back to light traffic. One rule (`causes.unusual`) decides both. While the incidents, traffic or trains feed is down, watches stay open and aren't checked, since a missing crash would look like "cleared". Watches expire after 12 h.
 
+## Places
+
+Search, place cards, saved places and nearby gas / EV / parking. Everything is OpenStreetMap data, free and keyless; nothing is made up when a service is down.
+
+- **Search** (`GET /geocode?q=&lat=&lng=`): the backend asks Nominatim (`app/geo/nominatim.py`) for up to 15 matches in a box about 5 km around you, and the whole Houston area (Katy to Baytown, The Woodlands to Galveston Bay, bounded) when that finds fewer than 3. Near you, a chain's branches all rank the same, so results are sorted by distance, with well-known places (Nominatim importance ≥ 0.1: a university, the airport) on top. Each result is a name, a short address line ("3407 Montrose Boulevard, Montrose"), the point and a kind ("Cafe", "Gas station", "Address"). The app shows our own named places first and opens the Trip to the point (the router snaps it to the nearest road-map node).
+- **Nominatim's rules:** one request per second for the whole app (a shared limiter; a request that would wait more than 4 s gets "busy"), a User-Agent that says who we are, 6 s timeouts, and caching. Nominatim's raw answers are cached in memory (LRU) and in the `geo_cache` table: searches for a day, places for a week, "nothing found" for an hour. When Nominatim fails, an expired cached answer comes back marked `stale`; with none, the API answers 503 and the app says "Search is down right now" (our own places keep working). The frontend waits 350 ms after typing stops, needs 3 letters and keeps one request in flight (the latest query goes next). `NOMINATIM_URL` points at another server.
+- **Details** (`GET /geocode/details?osm=W123` or `?name=&lat=&lng=`): the OpenStreetMap tags of a place: phone (with a `tel:` form), website (http/https only), brand, cuisine, and `hours`. Search results carry the same tags, so a result's details are cached with it. A map dot's OpenStreetMap id comes from the vector tile: feature id = OSM id × 10 + 1 (node), 2 (way) or 3 (relation).
+- **Opening hours** (`app/geo/hours.py`) reads the `opening_hours` tag: `24/7`, weekday lists and ranges (`Mo-Fr`, `Fr-Mo`, `Mo,We`), several spans a day, spans past midnight (`18:00-02:00`), `off`, later rules replacing earlier ones, holiday rules skipped. It works out the status at the app's clock in Houston time (or at `at`, e.g. when you'd arrive): "Open now, closes 9 PM", "Closing soon, at 9 PM" (within an hour), "Closed, opens 7 AM tomorrow", "Open 24 hours", plus the week's hours. Anything fancier (months, sunrise, comments, week numbers) gives `open: null` and the card shows the raw text.
+- **Place card** (`PlaceCard.tsx`): one card for map dots, search results, saved places and the nearby list: kind, name, address, hours, phone, website, a star, "Save as Home / Work" and Directions. A popup on desktop, a sheet at the bottom on a phone. On the Trip it also warns when the place is closed, or closes within 20 min, at the arrival time.
+- **Saved places** (`store.ts`): Home, Work and up to 20 favorites in `localStorage` (`blindspot.saved`), read and written inside try/catch so a private window just doesn't remember. Chips on Where to (Home / Work with their drive time), an editor, and markers on the map (a star for favorites).
+- **Gas / EV / parking** (`pois.ts`, `poiLayers.ts`): OpenFreeMap's OpenMapTiles `poi` layer has gas stations (class `fuel`), EV chargers (class `fuel`, subclass `charging_station`) and parking (class `parking`), but only in the zoom-14 tiles. The app fetches and decodes those tiles itself (`@mapbox/vector-tile`, the same files the map loads when you zoom in, cached by the browser): into a GeoJSON source for the map highlights (from Leaflet zoom 13, up to 120 tiles in view), and for the lists: **near you** (the tiles within ~2 km, then ~4 km; closest first as the crow flies) and **along a route** (the tiles the route passes; places within 800 m of it, the closest to the road in each stretch so they spread along the trip, in the order you pass them). No prices or live availability: OpenStreetMap doesn't have them.
+
 ## Request flow
 
 1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight. Saving the same trip again (same device, places, time, days and safety) returns the one already saved instead of a copy that would alert twice.
@@ -145,6 +158,7 @@ A watch on a road with something unusual (a non-routine cause of at least a minu
 - `SavedPlan`: id, name, device_id, request_json, result_json (the `plan_result.json` shape), watch, announced, leave_now_sent (leg indexes), held ("Hold on" sent), done, created_at, last_planned_at
 - `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
 - `Notification`: id, trip_id or plan_id, created_at (sim time), title, body, kind (`plan`, `leave_now`, `leave_earlier`, `leave_later`, `reroute`, `order_changed`, `cleared`, `info`)
+- `GeoCache`: key (`search|<query>|<area>`, `place|W123`, `find|<name>|<point>`), value (Nominatim's raw rows), fetched_at (real UTC time)
 
 ## Folder layout
 
@@ -167,6 +181,7 @@ backend/
     plan_io.py         plan request/result JSON (docs/contracts shapes)
     causes.py          why it's slow: delay split into causes, slowdowns, speed history
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
+    geo/               place search and details (Nominatim client, cache, rate limit), opening hours
     notifications/     service + scheduler
     api/               routers
     seed/              Houston network + synthetic generator
@@ -176,6 +191,7 @@ frontend/
   app/                 Next.js entry, fonts, theme (globals.css), PWA manifest
   components/app/      AppContext (data polling, screen navigation, map scene), AppShell, map chrome, demo
   components/map/      the Leaflet traffic map
+  components/places/   place card, search, saved places, nearby gas / EV / parking (list, map highlights)
   components/screens/  WhereTo, Trip, LiveMap, Causes, WhySlow, Alerts, Cameras
   components/ui/       shared pieces in the design's style (icons, chips, pills, buttons, logo)
   lib/                 API client, types, theme tokens, formatting
