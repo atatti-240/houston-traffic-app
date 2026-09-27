@@ -67,6 +67,96 @@ export interface Camera {
   segment_id: string | null;
   crossing_id: string | null;
   mock: boolean;
+  /** Live video, vehicle boxes and the incident check from the team's camera AI (a Baton Rouge
+   * camera standing in for this one), or null when this camera has none. */
+  live_feed: LiveFeed | null;
+}
+
+// ---- live AI camera feeds (GET /cv/...) ----------------------------------------------------
+
+export type LiveFeedStatus = "live" | "connecting" | "paused" | "missing" | "offline";
+
+export interface FeedIncident {
+  /** confirmed (drives routing), possible (camera card only), clear, waiting (no recent check),
+   * off (the CV app runs without its incident check), error */
+  state: "confirmed" | "possible" | "clear" | "waiting" | "off" | "error";
+  affects_routing: boolean;
+  /** P(incident) from the latest check */
+  p?: number | null;
+  /** The model's one-line description (when it flags something) */
+  text?: string | null;
+  /** Seconds since the incident was confirmed / since the latest check */
+  since_s?: number;
+  checked_s?: number;
+  /** Confirmed earlier, but the latest checks see a clear road */
+  clearing?: boolean;
+  error?: string;
+}
+
+export interface LiveFeed {
+  status: LiveFeedStatus;
+  cv_camera: string;
+  /** The Baton Rouge camera, e.g. "I-10 @ College Dr" */
+  source_name: string;
+  source_place: string;
+  provider: string;
+  stand_in: boolean;
+  stand_in_note: string;
+  /** A recording played on a loop (a test clip, or the fake CV server), not live video */
+  replay: boolean;
+  test_server: boolean;
+  /** Paths on the API: MJPEG video / one JPEG frame */
+  video_url: string;
+  frame_url: string;
+  vehicles: number | null;
+  flow: "flowing" | "slow" | "stopped" | null;
+  /** Rough (+-30% or worse) */
+  mph: number | null;
+  incident: FeedIncident;
+  age_s: number | null;
+}
+
+/** [x1, y1, x2, y2 (fractions of the frame), class, confidence, rough mph or null] */
+export type VehicleBox = [number, number, number, number, string, number, number | null];
+
+export interface LiveFeedDetail extends LiveFeed {
+  camera_id: string;
+  camera_name: string;
+  fps: number | null;
+  reconnects: number;
+  stats: {
+    vehicles: number;
+    counts: Record<string, number>;
+    mean_conf: number | null;
+    inference_ms: number | null;
+    speed: { median_mph: number | null; moving: number; stopped: number; measured: number };
+  } | null;
+  rolling: { rate: number | null; avg_60s: number | null; peak_60s: number | null; median_mph_60s: number | null };
+  model: string | null;
+  detection_error: string | null;
+  incident_model: string | null;
+  incident_check: "on" | "off" | "unknown";
+  incident_recent: number[];
+  /** Recent vehicle boxes, each with its frame's time (ms, the server's clock) */
+  detections: { t: number; boxes: VehicleBox[] }[];
+  /** The server's clock when it answered (ms) */
+  server_time: number;
+  /** The video plays this far behind real time, so the boxes can be drawn on the right cars */
+  video_delay_ms: number;
+  /** A confirmed incident clears once the camera has seen a clear road this long */
+  clear_after_s: number;
+}
+
+export interface CvStatus {
+  enabled: boolean;
+  connected: boolean;
+  error: string | null;
+  test_server?: boolean;
+  incident_check?: "on" | "off" | "unknown";
+  cameras: { cv_camera: string; camera_id: string; camera_name: string; source_name: string | null; status: LiveFeedStatus }[];
+  incidents: { cv_camera: string; camera_id: string; text: string | null; since_s: number }[];
+  /** Changes whenever a camera-confirmed incident starts, clears or changes */
+  incidents_key: string;
 }
 
 export interface RouteSegment {
@@ -430,4 +520,74 @@ export interface TrafficAlert {
   lng: number | null;
   slowdown_id: string | null;
   source: string;
+}
+
+// ---- real places (OpenStreetMap, via GET /geocode) ---------------------------------------------
+
+/** A search result: an address or a business. `id` is its OpenStreetMap id ("W123"). */
+export interface GeoResult {
+  id: string | null;
+  name: string;
+  /** Short line: "3407 Montrose Boulevard, Montrose" */
+  address: string | null;
+  lat: number;
+  lng: number;
+  /** "Cafe", "Gas station", "Address"... */
+  kind: string;
+  distance_km: number | null;
+}
+
+export interface GeoSearch {
+  query: string;
+  results: GeoResult[];
+  /** The geocoder didn't answer: these are older cached results */
+  stale: boolean;
+  attribution: string;
+}
+
+export interface PlaceHours {
+  /** The OpenStreetMap opening_hours text */
+  raw: string;
+  /** null when the text was too complex to read (show `raw`) */
+  open: boolean | null;
+  /** "Open now, closes 9 PM", "Closed, opens 7 AM tomorrow" */
+  text: string | null;
+  closes_at: string | null;
+  opens_at: string | null;
+  week: { day: string; hours: string }[] | null;
+  today: string | null;
+}
+
+export interface PlaceDetails {
+  id: string | null;
+  name: string;
+  address: string | null;
+  lat: number;
+  lng: number;
+  kind: string;
+  phone: { display: string; tel: string } | null;
+  /** Always http(s) */
+  website: string | null;
+  brand: string | null;
+  cuisine: string | null;
+  hours: PlaceHours | null;
+  /** When `hours` was worked out for (the app's clock, or the `at` asked for) */
+  at: string;
+  stale: boolean;
+  attribution: string;
+}
+
+/** Any real place the place card can show: a map dot, a search result, a saved place, a gas station. */
+export interface PlaceRef {
+  name: string;
+  lat: number;
+  lng: number;
+  /** OpenStreetMap id ("N123", "W456"): its details come from this */
+  osm?: string | null;
+  /** One of our own named places (Downtown, Galleria...): no business details */
+  placeId?: string;
+  kind?: string | null;
+  address?: string | null;
+  /** Dot color, as on the map */
+  color?: string;
 }

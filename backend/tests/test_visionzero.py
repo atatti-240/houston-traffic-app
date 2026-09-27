@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.seed.network import LINKS, node_latlng, segment_profiles
+from app.seed.network import LINKS, segment_geometry, segment_id, segment_profiles
 from app.seed.synthetic import SyntheticWorld
 from app.seed.visionzero import MAX_FACTOR, crash_factor, hin_segments, match, street_keys
 
@@ -13,9 +13,13 @@ def _link(code):
     return next(link for link in LINKS if link.code == code)
 
 
-def _match(code):
+def _shape(code):
     link = _link(code)
-    return match(link.name, node_latlng(link.a), node_latlng(link.b))
+    return tuple(map(tuple, segment_geometry(segment_id(link, link.a, link.b), link.a, link.b)))
+
+
+def _match(code):
+    return match(_link(code).name, _shape(code))
 
 
 def test_street_keys_normalize_names():
@@ -37,7 +41,9 @@ def test_hin_data_loads():
     assert sum(s.crashes for s in westheimer) == 237 and sum(s.deaths for s in westheimer) == 61
 
 
-@pytest.mark.parametrize("code,street", [("WHMR", "WESTHEIMER"), ("MAIN", "MAIN"), ("CULL", "CULLEN"), ("TELE", "TELEPHONE")])
+@pytest.mark.parametrize(
+    "code,street", [("WHMR", "WESTHEIMER"), ("MAIN", "MAIN"), ("TELE", "TELEPHONE"), ("OST", "OLD SPANISH")]
+)
 def test_streets_match_hin_rows_by_name_and_place(code, street):
     hits = _match(code)
     assert hits and all(street in s.name for s in hits)
@@ -46,26 +52,27 @@ def test_streets_match_hin_rows_by_name_and_place(code, street):
 
 
 def test_matched_streets_get_a_higher_crash_prior_than_unmatched():
-    whmr, ost = _link("WHMR"), _link("OST")
-    assert _match("OST") == []  # nearest Old Spanish Trail HIN row is ~1.2 km off our link
-    assert crash_factor(ost.name, node_latlng(ost.a), node_latlng(ost.b)) == 1.0
-    f = crash_factor(whmr.name, node_latlng(whmr.a), node_latlng(whmr.b))
+    # Our Cullen stretch (East End to Old Spanish Trail) isn't on the HIN: its Cullen Blvd
+    # segments start ~1 km further south.
+    assert _match("CULL") == []
+    assert crash_factor(_link("CULL").name, _shape("CULL")) == 1.0
+    f = crash_factor(_link("WHMR").name, _shape("WHMR"))
     assert 1.0 < f <= MAX_FACTOR
 
     profiles = {p.segment_id: p for p in segment_profiles()}
     assert profiles["WHMR:galleria>i69_610sw"].crash_mult == pytest.approx(f)
-    assert profiles["OST:ost_cullen>tmc_288"].crash_mult == 1.0
+    assert profiles["CULL:eastend>ost_cullen"].crash_mult == 1.0
 
 
 def test_matched_street_crashes_more_per_mile_in_the_synthetic_history():
-    profiles = [p for p in segment_profiles() if p.segment_id.startswith(("WHMR:", "OST:"))]
+    profiles = [p for p in segment_profiles() if p.segment_id.startswith(("WHMR:", "CULL:"))]
     world = SyntheticWorld(profiles=profiles)
-    counts = {"WHMR": 0, "OST": 0}
+    counts = {"WHMR": 0, "CULL": 0}
     for d in range(365):
         for c in world.crashes(date(2025, 1, 1) + timedelta(days=d)):
             counts[c.segment_id.split(":")[0]] += 1
     miles = {code: sum(p.length_m for p in profiles if p.segment_id.startswith(code)) / 1609.344 for code in counts}
-    assert counts["WHMR"] / miles["WHMR"] > 1.5 * counts["OST"] / miles["OST"]
+    assert counts["WHMR"] / miles["WHMR"] > 1.5 * counts["CULL"] / miles["CULL"]
 
 
 def test_freeways_keep_their_synthetic_crash_mult():

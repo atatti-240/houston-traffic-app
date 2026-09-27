@@ -96,7 +96,8 @@ const STEPS: Step[] = [
     title: "Look for yourself",
     narration: "Live cameras on the roads that matter. Heavy rain on the West Loop by the Galleria.",
     run: async (a) => {
-      a.go({ name: "cameras", area: "Galleria / Uptown" });
+      // The West Loop camera by name: with live AI feeds on, the I-10 Katy camera would come first.
+      a.go({ name: "cameras", area: "Galleria / Uptown", camId: "cam_L610W_i10_610w_i69_610sw" });
     },
   },
   {

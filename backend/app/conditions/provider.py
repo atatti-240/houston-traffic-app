@@ -37,6 +37,7 @@ Past times
     incidents that had started and readings taken by T, however close T is to now.
 """
 
+import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -52,6 +53,7 @@ from app.conditions.live import (
 )
 from app.graph import CrossingInfo, Network, SegmentInfo
 
+log = logging.getLogger("houston")
 LIVE_WINDOW = timedelta(minutes=30)
 LIVE_WEIGHT_MAX = 0.8
 CONF_FACTOR: dict[str, float] = {"high": 1.0, "medium": 0.75, "low": 0.5}
@@ -310,11 +312,15 @@ class ConditionsView:
 
 
 class ConditionsProvider:
-    def __init__(self, network: Network, models, sources=None, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self, network: Network, models, sources=None, now: Callable[[], datetime] | None = None, camera_ai=None
+    ) -> None:
         self.network = network
         self.models = models
         self.sources = sources
         self._now = now
+        # Incidents confirmed by the CV app's cameras (app/cv/incidents.py), or None
+        self.camera_ai = camera_ai
 
     @property
     def has_clock(self) -> bool:
@@ -348,6 +354,13 @@ class ConditionsProvider:
         statuses = pull("trains", self.sources.trains.crossing_status)
         traffic = pull("traffic", self.sources.live_traffic.current)
         incidents = pull("incidents", self.sources.incidents.active)
+        if self.camera_ai is not None:
+            # Extra eyes, not a feed of its own: when the CV app is away there's simply nothing
+            # from it, and nothing is marked down.
+            try:
+                incidents = incidents + self.camera_ai.active(now, self.network)
+            except Exception:
+                log.exception("camera AI incidents failed")
 
         by_seg: dict[str, list[LiveTraffic]] = defaultdict(list)
         for r in traffic:

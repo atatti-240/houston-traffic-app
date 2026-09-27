@@ -357,14 +357,21 @@ def _set_shares(causes: list[Cause]) -> None:
 
 
 def _marker_point(seg: SegmentInfo) -> tuple[float, float]:
-    """Middle of the segment, shifted to the right of travel like the map draws it."""
+    """Halfway along the segment, shifted to the right of travel like the map draws it."""
     geom = seg.geometry
-    n = len(geom)
-    a, b = geom[(n - 1) // 2], geom[n // 2]
-    lat, lng = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-    (y0, x0), (y1, x1) = geom[0], geom[-1]
-    cos = math.cos(math.radians(y0))
-    dx, dy = (x1 - x0) * cos, y1 - y0
+    cos = math.cos(math.radians(geom[0][0]))
+    steps = [math.hypot(q[0] - p[0], (q[1] - p[1]) * cos) for p, q in zip(geom, geom[1:])]
+    half, run = sum(steps) / 2, 0.0
+    for (p, q), d in zip(zip(geom, geom[1:]), steps):
+        if d > 0 and run + d >= half:
+            t = (half - run) / d
+            lat, lng = p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
+            dx, dy = (q[1] - p[1]) * cos, q[0] - p[0]  # local direction of travel
+            break
+        run += d
+    else:
+        lat, lng = geom[0]
+        dx, dy = (geom[-1][1] - geom[0][1]) * cos, geom[-1][0] - geom[0][0]
     length = math.hypot(dx, dy) or 1.0
     k = MARKER_OFFSET_M / 111_320
     return lat + (-dx / length) * k, lng + (dy / length) * k / cos

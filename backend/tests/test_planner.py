@@ -127,7 +127,7 @@ def test_live_blocked_crossing_is_avoided_by_the_plan(world):
     network, sources, router, clock = world
     stops = [stop(network, "downtown")]
     # Halfway to Safer: at full Safer the plan would rather wait out the train than detour via
-    # Cullen Blvd, which is on the Vision Zero High Injury Network.
+    # Old Spanish Trail, which is on the Vision Zero High Injury Network.
     before = plan_trip(router, place(network, "eastend"), stops, NOW, NOW, safety_weight=0.5)
     assert "x_navigation" in {c.id for c in before.legs[0].route.crossings}
     sources.trains.inject("x_navigation", NOW, 30)

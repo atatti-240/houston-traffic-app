@@ -173,3 +173,14 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String)  # "leave_now" | "leave_earlier" | "info"
     title: Mapped[str] = mapped_column(String)
     body: Mapped[str] = mapped_column(String)
+
+
+class GeoCache(Base):
+    """Answers from the free geocoder (OpenStreetMap's Nominatim), kept so we ask it as little as
+    possible and still have something to show when it's down. See app/geo/nominatim.py."""
+
+    __tablename__ = "geo_cache"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)  # "search|..." / "place|W123"
+    value: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)  # None: nothing found
+    fetched_at: Mapped[datetime] = mapped_column(DateTime)  # real UTC time, not the simulated clock
