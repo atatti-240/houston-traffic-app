@@ -47,6 +47,8 @@ SOURCE_LABELS = {
     "camera_ai": "camera AI",
     "demo": "demo feed",
     "history": "history",
+    "drivers": "drivers",
+    "demo_drivers": "demo drivers",
 }
 # Incident kind -> how a route reason names it ("Heads up: lane closure on ...")
 INCIDENT_NOUNS = {
@@ -59,6 +61,9 @@ INCIDENT_NOUNS = {
     "closure": "closure",
     "event": "event traffic",
     "weather": "bad weather",
+    "flooding": "flooding",
+    "police": "police",
+    "pothole": "pothole",
 }
 
 

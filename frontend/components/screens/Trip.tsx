@@ -20,6 +20,7 @@ import { CAUSE, C, ICON } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
+import TripReports from "./Trip/Reports";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
 import ShareEta from "./Trip/ShareEta";
 
@@ -818,6 +819,7 @@ export default function Trip() {
           )}
         </p>
       )}
+      <TripReports result={hidden ? null : result} />
 
       {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
 
