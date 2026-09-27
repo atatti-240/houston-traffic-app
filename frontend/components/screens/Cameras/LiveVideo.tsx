@@ -190,6 +190,7 @@ export default function LiveVideo({
       className={`overflow-hidden ${pseudoFull ? "fixed inset-0 z-[3000]" : "relative"} ${
         full ? "flex items-center justify-center" : "rounded-2xl border border-line"
       }`}
+      data-theme="dark"
       style={{ background: "#0B0D11" }}
     >
       <div className="relative aspect-video" style={{ width: full ? "min(100vw, calc(100vh * 16 / 9))" : "100%" }}>

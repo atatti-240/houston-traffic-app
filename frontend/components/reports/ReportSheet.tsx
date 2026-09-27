@@ -31,7 +31,7 @@ import {
   type ReportKind,
   type SnapResult,
 } from "@/lib/reports";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, SHADOW } from "@/lib/theme";
 
 const LABEL = "text-[13px] font-semibold tracking-[0.08em] text-muted uppercase";
 
@@ -58,7 +58,7 @@ function WhereChoice({ where, onChange }: { where: "here" | "spot"; onChange: (w
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(w)}
             className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[18px] text-[14px] font-semibold whitespace-nowrap"
-            style={on ? { background: C.ink, color: "#11141A" } : { color: C.soft }}
+            style={on ? { background: C.sel, color: C.onSel } : { color: C.soft }}
           >
             <Icon d={w === "here" ? ICON.locate : ICON.pin} size={15} />
             {label}
@@ -404,8 +404,8 @@ export default function ReportSheet() {
         ref={sheetRef}
         role="dialog"
         aria-labelledby="report-h"
-        className="fade-in fixed bottom-[84px] left-[436px] z-[1250] flex max-h-[calc(100dvh-150px)] w-[min(372px,calc(100vw-452px))] flex-col gap-3.5 overflow-y-auto rounded-[18px] border border-pop-line bg-pop p-5 text-ink"
-        style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+        className="fade-in fixed bottom-[84px] left-[436px] z-[1250] flex max-h-[calc(100dvh-150px)] w-[min(372px,calc(100vw-452px))] flex-col gap-3.5 overflow-y-auto rounded-[18px] bg-pop p-5 text-ink"
+        style={{ boxShadow: SHADOW[2] }}
       >
         {body}
       </section>,
@@ -414,17 +414,17 @@ export default function ReportSheet() {
   }
   return createPortal(
     <div className="fixed inset-0 z-[1250] flex flex-col justify-end">
-      <div className="absolute inset-0" style={{ background: "rgba(8,9,12,0.5)" }} onClick={closeReport} aria-hidden="true" />
+      <div className="absolute inset-0" style={{ background: C.scrim }} onClick={closeReport} aria-hidden="true" />
       <section
         ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-h"
-        className="relative flex flex-col gap-3.5 overflow-y-auto rounded-t-3xl border-t border-line bg-bg px-5 pt-4 pb-6 text-ink"
+        className="relative flex flex-col gap-3.5 overflow-y-auto rounded-t-3xl bg-bg px-5 pt-4 pb-6 text-ink"
         style={{
           // Stop short of the top of the map (the rest scrolls), so the dot shows there too, on short phones as well.
           maxHeight: `max(50dvh, calc(100dvh - ${coveredTop + 72}px))`,
-          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+          boxShadow: SHADOW.up,
         }}
       >
         {body}
@@ -450,10 +450,10 @@ export function PickBanner() {
   return createPortal(
     <div
       role="status"
-      className={`fade-in fixed z-[1260] flex items-center gap-3 rounded-[22px] border border-pop-line bg-pop py-2 pr-2 pl-4 text-[14px] text-ink ${
+      className={`fade-in fixed z-[1260] flex items-center gap-3 rounded-[22px] bg-pop py-2 pr-2 pl-4 text-[14px] text-ink ${
         isDesktop ? "top-16 left-[calc(420px+(100vw-420px)/2)] -translate-x-1/2" : "inset-x-3 top-3"
       }`}
-      style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      style={{ boxShadow: SHADOW[2] }}
     >
       <Icon d={ICON.pin} size={18} color={C.accent} className="shrink-0" />
       <span className="flex-1 font-medium">Tap the road where it is</span>
@@ -477,12 +477,12 @@ export function ReportFlash() {
   return createPortal(
     <div
       role="status"
-      className={`toast-in pointer-events-none fixed z-[1260] flex items-center gap-2 rounded-[22px] border border-pop-line bg-pop px-4 py-2.5 text-[14px] font-medium text-ink ${
+      className={`toast-in pointer-events-none fixed z-[1260] flex items-center gap-2 rounded-[22px] bg-pop px-4 py-2.5 text-[14px] font-medium text-ink ${
         isDesktop ? "top-16 left-[calc(420px+(100vw-420px)/2)] -translate-x-1/2" : "inset-x-3 top-3 min-h-11"
       }`}
-      style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      style={{ boxShadow: SHADOW[2] }}
     >
-      <Icon d={ICON.check} size={16} color={C.light} className="shrink-0" />
+      <Icon d={ICON.check} size={16} color={C.lightText} className="shrink-0" />
       {text}
     </div>,
     document.body,

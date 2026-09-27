@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Icon, Logo } from "@/components/ui";
 import { parseSim } from "@/lib/format";
 import { describeShareError, isGone, shareApi, timeOn, type SharedTrip as Trip } from "@/lib/share";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, SHADOW } from "@/lib/theme";
 
 // Leaflet touches `window`, so the map only renders in the browser.
 const ShareMap = dynamic(() => import("@/components/map/ShareMap"), {
@@ -132,7 +132,7 @@ function Details({ trip, at, error, now, onRefresh, busy }: { trip: Trip; at: nu
         </span>
         {status && <span className="text-[14px] text-soft">{status}</span>}
         {t.checked && Math.abs(change) >= 1 && (
-          <span className="text-[14px] font-medium" style={{ color: change > 0 ? C.moderate : C.light }}>
+          <span className="text-[14px] font-medium" style={{ color: change > 0 ? C.moderateText : C.lightText }}>
             {Math.abs(change)} min {change > 0 ? "later" : "earlier"} than when this was shared
           </span>
         )}
@@ -297,7 +297,7 @@ export default function SharedTrip({ id }: { id: string }) {
       <div
         ref={panel}
         className="absolute inset-x-0 bottom-0 z-[1000] max-h-[60dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg md:inset-y-0 md:right-auto md:left-0 md:max-h-none md:w-[420px] md:rounded-none md:border-t-0 md:border-r"
-        style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}
+        style={{ boxShadow: SHADOW.up }}
       >
         {state.kind === "ok" ? (
           <Details trip={state.trip} at={state.at} error={state.error} now={now} onRefresh={load} busy={busy} />

@@ -2,14 +2,14 @@
 
 /**
  * Trip: when to leave and which way, and why. No design exists for it; it follows the design's
- * language (Why it's slow tiles, dark cards, pill buttons).
+ * language (Why it's slow tiles, cards, pill buttons).
  *  Phone: a bottom sheet (max 64dvh) with the route on the map above it. Desktop: the left panel.
  *  Single trip: leave now (/route) or arrive by (/recommend). With extra stops: /plan (best order).
  *  Re-plans when the inputs change and whenever live data is refetched (a train blocking the
  *  route shows up as a reroute).
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/app/AppContext";
 import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
@@ -17,7 +17,7 @@ import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
-import { CAUSE, C, ICON } from "@/lib/theme";
+import { CAUSE, C, ICON, LEVEL, SHADOW, tint } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
@@ -113,10 +113,10 @@ function inTime(min: number | null | undefined): string | null {
 }
 
 function reasonIcon(reason: string): { d: string; color: string } {
-  if (reason.startsWith("Avoided") || reason.startsWith("Rerouted")) return { d: ICON.check, color: C.light };
+  if (reason.startsWith("Avoided") || reason.startsWith("Rerouted")) return { d: ICON.check, color: C.lightText };
   if (reason.startsWith("Safe Path") || reason.startsWith("Safety setting")) return { d: ICON.shield, color: C.accent };
   if (reason.startsWith("About")) return { d: ICON.clock, color: C.accent };
-  return { d: CAUSE.crash.icon, color: C.moderate };
+  return { d: CAUSE.crash.icon, color: C.moderateText };
 }
 
 function toPlaceIn(loc: Location, name?: string): PlaceIn {
@@ -207,7 +207,7 @@ function Segmented({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(m)}
             className="flex-1 cursor-pointer rounded-[18px] text-[14px] font-semibold whitespace-nowrap"
-            style={on ? { background: C.ink, color: "#11141A" } : { color: C.soft }}
+            style={on ? { background: C.sel, color: C.onSel } : { color: C.soft }}
           >
             {label}
           </button>
@@ -230,26 +230,30 @@ function SafetySlider({ value, onChange }: { value: number; onChange: (v: number
       </div>
       <div className="flex items-center gap-3">
         <span className="text-[12px] text-muted">Faster</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.25}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          aria-label="Faster or safer route"
-          aria-valuetext={label}
-          className="bs-range h-6 min-w-0 flex-1 cursor-pointer appearance-none bg-transparent"
-          style={{ "--fill": `${value * 100}%` } as CSSProperties}
-        />
+        {/* A flat track: the grey rail and the blue part up to the thumb are two bars under a see-through range input
+            (the fill ends at the thumb's center, which travels from 10px to width - 10px). */}
+        <div className="relative flex h-6 min-w-0 flex-1 items-center">
+          <span className="absolute inset-x-0 h-1 rounded-full bg-line" aria-hidden="true" />
+          <span className="absolute left-0 h-1 rounded-full bg-accent" style={{ width: `calc(10px + (100% - 20px) * ${value})` }} aria-hidden="true" />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.25}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+            aria-label="Faster or safer route"
+            aria-valuetext={label}
+            className="bs-range relative h-6 w-full min-w-0 cursor-pointer appearance-none bg-transparent"
+          />
+        </div>
         <span className="text-[12px] text-muted">Safer</span>
       </div>
       <style>{`
-        .bs-range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, ${C.accent} var(--fill), ${C.line} var(--fill)); }
-        .bs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: ${C.ink}; border: 3px solid ${C.bg}; box-shadow: 0 0 0 1px ${C.edgeStrong}; }
-        .bs-range::-moz-range-track { height: 6px; border-radius: 3px; background: ${C.line}; }
-        .bs-range::-moz-range-progress { height: 6px; border-radius: 3px; background: ${C.accent}; }
-        .bs-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: ${C.ink}; border: 3px solid ${C.bg}; }
+        .bs-range::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+        .bs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -8px; border-radius: 50%; background: ${C.accent}; border: 0; box-shadow: ${SHADOW[1]}; }
+        .bs-range::-moz-range-track { height: 4px; background: transparent; }
+        .bs-range::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: ${C.accent}; border: 0; box-shadow: ${SHADOW[1]}; }
         .bs-range:focus-visible { outline: 2px solid ${C.accent}; outline-offset: 4px; border-radius: 4px; }
       `}</style>
     </div>
@@ -272,7 +276,7 @@ function Banner({ children }: { children: ReactNode }) {
   return (
     <div
       className="flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] leading-snug"
-      style={{ background: "rgba(245,197,24,0.10)", color: C.moderate }}
+      style={{ background: tint(C.moderate, 14), color: C.moderateText }}
       role="status"
     >
       <Icon d={CAUSE.crash.icon} size={16} className="mt-px shrink-0" />
@@ -314,7 +318,7 @@ function Switch({ on, onChange, children }: { on: boolean; onChange: (v: boolean
       <span className="relative h-6 w-10 shrink-0 rounded-full transition-colors" style={{ background: on ? C.accent : C.edgeStrong }}>
         <span
           className="absolute top-1 h-4 w-4 rounded-full transition-[left]"
-          style={{ left: on ? 20 : 4, background: on ? C.onAccent : C.ink }}
+          style={{ left: on ? 20 : 4, background: on ? C.onAccent : C.float, boxShadow: SHADOW[1] }}
         />
       </span>
     </button>
@@ -627,7 +631,7 @@ export default function Trip() {
               </span>
             )}
             {rec && tight && (
-              <span className="text-[14px] font-medium" style={{ color: C.moderate }}>
+              <span className="text-[14px] font-medium" style={{ color: C.moderateText }}>
                 Tight: less than {rec.buffer_min} min to spare for {fmtTime(rec.arrive_by)}
               </span>
             )}
@@ -748,7 +752,7 @@ export default function Trip() {
                   <span className="flex flex-col items-center" aria-hidden="true">
                     <span
                       className="font-num flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px]"
-                      style={isLast ? { background: C.heavy, color: "#11141A" } : { background: C.accent, color: C.onAccent }}
+                      style={isLast ? { background: LEVEL.heavy.bg, color: LEVEL.heavy.fg } : { background: C.accent, color: C.onAccent }}
                     >
                       {i + 1}
                     </span>
@@ -766,7 +770,7 @@ export default function Trip() {
                     </span>
                     {l.uses_toll && <TollLine roads={l.toll_roads} small />}
                     {(l.late_min > 0 || l.tight) && (
-                      <span className="text-[12px] font-medium" style={{ color: l.late_min > 0 ? C.heavyText : C.moderate }}>
+                      <span className="text-[12px] font-medium" style={{ color: l.late_min > 0 ? C.heavyText : C.moderateText }}>
                         {l.late_min > 0 ? `${l.late_min} min late` : "Tight: little room for delays"}
                       </span>
                     )}
@@ -849,7 +853,7 @@ export default function Trip() {
               value={by}
               onChange={(e) => setBy(e.target.value)}
               aria-label="Arrive by"
-              className="font-num h-11 w-[138px] shrink-0 rounded-[22px] border border-edge bg-card px-3.5 text-[15px] text-ink outline-none [color-scheme:dark] focus:border-edge-strong"
+              className="font-num h-11 w-[138px] shrink-0 rounded-[22px] border border-edge bg-card px-3.5 text-[15px] text-ink outline-none focus:border-accent"
             />
           )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-/** The map on a Share ETA link: the dark street map, the shared route and its two ends. It stands
+/** The map on a Share ETA link: the street map, the shared route and its two ends. It stands
  * alone (no AppProvider, no traffic layer, no places): a link shows this trip and nothing else. */
 
 import "leaflet/dist/leaflet.css";
@@ -11,51 +11,20 @@ import { setWorkerUrl, type Map as LibreMap } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
+import { ATTRIBUTION, RASTER_ATTRIBUTION, STYLE, WORKER, hasWebGL, rasterUrl, restyle } from "@/components/map/basemapStyle";
 import { C } from "@/lib/theme";
+import { useTheme } from "@/lib/themeMode";
 import type { LatLngTuple } from "@/lib/types";
 
 const HOUSTON: LatLngTuple = [29.7604, -95.3698];
-// The same free street map and colors as the app's map (components/map/VectorBasemap.tsx).
-const STYLE = "https://tiles.openfreemap.org/styles/dark";
-const WORKER = "/maplibre/maplibre-gl-worker.mjs";
-const ATTRIBUTION =
-  '<a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>';
-const BG = "#171A21";
-const PAINT: [string, string, string | number][] = [
-  ["background", "background-color", BG],
-  ["water", "fill-color", "#10131A"],
-  ["landuse_park", "fill-color", "#1A2024"],
-  ["landcover_wood", "fill-color", "#1A2024"],
-  ["landuse_residential", "fill-opacity", 0],
-  ["building", "fill-color", "#1D2129"],
-  ["highway_minor", "line-color", "#2A2F3A"],
-  ["highway_path", "line-color", "#2A2F3A"],
-  ["highway_major_inner", "line-color", "#333948"],
-  ["highway_major_subtle", "line-color", "#333948"],
-  ["highway_motorway_inner", "line-color", "#333948"],
-  ["highway_motorway_subtle", "line-color", "#333948"],
-  ["highway_major_casing", "line-color", BG],
-  ["highway_motorway_casing", "line-color", BG],
-];
 
-function hasWebGL(): boolean {
-  try {
-    const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
-  } catch {
-    return false;
-  }
-}
-
-function restyle(m: LibreMap) {
-  for (const [layer, prop, value] of PAINT) {
-    if (m.getLayer(layer)) m.setPaintProperty(layer, prop as Parameters<LibreMap["setPaintProperty"]>[1], value);
-  }
-}
-
+/** The same street map and colors as the app's map (basemapStyle.ts), without its places. */
 function Streets() {
   const map = useMap();
+  const theme = useTheme();
+  const themeRef = useRef(theme);
   const [webgl] = useState(hasWebGL);
+  const [styled, setStyled] = useState<LibreMap | null>(null);
   useEffect(() => {
     if (!webgl) return;
     setWorkerUrl(new URL(WORKER, window.location.origin).href);
@@ -63,20 +32,23 @@ function Streets() {
     layer.getAttribution = () => ATTRIBUTION;
     layer.addTo(map);
     const gl = layer.getMaplibreMap();
-    const onStyle = () => restyle(gl);
+    const onStyle = () => {
+      restyle(gl, themeRef.current);
+      setStyled(gl);
+    };
     gl.on("style.load", onStyle);
     return () => {
       gl.off("style.load", onStyle);
+      setStyled(null);
       layer.remove();
     };
   }, [map, webgl]);
+  useEffect(() => {
+    themeRef.current = theme;
+    if (styled) restyle(styled, theme);
+  }, [theme, styled]);
   if (webgl) return null;
-  return (
-    <TileLayer
-      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-      url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    />
-  );
+  return <TileLayer key={theme} attribution={RASTER_ATTRIBUTION} url={rasterUrl(theme)} />;
 }
 
 /** Fit the route into the part of the map that isn't under the panel (`bottom` px on a phone). Only
@@ -125,17 +97,17 @@ export default function ShareMap({
       <Pane name="share-route" style={{ zIndex: 420 }}>
         {route && (
           <>
-            <Polyline positions={route} pathOptions={{ color: "#0E1015", weight: 12, opacity: 0.9 }} interactive={false} />
-            <Polyline positions={route} pathOptions={{ color: C.accent, weight: 7, opacity: 1 }} interactive={false} />
+            <Polyline positions={route} pathOptions={{ color: C.routeCasing, weight: 10, opacity: 1 }} interactive={false} />
+            <Polyline positions={route} pathOptions={{ color: C.route, weight: 6, opacity: 1 }} interactive={false} />
           </>
         )}
       </Pane>
       <Pane name="share-points" style={{ zIndex: 640 }}>
         {start && (
-          <CircleMarker center={start} radius={8} interactive={false} pathOptions={{ color: "#FFFFFF", weight: 3, fillColor: C.light, fillOpacity: 1 }} />
+          <CircleMarker center={start} radius={8} interactive={false} pathOptions={{ color: C.halo, weight: 3, fillColor: C.light, fillOpacity: 1 }} />
         )}
         {end && (
-          <CircleMarker center={end} radius={9} pathOptions={{ color: "#FFFFFF", weight: 3, fillColor: C.heavy, fillOpacity: 1 }}>
+          <CircleMarker center={end} radius={9} pathOptions={{ color: C.halo, weight: 3, fillColor: C.heavy, fillOpacity: 1 }}>
             {endLabel && (
               <Tooltip permanent direction="top" offset={[0, -10]} className="dark-tip">
                 {/* Cut short: a long name over a pin near the edge would run off the map */}

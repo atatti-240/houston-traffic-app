@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/components/app/AppContext";
 import { Icon, PillButton } from "@/components/ui";
 import { describeCreateError, prefersShareSheet, sendLink, shareApi, shareText, shareUrl, type ShareMade } from "@/lib/share";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, SHADOW } from "@/lib/theme";
 import type { Route } from "@/lib/types";
 
 const SHARE_ICON = "M12 3v12M8 7l4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1";
@@ -168,8 +168,8 @@ export default function ShareEta({
       >
         {toast && (
           <div
-            className="toast-in flex items-center gap-2.5 rounded-[16px] border border-pop-line bg-pop py-2.5 pr-4 pl-3 text-[14px] font-medium whitespace-nowrap text-ink"
-            style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+            className="toast-in flex items-center gap-2.5 rounded-[16px] bg-pop py-2.5 pr-4 pl-3 text-[14px] font-medium whitespace-nowrap text-ink"
+            style={{ boxShadow: SHADOW[2] }}
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-full" style={{ background: C.light }}>
               <Icon d={ICON.check} size={14} color={C.onAccent} width={2.6} />

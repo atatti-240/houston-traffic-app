@@ -21,7 +21,7 @@ import { dataGeneration, tripLevel } from "./Trip/shared";
 
 /** Places to offer before you've been anywhere (first ones that exist). */
 const POPULAR = ["galleria", "medcenter", "downtown", "heights", "hobby"];
-const ROW_LINE = "#22262F";
+const ROW_LINE = C.line;
 /** The design's search-result pin (a little rounder than ICON.pin). */
 const PIN = "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 7a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z";
 
@@ -107,7 +107,7 @@ function SearchField({
         placeholder={placeholder}
         autoComplete="off"
         enterKeyHint="go"
-        className="min-w-0 flex-1 border-0 bg-transparent text-[17px] text-ink outline-none placeholder:text-[#8A91A0]"
+        className="min-w-0 flex-1 border-0 bg-transparent text-[17px] text-ink outline-none placeholder:text-muted"
       />
     </div>
   );
@@ -209,7 +209,7 @@ function HereCard() {
         aria-label={close ? "Show more of the area" : "Center on my location"}
         aria-pressed={close}
         onClick={() => setClose(!close)}
-        className="absolute top-2.5 right-2.5 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-edge bg-card"
+        className="absolute top-2.5 right-2.5 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-float shadow-e1"
       >
         <svg
           width="18"
@@ -228,7 +228,7 @@ function HereCard() {
       </button>
       <div
         className="absolute inset-x-0 bottom-0 z-10 flex h-14 items-center gap-3 border-t border-line px-3.5"
-        style={{ background: "rgba(17,19,24,0.94)" }}
+        style={{ background: C.bg }}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate text-[15px] font-semibold">{here ? `You're in ${here.name}` : "Finding you…"}</span>
@@ -391,7 +391,7 @@ export default function WhereTo() {
                 </span>
               )}
               {geo.status === "error" && (
-                <span style={{ color: C.moderate }}>
+                <span style={{ color: C.moderateText }}>
                   {geo.message}
                   {results.length ? " Our own places still work." : ""}{" "}
                   <button type="button" onClick={() => setAttempt((n) => n + 1)} className="cursor-pointer font-medium text-accent">

@@ -36,7 +36,7 @@ function VoteButton({ on, busy, onClick, icon, children }: { on: boolean; busy: 
       disabled={busy}
       aria-pressed={on}
       className="flex h-9 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[18px] px-2 text-[13px] font-semibold whitespace-nowrap disabled:cursor-default disabled:opacity-60"
-      style={on ? { background: C.ink, color: "#11141A", border: `1px solid ${C.ink}` } : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` }}
+      style={on ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` } : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` }}
     >
       <Icon d={icon} size={15} />
       {children}
@@ -65,7 +65,7 @@ export default function ReportCard({ r, row = false }: { r: DriverReport; row?: 
   };
 
   return (
-    <div className={`flex flex-col gap-1.5 ${row ? "" : "w-[252px]"}`} style={{ fontFamily: "var(--font-grotesk), system-ui, sans-serif" }}>
+    <div className={`flex flex-col gap-1.5 ${row ? "" : "w-[252px]"}`} style={{ fontFamily: "inherit" }}>
       <div className="flex items-center gap-2">
         <ReportDot r={r} />
         <span className="text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">
@@ -77,7 +77,7 @@ export default function ReportCard({ r, row = false }: { r: DriverReport; row?: 
       <div className="text-[13px] font-medium text-soft">{r.road ? `${r.road} · ${r.place}` : r.place}</div>
       {r.note && <div className="text-[13px] leading-snug text-ink">“{r.note}”</div>}
       <div className="text-[13px] leading-snug text-muted">{r.provenance}</div>
-      <div className="text-[12px] leading-snug" style={{ color: r.affects_routing ? C.moderate : C.muted }}>
+      <div className="text-[12px] leading-snug" style={{ color: r.affects_routing ? C.moderateText : C.muted }}>
         {effect(r)}
       </div>
       {r.mine === "reported" ? (

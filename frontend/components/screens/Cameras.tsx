@@ -14,7 +14,7 @@ import LiveVideo from "@/components/screens/Cameras/LiveVideo";
 import { useLiveFeed } from "@/components/screens/Cameras/liveFeed";
 import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
 import { camName, hasLiveVideo, parseSim } from "@/lib/format";
-import { C, ICON, LEVEL, type Level } from "@/lib/theme";
+import { C, ICON, LEVEL, tint, type Level } from "@/lib/theme";
 
 const RANK: Record<Level, number> = { heavy: 2, moderate: 1, light: 0 };
 
@@ -88,7 +88,7 @@ function CamRow({ cam, selected, onPick }: { cam: LiveCam; selected: boolean; on
       {hasFeed(cam) && (
         <span
           className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-[0.08em] whitespace-nowrap"
-          style={{ background: "rgba(255,77,77,0.14)", color: C.heavyText }}
+          style={{ background: tint(C.heavy, 12), color: C.heavyText }}
           title="Real video with the camera AI's vehicle boxes"
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: C.heavy }} />
@@ -125,6 +125,7 @@ function Loading({ failed }: { failed: boolean }) {
       <div
         role="status"
         className="flex w-full items-center justify-center rounded-2xl border border-line px-6 text-center text-[13px] text-muted"
+        data-theme="dark"
         style={{ aspectRatio: "350 / 220", background: "#0B0D11" }}
       >
         {failed ? "Can't reach the cameras right now. We'll keep trying." : "Connecting to cameras…"}
