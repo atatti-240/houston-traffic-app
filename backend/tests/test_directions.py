@@ -16,7 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.directions import geo
-from app.directions.door import VIA_SPACING_M, Corridor, DoorDirections, Endpoint, door_timing
+from app.directions.door import RETRY_MIN_S, VIA_SPACING_M, Corridor, DoorDirections, Endpoint, door_timing
+from app.directions.limit import ClientLimiter
 from app.directions.options import MAX_SHARED, SLOWER_FACTOR, SLOWER_S, route_id, route_labels, route_options, shared
 from app.directions.osrm import OsrmClient, OsrmNoRoute, OsrmUnavailable
 from app.directions.steps import build_steps, fmt_ref, instruction, lanes, road_name, toward
@@ -531,6 +532,65 @@ def test_osrm_down_is_not_remembered_and_is_not_retried_during_the_cool_down(rou
     assert door.build(segs, o, d).status == "ok"  # not cached while it was down
 
 
+def test_a_failure_that_may_pass_says_when_to_ask_again(router, trained):
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(12))
+    segs, o, d = segments_of(network, best), place_end(network, "downtown"), place_end(network, "galleria")
+    now = [0.0]
+
+    def down(url, timeout):
+        raise ConnectionResetError("reset")
+
+    door = DoorDirections(OsrmClient("http://osrm.test", fetch=down, clock=lambda: now[0], sleep=lambda s: None))
+    assert door.build(segs, o, d).retry_after_s == 60  # the cool-down
+    now[0] = 58.5
+    assert door.build(segs, o, d).retry_after_s == RETRY_MIN_S  # nearly over: not in a burst right away
+
+    busy = OsrmClient("http://osrm.test", fetch=FakeOsrm(), clock=lambda: 0.0, sleep=lambda s: None, max_wait=2.0)
+    for _ in range(3):  # the queue is full
+        busy.route([[29.7, -95.3], [29.8, -95.4]])
+    door = DoorDirections(busy)
+    path = door.build(segs, o, d)
+    assert path.status == "unavailable" and path.retry_after_s == RETRY_MIN_S and door.cached(segs, o, d) is None
+
+
+def test_a_failure_that_would_happen_again_is_not_asked_again(router, trained):
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(12))
+    segs, o, d = segments_of(network, best), place_end(network, "downtown"), place_end(network, "galleria")
+    no_route = lambda url, t: (400, {"code": "NoSegment", "message": "Could not find a matching segment"})  # noqa: E731
+    for door in (DoorDirections(client_with(no_route)), DoorDirections(OsrmClient(""))):
+        path = door.build(segs, o, d)
+        assert path.status == "unavailable" and path.retry_after_s is None
+    assert DoorDirections.too_far(Corridor(segs)).retry_after_s is None
+
+
+def test_waiting_on_a_build_that_failed_for_now_says_to_ask_again(router, trained):
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(12))
+    started, release = threading.Event(), threading.Event()
+
+    def slow_then_down(url, timeout):
+        started.set()
+        release.wait(5)
+        raise TimeoutError("timed out")
+
+    door = DoorDirections(client_with(slow_then_down))
+    segs, o, d = segments_of(network, best), place_end(network, "downtown"), place_end(network, "galleria")
+    results = []
+    first = threading.Thread(target=lambda: results.append(door.build(segs, o, d)))
+    first.start()
+    started.wait(5)
+    second = threading.Thread(target=lambda: results.append(door.build(segs, o, d)))
+    second.start()
+    time.sleep(0.1)
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert [p.status for p in results] == ["unavailable", "unavailable"]
+    assert all(p.retry_after_s and p.retry_after_s >= RETRY_MIN_S for p in results)
+
+
 def test_doubling_back_is_caught_but_crossing_over_is_fine():
     east = [[29.75, -95.40 + i * 0.001] for i in range(12)]
     spur = east + [[29.75 + 0.001 * i, east[-1][1]] for i in range(1, 4)] + list(reversed(east[-8:]))
@@ -721,6 +781,7 @@ def test_with_osrm_unreachable_the_trip_still_comes_back_quickly(client, service
         and best["directions"]["note"]
     )
     assert best["geometry"] and best["total_min"] > 0
+    assert best["directions"]["retry_after_s"] == 60  # ask again once the cool-down is over
 
 
 def test_recommend_door_to_door_leaves_early_enough_on_the_usual_marks(client, services):
@@ -865,6 +926,7 @@ def test_points_far_from_houston_get_our_line_without_asking_osrm(client, servic
     body = post("/route?directions=true", {"origin": "downtown", "destination": far})
     best = body["best"]
     assert best["directions"]["status"] == "unavailable" and "around Houston" in best["directions"]["note"]
+    assert best["directions"]["retry_after_s"] is None  # it would be the same later
     assert best["total_min"] == plain["total_min"] and best["geometry"] == plain["geometry"]
     for r in body["routes"][1:]:
         ids = [s["id"] for s in r["segments"]]
@@ -881,3 +943,97 @@ def test_a_point_out_of_town_but_near_houston_still_goes_door_to_door(client, se
     katy = {"lat": 29.7858, "lng": -95.8245}  # ~20 km past the Energy Corridor
     best = client.post("/route?directions=true", json={"origin": "downtown", "destination": katy}).json()["best"]
     assert best["directions"]["status"] == "ok" and len(fake.urls) == 1
+
+
+def _directions_body(route: dict, destination) -> dict:
+    return {
+        "origin": "downtown",
+        "destination": destination,
+        "segment_ids": [s["id"] for s in route["segments"]],
+        "depart_at": route["depart_at"],
+    }
+
+
+def test_directions_that_failed_for_now_come_through_when_asked_again(client, services):
+    now = [0.0]
+    fake = FakeOsrm()
+    answers = iter([TimeoutError("timed out")])
+
+    def flaky(url, timeout):  # times out once, then answers
+        e = next(answers, None)
+        if e:
+            raise e
+        return fake(url, timeout)
+
+    services.directions = DoorDirections(
+        OsrmClient("http://osrm.test", fetch=flaky, clock=lambda: now[0], sleep=lambda s: None)
+    )
+    body = client.post("/route?directions=true", json={"origin": "downtown", "destination": GALLERIA_DOOR}).json()
+    best = body["best"]
+    assert best["directions"]["status"] == "unavailable" and best["directions"]["retry_after_s"] == 60
+    assert "main roads only" in best["directions"]["note"]
+    assert all(r["directions"]["retry_after_s"] is None for r in body["routes"][1:])  # pending: asked anyway
+
+    now[0] = 30  # still cooling down: fails fast, says how long is left, OSRM isn't asked
+    early = client.post("/directions", json=_directions_body(best, GALLERIA_DOOR)).json()
+    assert early["directions"]["status"] == "unavailable" and early["directions"]["retry_after_s"] == 30
+    assert fake.urls == []
+
+    now[0] = 61
+    patch = client.post("/directions", json=_directions_body(best, GALLERIA_DOOR)).json()
+    d = patch["directions"]
+    assert patch["id"] == best["id"] and d["status"] == "ok" and d["retry_after_s"] is None and d["steps"]
+    assert patch["total_min"] != best["total_min"] and patch["breakdown"]["access_min"] > 0
+    assert patch["geometry"][-1] == pytest.approx([GALLERIA_DOOR["lat"], GALLERIA_DOOR["lng"]], abs=1e-5)
+    again = client.post("/route?directions=true", json={"origin": "downtown", "destination": GALLERIA_DOOR}).json()
+    assert again["best"]["directions"]["status"] == "ok" and len(fake.urls) == 1  # remembered now
+
+
+def test_client_limiter_refills_and_forgets_idle_clients():
+    now = [0.0]
+    lim = ClientLimiter(burst=3, per_min=10, max_clients=2, clock=lambda: now[0])
+    assert [lim.take("a") for _ in range(3)] == [0, 0, 0]
+    assert lim.take("a") == pytest.approx(6.0)  # 10 a minute: one every 6 s
+    assert lim.take("b") == 0  # everyone has their own
+    now[0] = 3
+    assert lim.take("a") == pytest.approx(3.0)  # a refused ask doesn't count
+    now[0] = 6
+    assert lim.take("a") == 0 and lim.take("a") > 0
+    lim.take("c")
+    assert list(lim._clients) == ["a", "c"]  # b was idle the longest
+    now[0] = 1000
+    takes = [lim.take("a") for _ in range(4)]
+    assert takes[:3] == [0, 0, 0] and takes[3] > 0  # a full bucket again, not more
+
+
+def test_directions_are_limited_per_client(client, services):
+    fake = FakeOsrm()
+    now = [0.0]
+    services.directions = DoorDirections(client_with(fake))
+    services.directions.limiter = ClientLimiter(burst=2, per_min=10, clock=lambda: now[0])
+    alt = client.post("/route", json={"origin": "downtown", "destination": "galleria"}).json()["routes"][1]
+    doors = [{"lat": GALLERIA_DOOR["lat"] + 0.001 * i, "lng": GALLERIA_DOOR["lng"]} for i in range(3)]
+
+    assert [client.post("/directions", json=_directions_body(alt, x)).status_code for x in doors[:2]] == [200, 200]
+    r = client.post("/directions", json=_directions_body(alt, doors[2]))
+    assert r.status_code == 429 and r.headers["retry-after"] == "6"
+    assert r.json()["retry_after_s"] == 6 and "Try again" in r.json()["detail"]
+    calls = len(fake.urls)
+    # What's known already costs OSRM nothing, so it isn't limited ...
+    assert client.post("/directions", json=_directions_body(alt, doors[0])).status_code == 200
+    far = {"lat": 40.7128, "lng": -74.0060}  # too far for OSRM: our own line
+    to_far = client.post("/route", json={"origin": "downtown", "destination": far}).json()["best"]
+    assert client.post("/directions", json=_directions_body(to_far, far)).status_code == 200
+    assert len(fake.urls) == calls
+    # ... and another device isn't held up by this one
+    with TestClient(create_app(services), client=("10.0.0.2", 50000)) as other:
+        assert other.post("/directions", json=_directions_body(alt, doors[2])).status_code == 200
+    now[0] = 6
+    assert client.post("/directions", json=_directions_body(alt, doors[1] | {"lng": -95.47})).status_code == 200
+
+
+def test_directions_are_not_limited_with_osrm_off(client):
+    alt = client.post("/route", json={"origin": "downtown", "destination": "galleria"}).json()["routes"][1]
+    for i in range(12):
+        door = {"lat": GALLERIA_DOOR["lat"] + 0.001 * i, "lng": GALLERIA_DOOR["lng"]}
+        assert client.post("/directions", json=_directions_body(alt, door)).status_code == 200

@@ -1,9 +1,12 @@
 """Door-to-door directions for one route of a /route or /recommend answer (the ones it sent as
-"pending"): the app asks for them one by one after showing the trip."""
+"pending", or "unavailable" with a retry_after_s): the app asks for them one by one after showing
+the trip. Asks that may call OSRM are limited per client (429 with retry_after_s: try again then)."""
 
+import math
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_services, resolve_location, resolve_time
@@ -23,7 +26,7 @@ class DirectionsRequest(BaseModel):
 
 
 @router.post("/directions")
-def directions(req: DirectionsRequest, svc: Services = Depends(get_services)):
+def directions(req: DirectionsRequest, request: Request, svc: Services = Depends(get_services)):
     """Turn-by-turn steps and the door-to-door line for a route (its segment ids), plus its
     times when a point is involved. Answers with what changes in that route's JSON."""
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
@@ -35,7 +38,18 @@ def directions(req: DirectionsRequest, svc: Services = Depends(get_services)):
     view = svc.router.view()
     route = svc.router.evaluate(req.segment_ids, o, d, resolve_time(svc, req.depart_at), 0.0, view)
     o_ep, d_ep = endpoint(svc, req.origin), endpoint(svc, req.destination)
-    path, corr = directions_for(svc, route, o_ep, d_ep, fetch=True)
+    path, corr = directions_for(svc, route, o_ep, d_ep, fetch=False)
+    if path is None:  # not known yet: this ask may call OSRM, which everyone shares
+        if svc.directions.client.enabled:
+            wait = svc.directions.limiter.take(request.client.host if request.client else "")
+            if wait:
+                secs = math.ceil(wait)
+                return JSONResponse(
+                    {"detail": f"Too many directions requests. Try again in {secs} s.", "retry_after_s": secs},
+                    status_code=429,
+                    headers={"Retry-After": str(secs)},
+                )
+        path, corr = directions_for(svc, route, o_ep, d_ep, fetch=True)
     body = apply_patch(route_json(route), door_patch(route, path, corr, o_ep.is_point or d_ep.is_point))
     keep = ("geometry", "depart_at", "arrive_at", "total_min", "breakdown", "directions")
     return {"id": route_id(route), **{k: body[k] for k in keep}}

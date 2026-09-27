@@ -6,4 +6,5 @@ and up to three different routes to pick from.
     door.py     our corridor + OSRM -> the door-to-door line, steps and times (validated, cached)
     options.py  up to 3 routes, their labels, main roads and delay causes
     trips.py    the routes list in /route and /recommend
+    limit.py    a per-client limit on POST /directions (OSRM is shared by everyone)
 """

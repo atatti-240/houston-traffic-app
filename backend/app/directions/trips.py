@@ -20,7 +20,14 @@ from app.recommender import Recommendation
 from app.routing.router import Route
 from app.services import Services
 
-PENDING = {"status": "pending", "steps": [], "distance_m": None, "access_min": None, "note": None}
+PENDING = {
+    "status": "pending",
+    "steps": [],
+    "distance_m": None,
+    "access_min": None,
+    "note": None,
+    "retry_after_s": None,
+}
 
 
 def endpoint(svc: Services, loc: Location) -> Endpoint:
@@ -46,6 +53,8 @@ def door_patch(route: Route, path: DoorPath | None, corr: Corridor, timed: bool)
             if t is None
             else {"start": round(path.access_start_s / 60, 1), "end": round(path.access_end_s / 60, 1)},
             "note": f"{path.note} Times cover the main roads only." if timed and t is None and path.note else path.note,
+            # Unavailable only for now (OSRM down or busy): ask POST /directions again in that many seconds
+            "retry_after_s": path.retry_after_s,
         }
     }
     if path.geometry:
