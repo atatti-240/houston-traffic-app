@@ -274,9 +274,9 @@ export default function WhySlow() {
           <Bone h={18} w="52%" r={6} />
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <Bone h={66} r={14} />
-          <Bone h={66} r={14} />
-          <Bone h={66} r={14} />
+          <Bone h={86} r={14} />
+          <Bone h={86} r={14} />
+          <Bone h={86} r={14} />
         </div>
         <Bone h={160} r={18} />
         <Bone h={230} r={18} />
@@ -315,7 +315,11 @@ export default function WhySlow() {
         <Tile label="Speed">
           <span className="font-num text-[17px] whitespace-nowrap">
             {d.speed_mph}
-            <span className="text-[12px] text-muted"> / {d.free_flow_mph} mph</span>
+            <span className="text-[12px] text-muted"> mph</span>
+          </span>
+          {/* Free-flow speed, labelled so it doesn't read as the posted limit on the sign. */}
+          <span className="text-[12px] text-muted">
+            <span className="font-num">{d.free_flow_mph}</span> when clear
           </span>
         </Tile>
       </div>

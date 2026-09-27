@@ -462,11 +462,11 @@ class Router:
 
         naive_ids = self._search(origin, destination, depart_at, lam, view, blind=True)
         naive = self.evaluate(naive_ids, origin, destination, depart_at, w, view)
-        best.reasons = _dedupe_live(
-            avoid_notes(best, self.avoid)
-            + self._live_reasons(origin, destination, depart_at, lam, view, best)
-            + self._reasons(best, naive, view)
-        )
+        # What live data changed leads (alerts quote the first reason), then the avoid notes,
+        # which always make the MAX_REASONS cut.
+        live = self._live_reasons(origin, destination, depart_at, lam, view, best)
+        notes = avoid_notes(best, self.avoid)
+        best.reasons = _dedupe_live(live[: MAX_REASONS - len(notes)] + notes + self._reasons(best, naive, view))
 
         alt = None
         alt_ids = self._search(
