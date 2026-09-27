@@ -627,3 +627,29 @@ def test_route_ids_are_stable(router):
     a, _ = router.route("downtown", "galleria", MON(12))
     b, _ = router.route("downtown", "galleria", MON(12, 5))
     assert a.segment_ids == b.segment_ids and route_id(a) == route_id(b) and len(route_id(a)) == 10
+
+
+def test_the_same_trip_asked_twice_at_once_calls_osrm_once(router, trained):
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(12))
+    started, release = threading.Event(), threading.Event()
+    fake = FakeOsrm()
+
+    def slow(url, timeout):
+        started.set()
+        release.wait(5)
+        return fake(url, timeout)
+
+    door = DoorDirections(client_with(slow))
+    segs, o, d = segments_of(network, best), place_end(network, "downtown"), place_end(network, "galleria")
+    results = []
+    first = threading.Thread(target=lambda: results.append(door.build(segs, o, d)))
+    first.start()
+    started.wait(5)
+    second = threading.Thread(target=lambda: results.append(door.build(segs, o, d)))
+    second.start()
+    time.sleep(0.1)
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert len(fake.urls) == 1 and [p.status for p in results] == ["ok", "ok"] and results[0] is results[1]
