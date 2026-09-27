@@ -82,6 +82,21 @@ export const ALERT_GROUP: Record<AlertGroup, { label: string; filter: string; ic
   volume: { label: "Heavier than usual", filter: "Busier", icon: "M4 17l5-5 4 4 7-8", color: "#B86E0B" },
 };
 
+/** Vehicle boxes the camera AI draws, by class (the legend under a live camera). */
+export const VEHICLE: Record<string, { label: string; color: string }> = {
+  car: { label: "Cars", color: C.accent },
+  truck: { label: "Trucks", color: C.moderate },
+  bus: { label: "Buses", color: "#B07CE8" },
+  motorcycle: { label: "Motorcycles", color: C.light },
+};
+
+/** Traffic on a live camera, from its rough speeds. */
+export const FLOW: Record<"flowing" | "slow" | "stopped", { label: string; color: string }> = {
+  flowing: { label: "Flowing", color: C.light },
+  slow: { label: "Slow", color: C.moderate },
+  stopped: { label: "Stopped", color: C.heavy },
+};
+
 /** Common UI icons (24x24 stroke paths from the design). */
 export const ICON = {
   back: "M15 18l-6-6 6-6",
@@ -106,6 +121,9 @@ export const ICON = {
   check: "M5 12l5 5 9-10",
   chevron: "M9 6l6 6-6 6",
   video: "M3 7h12v10H3zM15 10l6-3v10l-6-3",
+  /** Vehicle boxes on / off: a box inside frame corners */
+  boxes: "M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M8 9h8v6H8z",
+  info: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 11v5M12 8v.01",
 } as const;
 
 /** Congestion score (0..1) -> level, matching the backend's speed thresholds
