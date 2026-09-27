@@ -22,6 +22,7 @@ from app.directions.options import MAX_SHARED, SLOWER_FACTOR, SLOWER_S, route_id
 from app.directions.osrm import OsrmClient, OsrmNoRoute, OsrmUnavailable
 from app.directions.steps import build_steps, fmt_ref, instruction, lanes, road_name, toward
 from app.main import create_app
+from app.routing.avoid import Avoid, avoiding
 from app.routing.router import Router
 
 MON = lambda h, m=0: datetime(2026, 9, 28, h, m)  # noqa: E731
@@ -1037,3 +1038,44 @@ def test_directions_are_not_limited_with_osrm_off(client):
     for i in range(12):
         door = {"lat": GALLERIA_DOOR["lat"] + 0.001 * i, "lng": GALLERIA_DOOR["lng"]}
         assert client.post("/directions", json=_directions_body(alt, door)).status_code == 200
+
+
+# --- route choices and avoid tolls / highways ----------------------------------------------------------
+
+
+def _uses_toll(network, route) -> bool:
+    return any(network.segments[sid].toll for sid in route.segment_ids)
+
+
+def test_extra_routes_stay_off_toll_roads_when_asked(services):
+    """Energy Corridor -> Downtown: the best route takes I-10, and the extra routes found by making
+    the chosen ones dearer go round by the Sam Houston Tollway. With avoid tolls, the router that
+    found the best route (app.routing.avoid.avoiding) finds the extra ones too, so they stay off it."""
+    t = MON(7, 30)
+    view = services.router.view(t)
+    network = services.network
+    best, alt = services.router.route("energy", "downtown", t, view=view)
+    plain = route_options(services.router, best, alt, view)
+    assert any(_uses_toll(network, r) for r in plain[1:])
+
+    tollfree = avoiding(services.router, Avoid(tolls=True))
+    best, alt = tollfree.route("energy", "downtown", t, view=view)
+    routes = route_options(tollfree, best, alt, view)
+    assert len(routes) >= 2 and not any(_uses_toll(network, r) for r in routes)
+    # The same extra searches on the plain router would go back to the tollway.
+    assert any(_uses_toll(network, r) for r in route_options(services.router, best, alt, view)[1:])
+
+
+def test_route_and_recommend_list_only_toll_free_routes_when_avoiding_tolls(client):
+    trip = {"origin": "energy", "destination": "downtown", "depart_at": MON(7, 30).isoformat()}
+    plain = client.post("/route", json=trip).json()
+    assert any(r["uses_toll"] for r in plain["routes"])
+
+    body = client.post("/route", json={**trip, "avoid_tolls": True}).json()
+    assert len(body["routes"]) >= 2 and not any(r["uses_toll"] for r in body["routes"])
+    assert not any(s["id"].startswith("BW8:") for r in body["routes"] for s in r["segments"])
+
+    rec = client.post(
+        "/recommend", json={"origin": "energy", "destination": "downtown", "arrive_by": "08:30", "avoid_tolls": True}
+    ).json()
+    assert len(rec["routes"]) >= 2 and not any(r["uses_toll"] for r in rec["routes"])

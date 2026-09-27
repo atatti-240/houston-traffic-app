@@ -17,7 +17,7 @@ from app.conditions.provider import ConditionsView
 from app.directions.door import Corridor, DoorPath, Endpoint, door_timing
 from app.directions.options import delay_causes, route_id, route_labels, route_options
 from app.recommender import Recommendation
-from app.routing.router import Route
+from app.routing.router import Route, Router
 from app.services import Services
 
 PENDING = {
@@ -124,10 +124,13 @@ def route_response(
     alt: Route | None,
     view: ConditionsView,
     directions: bool,
+    router: Router | None = None,
 ) -> dict:
-    """POST /route: best + alternative (as before) + the routes list."""
-    naive = cache(lambda: svc.router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
-    routes = route_options(svc.router, best, alt, view, naive)
+    """POST /route: best + alternative (as before) + the routes list. `router` is the one that
+    found `best` (it may stay off tolls or highways: app.routing.avoid); the extra routes use it too."""
+    router = router or svc.router
+    naive = cache(lambda: router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
+    routes = route_options(router, best, alt, view, naive)
     items = routes_json(svc, routes, endpoint(svc, origin), endpoint(svc, destination), directions)
     return {"best": items[0], "alternative": _alternative(alt, items), "routes": items}
 
@@ -140,6 +143,7 @@ def recommend_response(
     arrive_by: datetime,
     view: ConditionsView,
     directions: bool,
+    router: Router | None = None,
 ) -> dict:
     """POST /recommend: the departure (door to door when a point is involved) + the routes list.
     `recommend_by(extra_min)` runs the recommender with that many minutes added to the buffer.
@@ -147,7 +151,9 @@ def recommend_response(
     To or from an arbitrary point the way on and off our roads takes time too: the departure is
     picked again with the difference between the door-to-door trip and our corridor (rounded up
     to a minute) taken from the buffer, so departures stay on the usual 5-minute marks. OSRM is
-    called for the chosen route only, never in the recommender's loop."""
+    called for the chosen route only, never in the recommender's loop. `router` is the one the
+    recommender used (it may stay off tolls or highways); the extra routes use it too."""
+    router = router or svc.router
     o, d = endpoint(svc, origin), endpoint(svc, destination)
     rec = recommend_by(0)
     buffer_min = rec.buffer_min
@@ -159,8 +165,8 @@ def recommend_response(
             rec = recommend_by(extra)
             rec.buffer_min = buffer_min
     r0 = rec.route
-    naive = cache(lambda: svc.router.traffic_only_route(r0.origin, r0.destination, r0.depart_at, view))
-    routes = route_options(svc.router, r0, rec.alternative, view, naive)
+    naive = cache(lambda: router.traffic_only_route(r0.origin, r0.destination, r0.depart_at, view))
+    routes = route_options(router, r0, rec.alternative, view, naive)
     items = routes_json(svc, routes, o, d, directions)
     body = recommendation_json(rec)
     body.update(route=items[0], alternative=_alternative(rec.alternative, items), routes=items)
