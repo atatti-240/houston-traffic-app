@@ -653,3 +653,16 @@ def test_the_same_trip_asked_twice_at_once_calls_osrm_once(router, trained):
     first.join(5)
     second.join(5)
     assert len(fake.urls) == 1 and [p.status for p in results] == ["ok", "ok"] and results[0] is results[1]
+
+
+def test_both_ends_by_the_same_node_go_door_to_door_directly(client, services):
+    # A shop a few blocks from downtown snaps to the downtown node: our route is empty.
+    near = {"lat": 29.7573, "lng": -95.3555}
+    assert client.post("/route", json={"origin": "downtown", "destination": "downtown"}).status_code == 200
+    plain = client.post("/route", json={"origin": "downtown", "destination": near}).json()
+    assert plain["best"]["segments"] == [] and plain["best"]["label"] == "via local streets"
+    fake = FakeOsrm()
+    services.directions = DoorDirections(client_with(fake))
+    best = client.post("/route?directions=true", json={"origin": "downtown", "destination": near}).json()["best"]
+    assert best["directions"]["status"] == "ok" and len(fake.urls) == 1 and vias_in(fake.urls[0]) == 0
+    assert best["total_min"] > 0 and best["geometry"][-1] == pytest.approx([near["lat"], near["lng"]], abs=1e-5)
