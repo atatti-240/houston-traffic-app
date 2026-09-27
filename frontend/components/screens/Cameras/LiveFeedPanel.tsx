@@ -3,7 +3,7 @@
 /** What the camera AI sees on a live camera: vehicles in view, traffic flow from its rough speeds,
  * the incident check, and where the video really comes from (a Baton Rouge camera standing in). */
 
-import { Icon } from "@/components/ui";
+import { Icon, InfoToggle } from "@/components/ui";
 import { C, FLOW, ICON, VEHICLE } from "@/lib/theme";
 import type { LiveFeed, LiveFeedDetail } from "@/lib/types";
 
@@ -117,10 +117,7 @@ export default function LiveFeedPanel({ feed, detail }: { feed: LiveFeed; detail
         </div>
       )}
       <IncidentLine feed={feed} clearAfter={detail?.clear_after_s ?? 120} />
-      <p className="m-0 flex gap-2 text-[12px] leading-snug text-muted">
-        <Icon d={ICON.info} size={15} color={C.muted} className="mt-px shrink-0" />
-        <span>{source(feed, detail)}</span>
-      </p>
+      <InfoToggle label="Where this video comes from">{source(feed, detail)}</InfoToggle>
     </section>
   );
 }
@@ -132,10 +129,5 @@ export function FeedOffline({ feed }: { feed: LiveFeed | null }) {
     : feed.status === "missing"
       ? `Live AI feed offline: the camera AI isn't running its Baton Rouge camera ${feed.cv_camera}. Showing a drawn view of this road's traffic.`
       : "Live AI feed offline: can't reach the camera AI right now. Showing a drawn view of this road's traffic.";
-  return (
-    <p className="m-0 flex gap-2 text-[12px] leading-snug text-muted">
-      <Icon d={ICON.info} size={15} color={C.muted} className="mt-px shrink-0" />
-      <span>{why}</span>
-    </p>
-  );
+  return <InfoToggle label="Why there's no live video">{why}</InfoToggle>;
 }
