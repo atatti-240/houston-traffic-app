@@ -5,6 +5,7 @@ the points it was given), and each test bends that answer to what it wants to ch
 """
 
 import http.client
+import json
 import socket
 import threading
 import time
@@ -15,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.directions import geo
-from app.directions.door import Corridor, DoorDirections, Endpoint, door_timing
+from app.directions.door import VIA_SPACING_M, Corridor, DoorDirections, Endpoint, door_timing
 from app.directions.options import MAX_SHARED, SLOWER_FACTOR, SLOWER_S, route_id, route_labels, route_options, shared
 from app.directions.osrm import OsrmClient, OsrmNoRoute, OsrmUnavailable
 from app.directions.steps import build_steps, fmt_ref, instruction, lanes, road_name, toward
@@ -331,6 +332,90 @@ def test_slow_server_times_out():
         srv.close()
 
 
+def _serve_once(send) -> tuple[socket.socket, int]:
+    """A local server for one request: reads it, then `send(conn)` writes whatever it likes."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def run():
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(65536)
+            try:
+                send(conn)
+            except OSError:  # the client hung up
+                pass
+
+    threading.Thread(target=run, daemon=True).start()
+    return srv, srv.getsockname()[1]
+
+
+def test_a_server_trickling_its_answer_is_cut_off_at_the_timeout():
+    def trickle(conn):
+        conn.sendall(b'HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{"code":"Ok","routes":[')
+        for _ in range(40):  # a byte every 0.2 s: each read is quick, the whole answer never ends
+            time.sleep(0.2)
+            conn.sendall(b" ")
+
+    srv, port = _serve_once(trickle)
+    try:
+        c = OsrmClient(f"http://127.0.0.1:{port}", timeout=0.6)
+        t = time.monotonic()
+        with pytest.raises(OsrmUnavailable, match="too long|timed out"):
+            c.route([[29.7, -95.3], [29.8, -95.4]])
+        assert time.monotonic() - t < 1.5 and c.down
+    finally:
+        srv.close()
+
+
+def test_an_oversized_answer_is_refused(monkeypatch):
+    monkeypatch.setattr("app.directions.osrm.MAX_BODY_BYTES", 1000)
+    srv, port = _serve_once(
+        lambda conn: conn.sendall(b"HTTP/1.1 200 OK\r\ncontent-length: 5000\r\n\r\n" + b'{"code":"Ok"' + b" " * 4988)
+    )
+    try:
+        with pytest.raises(OsrmUnavailable):
+            OsrmClient(f"http://127.0.0.1:{port}", timeout=2.0).route([[29.7, -95.3], [29.8, -95.4]])
+    finally:
+        srv.close()
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_real_answers_are_read_whole(chunked):
+    ok = json.dumps(fake_route("http://x/route/v1/driving/-95.3,29.7;-95.4,29.8?steps=true")).encode()
+    no = b'{"code": "NoSegment", "message": "Could not find a matching segment"}'
+
+    def answer(status: bytes, body: bytes) -> bytes:
+        if chunked:  # in two pieces, the second a moment later
+            half = len(body) // 2
+            parts = [body[:half], body[half:]]
+            return b"HTTP/1.1 %s\r\ntransfer-encoding: chunked\r\n\r\n" % status + b"".join(
+                b"%x\r\n%s\r\n" % (len(p), p) for p in parts
+            ) + b"0\r\n\r\n"
+        return b"HTTP/1.1 %s\r\ncontent-length: %d\r\n\r\n%s" % (status, len(body), body)
+
+    srv, port = _serve_once(lambda conn: conn.sendall(answer(b"200 OK", ok)))
+    try:
+        route = OsrmClient(f"http://127.0.0.1:{port}", timeout=2.0).route([[29.7, -95.3], [29.8, -95.4]])
+        assert route["legs"] and route["geometry"]["coordinates"]
+    finally:
+        srv.close()
+    srv, port = _serve_once(lambda conn: conn.sendall(answer(b"400 Bad Request", no)))
+    try:
+        with pytest.raises(OsrmNoRoute, match="NoSegment"):
+            OsrmClient(f"http://127.0.0.1:{port}", timeout=2.0).route([[29.7, -95.3], [29.8, -95.4]])
+    finally:
+        srv.close()
+
+
+def test_an_answer_that_is_not_an_object_is_a_server_problem():
+    c = client_with(lambda url, t: (200, []))
+    with pytest.raises(OsrmUnavailable):
+        c.route([[29.7, -95.3], [29.8, -95.4]])
+    assert c.down
+
+
 # --- door to door: vias, validation, fallbacks, cache ------------------------------------------------
 
 
@@ -478,6 +563,47 @@ def test_door_timing_counts_the_part_of_our_roads_it_drives_plus_the_way_on_and_
     assert best.base_travel_s * driven * 0.5 < t.travel_s - t.access_s <= best.base_travel_s
     assert t.total_s == pytest.approx(t.travel_s + t.train_delay_s + t.closure_wait_s)
     assert t.arrive_at == best.depart_at + timedelta(seconds=t.total_s)
+
+
+def test_our_roads_driven_before_the_first_via_and_after_the_last_are_timed_by_us(router, trained):
+    """OSRM's line follows our road from the start and to near the end (as it does for a trip from
+    one of our places): only the bit off our roads is OSRM's time, the rest is our traffic model."""
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(8))
+    corr = Corridor(segments_of(network, best))
+    o = Endpoint(*corr.line[0], is_point=True)
+    end = corr.line[-1]
+    heading = geo.bearing(corr.line[-2], end) % 180
+    # ~130 m off to the side of where our road ends (east of a north-south road, else north)
+    off_end = [end[0], end[1] + 0.00135] if heading < 45 or heading > 135 else [end[0] + 0.0012, end[1]]
+    d = Endpoint(*off_end, is_point=True)
+
+    def along_our_road(url, timeout):
+        pts, _ = _parse(url)
+        line = [p for a, b in zip(corr.line, corr.line[1:]) for p in _dense(a, b, 20.0)] + [corr.line[-1]]
+        line += _dense(corr.line[-1], off_end, 20.0)[1:] + [off_end]
+        dists = [geo.dist_m(a, b) for a, b in zip(line, line[1:])]
+        leg = {
+            "distance": sum(dists),
+            "duration": sum(dists) / 20,
+            "steps": [_step("depart", line[0], line[1]), _step("arrive", off_end, off_end, modifier="left")],
+            "annotation": {"distance": dists, "duration": [x / 20 for x in dists]},
+        }
+        route = {
+            "distance": leg["distance"],
+            "duration": leg["duration"],
+            "geometry": {"type": "LineString", "coordinates": [[p[1], p[0]] for p in line]},
+            "legs": [leg],
+        }
+        return 200, {"code": "Ok", "routes": [route], "waypoints": [{"location": [p[1], p[0]]} for p in pts]}
+
+    path = DoorDirections(client_with(along_our_road)).build(corr.segments, o, d)
+    assert path.status == "ok"
+    vias = corr.vias(0.0, corr.length, VIA_SPACING_M)
+    assert path.join_m < 50 < vias[0].d and path.access_start_s < 5
+    assert path.leave_m > corr.length - 50 > vias[-1].d and 0 < path.access_end_s < 15  # ~130 m at 20 m/s
+    t = door_timing(best, corr, path)
+    assert t.total_s == pytest.approx(best.total_s + path.access_start_s + path.access_end_s, abs=30)
 
 
 # --- route choices ------------------------------------------------------------------------------------
@@ -696,8 +822,62 @@ def _cut_off(url, timeout):
     raise http.client.IncompleteRead(b"")  # the connection dropped mid-answer
 
 
-@pytest.mark.parametrize("answer", [_cut_off, lambda url, t: (200, {"code": "Ok", "routes": [{"legs": []}]})])
+def _string_steps(url, timeout):
+    status, body = FakeOsrm()(url, timeout)
+    for leg in body["routes"][0]["legs"]:
+        leg["steps"] = ["turn left"] * len(leg["steps"])
+    return status, body
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        _cut_off,
+        lambda url, t: (200, {"code": "Ok", "routes": [{"legs": []}]}),
+        lambda url, t: (200, []),
+        _string_steps,
+    ],
+)
 def test_odd_answers_fall_back_instead_of_failing(client, services, answer):
     services.directions = DoorDirections(client_with(answer))
     r = client.post("/route?directions=true", json={"origin": "downtown", "destination": GALLERIA_DOOR})
     assert r.status_code == 200 and r.json()["best"]["directions"]["status"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "far",
+    [
+        {"lat": 40.7128, "lng": -74.0060},  # New York: snaps to one of our places, 2,000+ km away
+        {"lat": 1000, "lng": -95.4},  # not a coordinate
+        {"lat": float("nan"), "lng": -95.4},
+    ],
+)
+def test_points_far_from_houston_get_our_line_without_asking_osrm(client, services, far):
+    fake = FakeOsrm()
+    services.directions = DoorDirections(client_with(fake))
+
+    def post(path: str, body: dict) -> dict:  # json.dumps: NaN too, as a sloppy client might send it
+        r = client.post(path, content=json.dumps(body), headers={"content-type": "application/json"})
+        assert r.status_code == 200
+        return r.json()
+
+    plain = post("/route", {"origin": "downtown", "destination": far})["best"]
+    body = post("/route?directions=true", {"origin": "downtown", "destination": far})
+    best = body["best"]
+    assert best["directions"]["status"] == "unavailable" and "around Houston" in best["directions"]["note"]
+    assert best["total_min"] == plain["total_min"] and best["geometry"] == plain["geometry"]
+    for r in body["routes"][1:]:
+        ids = [s["id"] for s in r["segments"]]
+        patch = post("/directions", {"origin": "downtown", "destination": far, "segment_ids": ids})
+        assert patch["directions"]["status"] == "unavailable"
+    rec = post("/recommend?directions=true", {"origin": far, "destination": "galleria", "arrive_by": "09:00"})
+    assert rec["route"]["directions"]["status"] == "unavailable"
+    assert fake.urls == []
+
+
+def test_a_point_out_of_town_but_near_houston_still_goes_door_to_door(client, services):
+    fake = FakeOsrm()
+    services.directions = DoorDirections(client_with(fake))
+    katy = {"lat": 29.7858, "lng": -95.8245}  # ~20 km past the Energy Corridor
+    best = client.post("/route?directions=true", json={"origin": "downtown", "destination": katy}).json()["best"]
+    assert best["directions"]["status"] == "ok" and len(fake.urls) == 1
