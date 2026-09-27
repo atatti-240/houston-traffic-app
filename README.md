@@ -60,10 +60,14 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 6. **Why it's slow.** 60% of the delay is the crash, 40% is rush hour, and the speed chart shows the drop at 4:52.
 7. **Live cams.** The West Loop camera by the Galleria, in the rain.
 8. **Alerts.** Incidents, roadwork, events, weather, trains and busier roads in one list, each with what it costs you.
-9. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
-10. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
+9. **Drivers report what they see.** Flooding on Westheimer by the Galleria, with *Still there* / *Not there* (the scenario's canned reports are labeled *Demo report*).
+10. **Downtown → Galleria.** The only way in crosses the flood: *"Flooding on your route. Turn around, don't drown."*
+11. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
+12. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
 You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`.
+
+**Report** (on the map, and over the map on a trip) reports a crash, police, a hazard, a pothole, a stalled car or flooding where you are or at a spot you tap, snapped to the road direction it's on. Tap a report's pin for *Still there* / *Not there*. Crashes, stalled cars and flooding slow the road for routing; see [docs/driver-reports.md](docs/driver-reports.md).
 
 ## How it works
 
