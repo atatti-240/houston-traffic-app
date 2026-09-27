@@ -51,7 +51,8 @@ export function RouteList({
       {routes.map((r) => {
         const on = r === selected;
         const pending = pendingTimes(r);
-        const cause = r.delay_causes?.[0];
+        // What stands out: a crash, a train, a closure... before plain traffic
+        const cause = r.delay_causes?.find((c) => c.kind !== "rush" && c.minutes >= 2) ?? r.delay_causes?.[0];
         const more = fastest !== null && !pending ? minutes(r) - fastest : 0;
         return (
           <button

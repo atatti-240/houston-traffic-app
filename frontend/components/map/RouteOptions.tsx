@@ -16,11 +16,15 @@ import { C } from "@/lib/theme";
 type SceneRoute = NonNullable<MapScene["routes"]>[number];
 
 /** Where to put each route's bubble, in screen space at the current zoom: on its own line, as far as possible from
- * the other lines (so it's clear which line it names), never on top of another bubble. The picked route goes first. */
-function bubbleSpots(map: L.Map, routes: SceneRoute[]): (LatLngTuple | null)[] {
+ * the other lines (so it's clear which line it names), never on top of another bubble or the start / end markers.
+ * The picked route goes first. */
+function bubbleSpots(map: L.Map, routes: SceneRoute[], markers: LatLngTuple[]): (LatLngTuple | null)[] {
   const px = routes.map((r) => r.geometry.map((p) => map.latLngToLayerPoint(p)));
   const sample = (pts: L.Point[], n: number) => pts.filter((_, i) => i % Math.max(1, Math.floor(pts.length / n)) === 0);
-  const placed: { x: number; y: number; w: number; h: number }[] = [];
+  const placed: { x: number; y: number; w: number; h: number }[] = markers.map((m) => {
+    const p = map.latLngToLayerPoint(m);
+    return { x: p.x, y: p.y, w: 22, h: 22 };
+  });
   const out: (LatLngTuple | null)[] = routes.map(() => null);
   const order = routes.map((_, i) => i).sort((a, b) => Number(routes[b].selected) - Number(routes[a].selected));
   for (const i of order) {
@@ -85,9 +89,13 @@ export default function RouteOptions() {
   const [zoom, setZoom] = useState(() => map.getZoom());
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
   const routes = scene?.routes;
+  const points = scene?.points;
   const pick = scene?.pickRoute;
   // Screen positions: again after every zoom
-  const spots = useMemo(() => (routes && routes.length > 1 ? bubbleSpots(map, routes) : []), [routes, zoom, map]);
+  const spots = useMemo(
+    () => (routes && routes.length > 1 ? bubbleSpots(map, routes, (points ?? []).map((p) => [p.lat, p.lng] as LatLngTuple)) : []),
+    [routes, points, zoom, map],
+  );
   if (!routes || routes.length < 2) return null;
   return (
     <>
@@ -108,7 +116,8 @@ export default function RouteOptions() {
             </Fragment>
           ))}
       </Pane>
-      <Pane name="route-bubbles" style={{ zIndex: 630 }}>
+      {/* Over the place names too (they're Leaflet tooltips, 650), under popups (700) */}
+      <Pane name="route-bubbles" style={{ zIndex: 660 }}>
         {routes.map((r, i) =>
           spots[i] ? (
             <Marker
