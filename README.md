@@ -43,6 +43,7 @@ API docs: http://localhost:8000/docs
 |---|---|
 | `make backend` / `make frontend` | run one side |
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
+| `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
 | `make test` | backend pytest + frontend typecheck |
 
 Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
@@ -76,7 +77,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:
 
 ```
 backend/   FastAPI + SQLite: adapters (mock data), scoring models, router, recommender, planner, causes, scheduler, API
-frontend/  Next.js PWA + Leaflet, dark UI: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams, scripted demo
+frontend/  Next.js PWA + Leaflet over a MapLibre street map, dark UI: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams, scripted demo
 ```
 
 ## How real data plugs in
@@ -95,7 +96,7 @@ Every source is an interface in `backend/app/adapters/base.py`. Today each one h
 
 Live methods are called once per request, so cache the upstream for about a minute, and raise when it's down. The app marks the feed down and falls back to predictions.
 
-The one step real feeds need is **map matching**: snap each sensor, incident or crossing to a `RoadSegment` id. The seeded graph (`app/seed/network.py`) is a hand-built sketch of the major corridors; swapping in OpenStreetMap-derived segments keeps the same schema.
+The one step real feeds need is **map matching**: snap each sensor, incident or crossing to a `RoadSegment` id. The seeded graph (`app/seed/network.py`) is a hand-built graph of the major corridors; each segment is drawn along the real road, traced once from OpenStreetMap (`make roads`, saved in `app/seed/road_shapes.json`). Swapping in a full OpenStreetMap road graph keeps the same schema.
 
 Notifications work the same way: `NotificationService` has a mock (stored and polled by the app, plus browser notifications via the service worker). `WebPushNotificationService` is the stub where VAPID keys and `pywebpush` go.
 
@@ -105,4 +106,5 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
-- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, OSM road graph, real web push, the marketing website
+- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, full OSM road graph, real web push, the marketing website

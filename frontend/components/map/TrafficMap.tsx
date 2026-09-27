@@ -7,27 +7,39 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import VectorBasemap from "@/components/map/VectorBasemap";
 import { camName } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
 import type { LatLngTuple, Slowdown } from "@/lib/types";
 
 export const HOUSTON_CENTER: LatLngTuple = [29.7604, -95.3698];
 
-/** Shift a line to the right of travel so both directions of a road are visible. */
+/** Shift a line to the right of travel so both directions of a road are visible: each point
+ * moves along the average of its neighbouring segments' right-hand normals (curves stay curves). */
 export function offsetLine(geom: LatLngTuple[], meters = 55): LatLngTuple[] {
   if (geom.length < 2) return geom;
-  const [a, b] = [geom[0], geom[geom.length - 1]];
-  const cos = Math.cos((a[0] * Math.PI) / 180);
-  const dx = (b[1] - a[1]) * cos;
-  const dy = b[0] - a[0];
-  const len = Math.hypot(dx, dy) || 1;
+  const cos = Math.cos((geom[0][0] * Math.PI) / 180);
   const k = meters / 111_320;
-  const dLat = (-dx / len) * k;
-  const dLng = ((dy / len) * k) / cos;
-  return geom.map(([lat, lng]) => [lat + dLat, lng + dLng]);
+  const normals = geom.slice(1).map((b, i) => {
+    const a = geom[i];
+    const dx = (b[1] - a[1]) * cos;
+    const dy = b[0] - a[0];
+    const len = Math.hypot(dx, dy) || 1;
+    return [-dx / len, dy / len] as const; // right of travel: (dLat, dLng scaled)
+  });
+  return geom.map(([lat, lng], i) => {
+    const prev = normals[Math.max(0, i - 1)];
+    const next = normals[Math.min(normals.length - 1, i)];
+    let nLat = prev[0] + next[0];
+    let nLng = prev[1] + next[1];
+    const len = Math.hypot(nLat, nLng) || 1;
+    nLat /= len;
+    nLng /= len;
+    return [lat + nLat * k, lng + (nLng * k) / cos];
+  });
 }
 
 function Register() {
@@ -271,10 +283,7 @@ export default function TrafficMap({
       touchZoom={interactive}
       keyboard={interactive}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
-      />
+      <VectorBasemap />
       {interactive && <Register />}
       {interactive && <ClickAway />}
       {interactive && <FitScene fit={scene?.fit} padding={scene?.fitPadding} />}

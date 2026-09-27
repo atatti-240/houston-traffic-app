@@ -41,7 +41,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here. It runs at `CLOCK_SPEED` × real time from `SIM_START` (a Monday 7:15 AM), and the demo can jump it. |
 | Services | `backend/app/services.py` | Wires network + models + router + scheduler + clock together for the API. |
 | REST API | `backend/app/api/` | FastAPI routers. |
-| Frontend | `frontend/` | Next.js PWA, dark theme. One Leaflet map stays mounted under every screen: Where to, Trip, Live map, Causes, Why it's slow, Alerts and Live cams. Full-screen panels on a phone, a 420px side panel next to the map on desktop. Plus the scripted demo. |
+| Frontend | `frontend/` | Next.js PWA, dark theme. One Leaflet map (over a free MapLibre vector street map from OpenFreeMap) stays mounted under every screen: Where to, Trip, Live map, Causes, Why it's slow, Alerts and Live cams. Full-screen panels on a phone, a 420px side panel next to the map on desktop. Plus the scripted demo. |
 
 ## Time buckets
 
@@ -136,7 +136,7 @@ A watch on a road with something unusual (a non-routine cause of at least a minu
 ## Data model (SQLite via SQLAlchemy)
 
 - `Node`: id, name, lat, lng, is_place
-- `RoadSegment`: id, name, highway, road_class (`freeway`/`arterial`), direction, from_node, to_node, length_m, free_flow_mph, geometry (JSON list of `[lat, lng]`)
+- `RoadSegment`: id, name, highway, road_class (`freeway`/`arterial`), direction, from_node, to_node, length_m, free_flow_mph, geometry (JSON list of `[lat, lng]`: the real road, traced from OpenStreetMap by `scripts/fetch_road_shapes.py` into `app/seed/road_shapes.json`; existing databases pick up new shapes on startup)
 - `RailCrossing`: id, name, lat, lng, rail_line, segment_id
 - `Camera`: id, kind (`highway`/`train`), name, lat, lng, url, segment_id, crossing_id
 - `ScoreEntry`: model, entity_id, bucket, value, aux, n_obs (aux = avg blocked minutes for trains)

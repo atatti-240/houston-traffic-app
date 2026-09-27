@@ -1,4 +1,4 @@
-.PHONY: setup seed dev backend frontend test
+.PHONY: setup seed roads dev backend frontend test
 
 setup:
 	cd backend && uv sync
@@ -7,6 +7,10 @@ setup:
 # Rebuild the database from scratch: Houston road network + synthetic history replay.
 seed:
 	cd backend && rm -f data/app.db && uv run python scripts/seed.py && uv run python scripts/replay_history.py
+
+# Re-trace every road segment along the real streets (OpenStreetMap via the public OSRM router).
+roads:
+	cd backend && uv run python scripts/fetch_road_shapes.py
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
