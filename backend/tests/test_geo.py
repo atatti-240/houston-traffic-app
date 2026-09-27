@@ -43,6 +43,9 @@ def test_parse_common_forms():
     week = parse("Mo-Fr 08:00-17:00, Sa 09:00-12:00")
     assert week[0] == [(480, 1020)] and week[5] == [(540, 720)] and week[6] == []
     assert parse("Mo-Fr 00:00-24:00")[1] == [(0, 1440)]
+    # 24/7 as one rule among others
+    assert parse("24/7; PH off") == [[(0, 1440)]] * 7
+    assert parse("Mo-Sa 24/7; Su 08:00-20:00")[6] == [(480, 1200)] and parse("Mo-Sa 24/7; Su 08:00-20:00")[0] == [(0, 1440)]
 
 
 @pytest.mark.parametrize(
@@ -240,6 +243,43 @@ def test_down_without_cache_raises_and_with_cache_serves_stale(session_factory):
     again = make_geo(FakeNominatim(), session_factory, clock)
     again.fetch.down = True
     assert again.search("starbucks", near) == (fresh, True)
+
+
+def test_search_stays_in_houston_for_a_point_outside_it():
+    fake = FakeNominatim(search={("starbucks", "houston"): STARBUCKS})
+    results, _ = make_geo(fake).search("starbucks", (40.7128, -74.0060))  # New York
+    assert len(fake.urls) == 1 and float(fake.params(0)["viewbox"].split(",")[0]) < -96
+    assert {r["id"] for r in results} == {"W1", "W2", "W3"}
+
+
+def test_down_near_a_new_spot_serves_the_saved_answer_for_all_of_houston(session_factory):
+    rice = nominatim_row(45185995, "Rice University", 29.717, -95.402, typ="university", importance=0.59)
+    fake = FakeNominatim(search={("rice university", "near"): [], ("rice university", "houston"): [rice]})
+    clock = Clock()
+    geo = make_geo(fake, session_factory, clock)
+    geo.search("rice university", (29.7432, -95.3808))  # near Midtown: nothing close, so all of Houston too
+    fake.down = True
+    fake.urls.clear()
+    # From somewhere else (no saved answer for that spot): the saved one for the whole area, marked
+    # stale, after a single failed request (not a second wait for the same outage).
+    results, stale = geo.search("rice university", (29.7604, -95.4600))
+    assert stale and [r["name"] for r in results] == ["Rice University"] and len(fake.urls) == 1
+    clock.t += timedelta(days=3)
+    assert geo.search("rice university", (29.7000, -95.3000))[1] is True
+    with pytest.raises(GeoUnavailable, match="down"):
+        geo.search("walmart", (29.7604, -95.4600))
+
+
+def test_nothing_near_you_and_the_area_down_says_down_not_nothing_found():
+    fake = FakeNominatim(search={("heb", "near"): []})
+
+    def fetch(url):
+        if float(dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))["viewbox"].split(",")[0]) < -96:
+            raise TimeoutError("timed out")
+        return fake(url)
+
+    with pytest.raises(GeoUnavailable, match="down"):
+        make_geo(fetch).search("heb", (29.7432, -95.3808))
 
 
 def test_nothing_found_is_cached_for_a_short_while():

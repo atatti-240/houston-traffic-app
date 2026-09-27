@@ -265,6 +265,11 @@ def _rows_ok(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(r, dict) and "lat" in r and "lon" in r for r in value)
 
 
+def in_houston(lat: float, lng: float) -> bool:
+    left, top, right, bottom = HOUSTON_VIEWBOX
+    return left <= lng <= right and bottom <= lat <= top
+
+
 def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp, dl = p2 - p1, math.radians(lng2 - lng1)
@@ -292,11 +297,12 @@ class Geocoder:
         base = {"format": "jsonv2", "addressdetails": 1, "extratags": 1}
         return f"{self.base_url}/{path}?{urllib.parse.urlencode({**base, **params})}"
 
-    def _get(self, key: str, url: str, ttl: timedelta) -> tuple[list[dict], bool]:
+    def _get(self, key: str, url: str, ttl: timedelta, offline: bool = False) -> tuple[list[dict], bool]:
         """(Nominatim's rows, stale): the cached answer while fresh, else ask (then cache). If
         asking fails, an expired cached answer comes back with stale=True, else GeoUnavailable.
-        The raw rows are cached (not our reading of them), so a better reading applies to old
-        answers too."""
+        `offline`: it just failed, so don't ask again (a second wait for the same outage); only
+        the cache answers. The raw rows are cached (not our reading of them), so a better
+        reading applies to old answers too."""
         hit = self.cache.get(key)
         if hit is not None and not _rows_ok(hit[0]):
             hit = None
@@ -304,6 +310,10 @@ class Geocoder:
             value, at = hit
             if self.now() - at < (ttl if value else MISS_TTL):
                 return value, False
+        if offline:
+            if hit is not None:
+                return hit[0], True
+            raise GeoUnavailable(DOWN)
         try:
             self.limiter.wait()
             data = self.fetch(url)
@@ -326,9 +336,11 @@ class Geocoder:
         self.cache.put_many(items, self.now())
         return rows, False
 
-    def _search(self, q: str, box: tuple[float, float, float, float], key: str, limit: int) -> tuple[list[dict], bool]:
+    def _search(
+        self, q: str, box: tuple[float, float, float, float], key: str, limit: int, offline: bool = False
+    ) -> tuple[list[dict], bool]:
         url = self._url("search", q=q, limit=limit, viewbox=",".join(f"{v:.4f}" for v in box), bounded=1, countrycodes="us")
-        rows, stale = self._get(key, url, SEARCH_TTL)
+        rows, stale = self._get(key, url, SEARCH_TTL, offline)
         return [details_json(r) for r in rows], stale
 
     # ---- what the API uses ------------------------------------------------------------------
@@ -337,21 +349,28 @@ class Geocoder:
         """Places matching `q` in the Houston area, the ones around `near` first. (results, stale)
 
         Near you, the geocoder ranks a chain's branches all the same, so we ask for more of them
-        and keep the closest; well-known places (a university, the airport) stay on top."""
+        and keep the closest; well-known places (a university, the airport) stay on top. A point
+        outside the Houston area only orders the results: the search itself stays in Houston."""
         q = " ".join(q.split())
         norm = q.lower()
         results: list[dict] = []
         stale = False
-        if near:
+        failed: GeoUnavailable | None = None
+        if near and in_houston(*near):
             lat, lng = near
             box = (lng - NEAR_DEG, lat + NEAR_DEG, lng + NEAR_DEG, lat - NEAR_DEG)
-            results, stale = self._search(q, box, f"search|{norm}|{lat:.2f},{lng:.2f}", NEAR_FETCH)
+            try:
+                results, stale = self._search(q, box, f"search|{norm}|{lat:.2f},{lng:.2f}", NEAR_FETCH)
+            except GeoUnavailable as e:
+                # Nothing saved for around here: the whole area's saved answer is better than nothing.
+                failed, stale = e, True
         if len(results) < NEAR_ENOUGH:
             try:
-                more, more_stale = self._search(q, HOUSTON_VIEWBOX, f"search|{norm}|houston", NEAR_FETCH)
-            except GeoUnavailable:
-                if not near:
-                    raise
+                # After a failure, only a saved answer (don't wait for the same outage twice).
+                more, more_stale = self._search(q, HOUSTON_VIEWBOX, f"search|{norm}|houston", NEAR_FETCH, offline=stale)
+            except GeoUnavailable as e:
+                if not results:
+                    raise (failed or e) from None
                 more, more_stale = [], True  # keep what we found near you
             seen = {r["id"] for r in results}
             results = results + [r for r in more if r["id"] not in seen]

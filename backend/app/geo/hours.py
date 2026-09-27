@@ -53,6 +53,8 @@ def _days(sel: str) -> set[int]:
 
 
 def _spans(sel: str) -> list[tuple[int, int]]:
+    if sel.strip() == "24/7":  # as one rule among others: "24/7; PH off"
+        return [(0, 24 * 60)]
     out = []
     for part in sel.split(","):
         m = _SPAN.match(part.strip())
