@@ -24,6 +24,7 @@ it. Trips between our named places keep our own time (the place is the door).
 """
 
 import logging
+import math
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -45,6 +46,7 @@ STRAIGHT_TURN = 15  # ... turning at most this many degrees
 MIN_EDGE_M = 50  # else it sits in the middle of a straight edge at least this long
 VIA_RADIUS_M = 30  # via points are on the traced road: snap them only that close
 UTURN_NEAR_VIA_M = 300  # a U-turn this close to a via point means the via snapped wrong
+ON_ROAD_M = 25  # OSRM's line this close to our traced road is on it (frontage roads are farther)
 VIA_BEARING_RANGE = 45
 ACCESS_BEARING_RANGE = 60
 MAX_VIAS = 25
@@ -52,6 +54,7 @@ SIMPLIFY_M = 4
 CACHE_SIZE = 256
 BUILD_BUDGET_S = 8  # no further OSRM attempt that could end later than this into a build
 BUILD_WAIT_S = 10  # how long a request waits for the same trip's directions being built
+FAR_M = 80_000  # a point farther than this from where it joins our roads (another city) gets none
 MPH = 0.44704  # m/s
 
 # Checks on what OSRM sends back.
@@ -64,6 +67,7 @@ ACCESS_SLACK_M = 1500
 UNAVAILABLE_NOTE = "Turn-by-turn directions aren't available right now. The line follows our main roads."
 OFF_NOTE = "Turn-by-turn directions are turned off."
 PARTIAL_NOTE = "Turn-by-turn covers getting on and off the main roads; follow the highlighted roads in between."
+FAR_NOTE = "Turn-by-turn directions only cover trips around Houston. The line follows our main roads."
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,12 @@ class Endpoint:
     @property
     def latlng(self) -> list[float]:
         return [self.lat, self.lng]
+
+    def near(self, lat: float, lng: float) -> bool:
+        """A real coordinate within FAR_M of (lat, lng), where it joins our roads. Anything else (a
+        typo, another city) would be a trip mostly spent getting to Houston: no OSRM for it."""
+        ok = math.isfinite(self.lat) and math.isfinite(self.lng) and abs(self.lat) <= 90 and abs(self.lng) <= 180
+        return ok and geo.dist_m(self.latlng, [lat, lng]) <= FAR_M
 
 
 @dataclass
@@ -215,6 +225,18 @@ def _nearest(line: list[list[float]], p: list[float], start: int = 0) -> int:
     return at
 
 
+def _stays_on(line: list[list[float]], start: int, step: int, road: list[list[float]]) -> int:
+    """From line[start] (on our road), the farthest vertex backwards (step -1) or forwards (+1) that
+    the line reaches without leaving `road` (within ON_ROAD_M of it)."""
+    if len(road) < 2:
+        return start
+    cum = geo.cumulative(road)
+    i = start
+    while 0 <= i + step < len(line) and geo.project(line[i + step], road, cum)[1] <= ON_ROAD_M:
+        i += step
+    return i
+
+
 class Rejected(Exception):
     """OSRM's answer doesn't match our route. `blame`: the vias (indexes) that went wrong."""
 
@@ -278,6 +300,11 @@ class DoorDirections:
         note = OFF_NOTE if not self.client.enabled else UNAVAILABLE_NOTE
         return DoorPath("unavailable", None, [], None, 0.0, corr.length, note=note, tried=tried)
 
+    @staticmethod
+    def too_far(corr: "Corridor") -> DoorPath:
+        """For a point too far from our roads (Endpoint.near): our line, no steps, no OSRM call."""
+        return DoorPath("unavailable", None, [], None, 0.0, corr.length, note=FAR_NOTE, tried=["too far"])
+
     def _build(self, segments: list[SegmentInfo], origin: Endpoint, destination: Endpoint) -> DoorPath:
         corr = Corridor(segments)
         d_from = corr.position(origin.latlng, 0)
@@ -306,7 +333,8 @@ class DoorDirections:
                 tried.append(f"{label} unavailable ({e})")
                 transient = True
                 break
-            except (OsrmError, Rejected, LookupError, TypeError, ValueError) as e:  # incl. an odd "Ok" answer
+            # incl. an odd "Ok" answer (missing or mistyped fields)
+            except (OsrmError, Rejected, LookupError, TypeError, ValueError, AttributeError) as e:
                 tried.append(f"{label} rejected ({type(e).__name__}: {e})")
                 attempt = None
                 if kind == "vias":
@@ -380,15 +408,23 @@ class DoorDirections:
                 if near:
                     raise Rejected("U-turn at a via point", near)
 
+        # Where the trip really gets on and off our roads: OSRM's line usually follows them for a
+        # while before the first via and after the last one, and that part is timed by our
+        # traffic-aware model, not by OSRM's free-flow durations.
+        head, tail = corr.cut(0.0, vias[0].d), corr.cut(vias[-1].d, corr.length)
+        join = _stays_on(geom, first, -1, head)
+        leave = _stays_on(geom, last, 1, tail)
+        join_m = vias[0].d if join == first else geo.project(geom[join], head)[0]
+        leave_m = vias[-1].d if leave == last else vias[-1].d + geo.project(geom[leave], tail)[0]
         return DoorPath(
             "ok",
             geo.simplify(geom, SIMPLIFY_M),
             build_steps(r["legs"]),
             round(float(r.get("distance", 0.0)), 1),
-            vias[0].d,
-            vias[-1].d,
-            access_start_s=sum(durs[:first]),
-            access_end_s=sum(durs[last:]),
+            join_m,
+            leave_m,
+            access_start_s=sum(durs[:join]),
+            access_end_s=sum(durs[leave:]),
         )
 
     def _access(self, corr: Corridor, vias: list[Via], o: Endpoint, d: Endpoint) -> DoorPath:

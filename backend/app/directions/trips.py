@@ -73,6 +73,9 @@ def directions_for(
 ) -> tuple[DoorPath | None, Corridor]:
     segs = [svc.network.segments[sid] for sid in route.segment_ids]
     corr = Corridor(segs)
+    start, end = svc.network.nodes[route.origin], svc.network.nodes[route.destination]
+    if not (o.near(start.lat, start.lng) and d.near(end.lat, end.lng)):
+        return svc.directions.too_far(corr), corr
     path = svc.directions.build(segs, o, d) if fetch else svc.directions.cached(segs, o, d)
     return path, corr
 

@@ -24,6 +24,7 @@ log = logging.getLogger("houston.osrm")
 
 DEFAULT_URL = "https://router.project-osrm.org"
 USER_AGENT = "BlindSpot-Houston/0.1 (traffic app; door-to-door directions)"
+MAX_BODY_BYTES = 8_000_000  # a Houston trip with steps and annotations is well under 1 MB
 
 # fetch(url, timeout) -> (HTTP status, parsed JSON body). Raises OSError / ValueError on failure.
 Fetch = Callable[[str, float], tuple[int, dict]]
@@ -41,14 +42,39 @@ class OsrmNoRoute(OsrmError):
     """OSRM answered, but not with a route (e.g. a point it can't snap to a road)."""
 
 
+def _read_body(r, deadline: float) -> bytes:
+    """The whole answer by `deadline` and at most MAX_BODY_BYTES. The socket timeout alone is per
+    read, so a server sending a byte every few seconds could otherwise hold a request for minutes."""
+    sock = getattr(getattr(getattr(r, "fp", None), "raw", None), "_sock", None)
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("OSRM took too long to answer")
+        try:
+            if sock is not None:
+                sock.settimeout(left)  # the next read waits at most until the deadline
+        except OSError:  # already closed: what's left is in the buffer
+            sock = None
+        chunk = r.read1(65536)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            raise ValueError("OSRM's answer is too big")
+        chunks.append(chunk)
+
+
 def urllib_fetch(url: str, timeout: float) -> tuple[int, dict]:
+    deadline = time.monotonic() + timeout
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, json.load(r)
+            return r.status, json.loads(_read_body(r, deadline))
     except urllib.error.HTTPError as e:  # OSRM explains a 400 in a JSON body
         try:
-            return e.code, json.load(e)
+            return e.code, json.loads(_read_body(e.fp, deadline)) if e.fp is not None else {}
         except ValueError:
             return e.code, {}
 
@@ -147,6 +173,9 @@ class OsrmClient:
         if status >= 500:
             self._trip(f"HTTP {status}")
             raise OsrmUnavailable(f"OSRM HTTP {status}")
+        if not isinstance(body, dict):  # not an OSRM answer (a proxy's page, say)
+            self._trip("odd answer")
+            raise OsrmUnavailable("OSRM sent something odd")
         code = body.get("code")
         if code != "Ok" or not body.get("routes"):
             raise OsrmNoRoute(f"{code or status}: {body.get('message', '')}".strip())
