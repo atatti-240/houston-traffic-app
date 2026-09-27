@@ -11,6 +11,7 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import Reports from "@/components/map/Reports";
+import RouteOptions from "@/components/map/RouteOptions";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import PlacesLayer from "@/components/places/PlacesLayer";
 import { camName, hasLiveVideo } from "@/lib/format";
@@ -334,6 +335,7 @@ export default function TrafficMap({
           <Polyline positions={scene.alternative} pathOptions={{ color: C.muted, weight: 6, opacity: 0.7, dashArray: "8 8" }} interactive={false} />
         )}
       </Pane>
+      {interactive && <RouteOptions />}
       <Pane name="route" style={{ zIndex: 420 }}>
         {(scene?.legs ?? (scene?.route ? [scene.route] : [])).map((leg, i) => (
           <span key={`r-${i}`}>

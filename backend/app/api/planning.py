@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 
 from app.api.deps import get_services, is_clock_time, resolve_location, resolve_time
-from app.api.schemas import RecommendRequest, RouteRequest, TripIn, recommendation_json, route_json
+from app.api.schemas import RecommendRequest, RouteRequest, TripIn
+from app.directions.trips import recommend_response, route_response
 from app.models import Notification, Trip, TripState
 from app.recommender import recommend_departure
 from app.routing.avoid import avoiding
@@ -17,34 +18,44 @@ router = APIRouter(tags=["planning"])
 
 
 @router.post("/route")
-def route(req: RouteRequest, svc: Services = Depends(get_services)):
+def route(req: RouteRequest, directions: bool = False, svc: Services = Depends(get_services)):
+    """Best route, the router's alternative, and up to 3 different routes (`routes`).
+    `?directions=true` adds door-to-door directions (app/directions)."""
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
+    view = svc.router.view()
+    router = avoiding(svc.router, req.avoid)
     try:
-        best, alt = avoiding(svc.router, req.avoid).route(
-            o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight
+        best, alt = router.route(
+            o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight, view=view
         )
+        return route_response(svc, req.origin, req.destination, best, alt, view, directions)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
-    return {"best": route_json(best), "alternative": route_json(alt)}
 
 
 @router.post("/recommend")
-def recommend(req: RecommendRequest, svc: Services = Depends(get_services)):
+def recommend(req: RecommendRequest, directions: bool = False, svc: Services = Depends(get_services)):
+    """When to leave, plus the routes list. `?directions=true` adds door-to-door directions."""
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     arrive_by = resolve_time(svc, req.arrive_by)
     now = svc.clock.now()
     if is_clock_time(req.arrive_by) and arrive_by <= now:
         arrive_by += timedelta(days=1)  # "08:30" at 5 PM means tomorrow morning
-    try:
+    view = svc.router.view()
+    router = avoiding(svc.router, req.avoid)
+
+    def recommend_by(extra_min: int = 0):  # door to door, the way on and off our roads comes off the buffer
         # earliest=now: never suggest leaving in the past. A deadline that already passed
         # comes back as "leave now" with on_time=False.
-        rec = recommend_departure(
-            avoiding(svc.router, req.avoid), o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now,
-            safety_weight=req.safety_weight,
+        return recommend_departure(
+            router, o, d, arrive_by, req.safe_path, req.buffer_min + extra_min, earliest=now,
+            safety_weight=req.safety_weight, view=view,
         )
+
+    try:
+        return recommend_response(svc, req.origin, req.destination, recommend_by, arrive_by, view, directions)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
-    return recommendation_json(rec)
 
 
 def _trip_json(t: Trip) -> dict:
