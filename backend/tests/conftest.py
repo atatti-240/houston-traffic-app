@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SCHEDULER_INTERVAL_S", "0")
+os.environ["OSRM_URL"] = ""  # tests never call the public router (they mock it)
 
 import pytest  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
