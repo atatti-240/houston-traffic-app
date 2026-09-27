@@ -278,7 +278,11 @@ export default function WhereTo() {
 
   const dests = useMemo(() => {
     if (q) return results.map((p) => ({ key: p.id, to: p.id as Location }));
-    const slots = (["home", "work"] as const).flatMap((s) => (saved[s] ? [{ key: `saved:${s}`, to: savedTo(saved[s] as SavedPlace) }] : []));
+    // Keyed by the place too: a new Home gets its own drive time.
+    const slots = (["home", "work"] as const).flatMap((s) => {
+      const p = saved[s];
+      return p ? [{ key: `saved:${s}:${p.key}`, to: savedTo(p) }] : [];
+    });
     return [...slots, ...list.map((r) => ({ key: r.id, to: r.to }))];
   }, [q, results, list, saved]);
   const etas = useEtas(here?.place, dests, dataGeneration(slowdowns));
@@ -315,7 +319,7 @@ export default function WhereTo() {
   };
 
   const slotEta = (slot: Slot) => {
-    const e = etas[`saved:${slot}`];
+    const e = etas[`saved:${slot}:${saved[slot]?.key}`];
     if (!e || "error" in e) return null;
     if ("here" in e) return <span className="text-[12px] text-muted">· here</span>;
     return (

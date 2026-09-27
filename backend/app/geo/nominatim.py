@@ -121,12 +121,18 @@ class Cache:
         return hit
 
     def put(self, key: str, value: object, at: datetime) -> None:
-        self._remember(key, (value, at))
-        if self.session_factory is None:
+        self.put_many({key: value}, at)
+
+    def put_many(self, items: dict[str, object], at: datetime) -> None:
+        """Several answers in one write (a search and each of its places)."""
+        for key, value in items.items():
+            self._remember(key, (value, at))
+        if self.session_factory is None or not items:
             return
         try:
             with self.session_factory() as s:
-                s.merge(GeoCache(key=key, value=value, fetched_at=at))
+                for key, value in items.items():
+                    s.merge(GeoCache(key=key, value=value, fetched_at=at))
                 s.commit()
         except Exception:
             log.exception("geo cache write failed")
@@ -313,13 +319,11 @@ class Geocoder:
             if hit is not None:
                 return hit[0], True
             raise GeoUnavailable(DOWN) from e
-        now = self.now()
-        self.cache.put(key, rows, now)
+        items: dict[str, object] = {key: rows}
         # Every row carries its tags: that's its details too, so opening it doesn't ask again.
         if not key.startswith("place|"):
-            for r in rows:
-                if ref := osm_ref(r):
-                    self.cache.put(f"place|{ref}", [r], now)
+            items.update({f"place|{ref}": [r] for r in rows if (ref := osm_ref(r))})
+        self.cache.put_many(items, self.now())
         return rows, False
 
     def _search(self, q: str, box: tuple[float, float, float, float], key: str, limit: int) -> tuple[list[dict], bool]:
