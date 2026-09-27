@@ -24,6 +24,7 @@ import base64
 import binascii
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -52,6 +53,11 @@ DETECTION_LAG_S = 0.08
 SNAP_S = 0.3
 WATCH_S = 20.0  # a camera counts as watched for this long after its last request
 VIEW_GAP_S = 2.0  # at most one view change this often
+# follow, with two cameras watched at once: each keeps the CV app this long before the other gets its
+# turn (switching every VIEW_GAP_S would never let either video start), while its card still asks
+# about it this often (it polls every 0.5-2 s).
+VIEW_TURN_S = 30.0
+ACTIVE_S = 3.0
 BACKOFF_S = (1, 2, 5, 10, 30)
 READ_TIMEOUT_S = 30.0  # the CV app sends a keepalive every 15 s when nothing changes
 
@@ -110,7 +116,14 @@ def parse_mapping(spec: str, cameras: dict[str, dict]) -> tuple[dict[str, str], 
 
 
 def _num(v) -> float | None:
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
+    """A finite number, else None (NaN, Infinity and numbers too big for a float included)."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if math.isfinite(f) else None
 
 
 def _text(v, limit: int = 300) -> str | None:
@@ -212,7 +225,9 @@ class IncidentWatch:
     """One camera's confirmed-incident episode. It starts on a confirmed check (the CV app confirms
     when 2 of the camera's last 3 checks flag it) and ends once the camera has seen a clear road
     for `clear_after` seconds, or when its incident check has been silent for INCIDENT_STALE_S
-    (the camera was switched off, or the CV app went away). A "possible" check keeps it going."""
+    (the camera was switched off, or the CV app went away). A "possible" check keeps it going.
+    It keeps its first description: the model words each check afresh, and a new wording every few
+    seconds would re-plan trips each time and could flip its kind (crash, stalled car...)."""
 
     def __init__(self) -> None:
         self.n = 0
@@ -231,7 +246,7 @@ class IncidentWatch:
                 self.started, self.text = at, None
                 self.n += 1
             self.confirmed_at, self.clear_since = at, None
-            self.text = text or self.text
+            self.text = self.text or text
         elif self.started is not None:
             if state == "possible":
                 self.clear_since = None
@@ -305,8 +320,10 @@ class CvBridge:
         self.error: str | None = None
         self._watched: dict[str, float] = {}
         self._view_set: tuple[str, str | None] | None = None
+        self._view_since = float("-inf")  # when the CV app was switched to _view_set
         self._view_dirty = True
         self._view_at = float("-inf")
+        self._skipped_at = float("-inf")
         self.view_error: str | None = None
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -326,7 +343,12 @@ class CvBridge:
         with self._lock:
             self.last_message_at = now
             for u in updates:
-                used += self._apply(u, now)
+                try:
+                    used += self._apply(u, now)
+                except Exception:  # one odd update mustn't cost the connection (it would come back with it)
+                    if now - self._skipped_at > 60:
+                        self._skipped_at = now
+                        log.warning("Skipped a CV update that couldn't be read", exc_info=True)
         return used
 
     def _apply(self, u, now: float) -> bool:
@@ -468,11 +490,10 @@ class CvBridge:
         if feed.status == "live" and feed.frame_at is not None and now - feed.frame_at <= LIVE_WITHIN_S:
             return "live"
         # Paused, but it's what we asked for (or are about to): the CV app is starting it.
-        watched = max(((t, cam) for cam, t in self._watched.items() if now - t <= WATCH_S), default=(0, None))[1]
         asked = (
             self.view_mode == "all"
             or (self._view_set is not None and self._view_set[1] == cv_id)
-            or (self.view_mode == "follow" and watched is not None and self.by_camera[watched] == cv_id)
+            or (self.view_mode == "follow" and self._follow(now) == cv_id)
         )
         return "paused" if feed.status == "paused" and not asked else "connecting"
 
@@ -611,7 +632,7 @@ class CvBridge:
         return out
 
     def incidents_key(self, now: float | None = None) -> str:
-        """Changes whenever a camera-confirmed incident starts, clears or gets a new description."""
+        """Changes whenever a camera-confirmed incident starts, clears or gets its description."""
         return ";".join(f"{i.cv_camera}:{i.n}:{i.text or ''}" for i in self.confirmed(now))
 
     def status(self, now: float | None = None) -> dict:
@@ -664,23 +685,37 @@ class CvBridge:
     # --- which camera the CV app processes ---------------------------------------------------------
 
     def desired_view(self, now: float | None = None) -> tuple[str, str | None] | None:
-        """("one", CV camera) / ("all", None), or None to leave the CV app alone.
-        follow: the mapped camera someone watched most recently, else the first mapped one (so
-        incidents keep being checked on it while nobody's looking)."""
+        """("one", CV camera) / ("all", None), or None to leave the CV app alone (see _follow)."""
         if self.view_mode == "off" or not self.mapping:
             return None
         if self.view_mode == "all":
             return ("all", None)
         now = time.time() if now is None else now
         with self._lock:
-            available = self._available()
-            usable = [cv for cv in self.mapping if available is None or cv in available]
-            watched = [
-                (t, cam) for cam, t in self._watched.items() if now - t <= WATCH_S and self.by_camera[cam] in usable
-            ]
+            cam = self._follow(now)
+        return None if cam is None else ("one", cam)
+
+    def _follow(self, now: float) -> str | None:
+        """follow: the CV camera to process. The mapped camera someone watched most recently, else
+        the first mapped one (so incidents keep being checked on it while nobody's looking). When
+        two are watched at once they take turns of VIEW_TURN_S. Call with the lock held."""
+        available = self._available()
+        usable = [cv for cv in self.mapping if available is None or cv in available]
         if not usable:
             return None
-        return ("one", self.by_camera[max(watched)[1]] if watched else usable[0])
+        seen = {
+            self.by_camera[cam]: t for cam, t in self._watched.items()
+            if now - t <= WATCH_S and self.by_camera[cam] in usable
+        }
+        cur = self._view_set[1] if self._view_set is not None and self._view_set[0] == "one" else None
+        active = cur in seen and now - seen[cur] <= ACTIVE_S
+        if active and now - self._view_since < VIEW_TURN_S:
+            return cur  # someone is still watching it: their turn isn't over
+        # Its viewer left (someone else is watching now), or their turn is over and another viewer's waiting
+        others = [(t, cv) for cv, t in seen.items() if cv != cur and (not active or now - t <= ACTIVE_S)]
+        if others:
+            return max(others)[1]
+        return cur if cur in seen else usable[0]
 
     def sync_view(self, client: httpx.Client, now: float | None = None) -> None:
         now = time.time() if now is None else now
@@ -700,7 +735,10 @@ class CvBridge:
             self.view_error = f"couldn't switch the CV app to {params}: {type(e).__name__}"
             log.warning("CV view change failed: %s", e)
             return
-        self._view_set, self._view_dirty, self.view_error = want, False, None
+        with self._lock:
+            if want != self._view_set:
+                self._view_since = now
+            self._view_set, self._view_dirty, self.view_error = want, False, None
 
     # --- background threads ---------------------------------------------------------------------
 

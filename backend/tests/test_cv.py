@@ -194,6 +194,39 @@ def test_bad_updates_are_skipped(cams):
     assert b.frame(GULF) is None
 
 
+def test_numbers_that_arent_finite_are_ignored(cams):
+    # Python's json writes (and reads) NaN and Infinity; a huge integer doesn't fit a float
+    b = make_bridge(cams)
+    frame = b64(FRAMES[0])
+    msg = json.loads(
+        '{"updates": ['
+        f'{{"cam": "007", "kind": "raw", "jpeg": "{frame}", "info": {{"status": "live", "fps": NaN, "reconnects": Infinity}}}},'
+        '{"cam": "007", "kind": "yolo", "jpeg": null, "info": {"stats": {"vehicles": Infinity, "counts": {"car": NaN},'
+        ' "inference_ms": 1' + "0" * 400 + ', "speed": {"median_mph": Infinity, "moving": 4, "stopped": 0, "measured": 4}},'
+        ' "dets": [[0.1, 0.1, Infinity, 0.3, "car", 0.9, 12], [0.1, 0.1, 0.2, 0.3, "car", 0.9, -Infinity]],'
+        ' "rate": Infinity, "median_mph_60s": -Infinity}},'
+        '{"cam": "007", "kind": "incident", "jpeg": null, "info": {"p": 0.2, "state": "clear", "at": NaN, "recent": [Infinity, 0.2]}}'
+        "]}"
+    )
+    assert b.handle_message(msg) == 3
+    d = b.detail(GULF)
+    json.dumps(d, allow_nan=False)  # the API can send it
+    assert d["status"] == "live" and d["reconnects"] == 0 and d["vehicles"] == 0 and d["flow"] is None
+    assert d["detections"][0]["boxes"] == [[0.1, 0.1, 0.2, 0.3, "car", 0.9, None]]
+    assert d["incident"]["state"] == "clear" and d["incident_recent"] == [0.2]
+
+
+def test_one_update_that_fails_doesnt_cost_the_others(cams, monkeypatch):
+    b = make_bridge(cams)
+
+    def broken(*a):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(b, "_detections", broken)
+    assert b.handle_message({"updates": [yolo("007", 0), raw("007", 1)]}) == 1
+    assert b.frame(GULF).jpeg == FRAMES[1]
+
+
 def test_paused_cameras_have_no_live_video(cams):
     b = make_bridge(cams)
     b.handle_message({"updates": [raw("009", 0, status="paused")]})
@@ -266,6 +299,22 @@ def test_confirmed_incident_lasts_until_the_camera_stays_clear(cams):
     # A new one later is a new incident
     confirm(b, now=t + 400)
     assert b.confirmed(now=t + 400)[0].n == 2
+
+
+def test_a_confirmed_incident_keeps_its_first_description(cams):
+    # The model words every check afresh: a new wording mustn't re-plan trips or turn a crash into a stall
+    b = make_bridge(cams)
+    t = 2_500_000.0
+    b.handle_message({"updates": [incident("007", 0.9, "possible", None, at=t - 4)]}, now=t - 4)
+    b.handle_message({"updates": [incident("007", 0.6, "confirmed", None, at=t)]}, now=t)  # 2 of 3, latest low
+    assert b.confirmed(now=t)[0].text is None
+    b.handle_message({"updates": [incident("007", 0.9, "confirmed", CRASH_TEXT, at=t + 4)]}, now=t + 4)
+    key = b.incidents_key(now=t + 4)
+    assert b.confirmed(now=t + 4)[0].text == CRASH_TEXT and key.endswith(CRASH_TEXT)
+    b.handle_message({"updates": [incident("007", 0.9, "confirmed", "A car is stopped on the shoulder.", at=t + 8)]}, now=t + 8)
+    (ci,) = b.confirmed(now=t + 8)
+    assert ci.text == CRASH_TEXT and b.incidents_key(now=t + 8) == key
+    assert b.summary(GULF, now=t + 8)["incident"]["text"] == CRASH_TEXT
 
 
 def test_confirmed_incident_is_dropped_when_the_camera_goes_quiet(cams):
@@ -377,6 +426,18 @@ def test_camera_endpoints(client, cv_services, monkeypatch):
     assert client.get("/cv/cameras/nope").status_code == 404
 
 
+def test_open_videos_are_capped(client, cv_services, monkeypatch):
+    from app.api import cv as cv_api
+
+    feed_video(cv_services.cv)
+    monkeypatch.setitem(cv_api.OPEN, "streams", cv_api.MAX_STREAMS)
+    assert client.get(f"/cv/cameras/{GULF}/video").status_code == 503
+    monkeypatch.setitem(cv_api.OPEN, "streams", 0)
+    monkeypatch.setattr(cv_api, "MAX_STREAM_S", 0.3)
+    assert client.get(f"/cv/cameras/{GULF}/video").status_code == 200
+    assert cv_api.OPEN["streams"] == 0  # counted while open only
+
+
 def test_camera_lists_carry_live_feed(client, cv_services):
     feed_video(cv_services.cv)
     by_id = {c["id"]: c for c in client.get("/cameras").json()}
@@ -453,10 +514,41 @@ def test_follow_view_processes_the_watched_camera_else_the_first(cams):
         b.touch(GULF, now=t + 11.5)
         b.sync_view(client, now=t + 12)
         assert len(calls) == 2  # at most one change every VIEW_GAP_S
-        b.sync_view(client, now=t + 14)
+        b.sync_view(client, now=t + 13.5)
+        assert len(calls) == 2  # the I-10 card may still be open (see the next test)
+        b.sync_view(client, now=t + 14.5)  # it stopped asking: back to the Gulf Freeway camera
         assert calls[-1] == {"mode": "one", "cam": "br:007"}
         b.sync_view(client, now=t + 11.5 + cvb.WATCH_S + 5)  # nobody watching: back to the first
         assert len(calls) == 3
+
+
+def test_two_cameras_watched_at_once_take_turns(cams):
+    # Two cards open on different cameras, both polling: switching every VIEW_GAP_S would never let
+    # either video start, so each keeps the CV app for VIEW_TURN_S.
+    b, calls = view_calls(cams, "follow")
+    t = 6_000_000.0
+    b.handle_message({"updates": [raw("009", 0, status="paused")]}, now=t)
+    switches = []
+    with b._client() as client:
+        b.touch(GULF, now=t)
+        b.sync_view(client, now=t)
+        for k in range(1, 140):  # 70 s, both cards asking twice a second
+            now = t + k / 2
+            b.touch(GULF, now=now)
+            b.touch(KATY, now=now + 0.1)
+            n = len(calls)
+            b.sync_view(client, now=now + 0.2)
+            if len(calls) > n:
+                switches.append((round(now + 0.2 - t), calls[-1]["cam"]))
+            if k == 20:
+                assert b.summary(KATY, now=now + 0.2)["status"] == "paused"  # waiting its turn
+    assert calls[0] == {"mode": "one", "cam": "br:007"}
+    assert switches == [(30, "br:009"), (60, "br:007")]
+    # Once its turn is over, someone who moved on to another camera gets it at once
+    b.touch(KATY, now=t + 100)
+    with b._client() as client:
+        b.sync_view(client, now=t + 100)
+    assert calls[-1] == {"mode": "one", "cam": "br:009"}
 
 
 def test_view_modes_all_and_off(cams):
