@@ -1,4 +1,4 @@
-.PHONY: setup seed roads dev backend frontend test
+.PHONY: setup seed roads transit dev backend frontend test
 
 setup:
 	cd backend && uv sync
@@ -11,6 +11,10 @@ seed:
 # Re-trace every road segment along the real streets (OpenStreetMap via the public OSRM router).
 roads:
 	cd backend && uv run python scripts/fetch_road_shapes.py
+
+# Download METRO's bus and rail timetable (GTFS) and build the transit index (backend/data/transit.db, not committed).
+transit:
+	cd backend && uv run python scripts/build_transit.py
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
