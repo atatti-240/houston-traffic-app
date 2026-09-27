@@ -1,26 +1,39 @@
 "use client";
 
 /** Live cameras (design "Live cameras"): pick an area, watch a camera's live view and see what it
- * shows; the note links to "Why it's slow" for that road. The map marks the selected camera. */
+ * shows; the note links to "Why it's slow" for that road. The map marks the selected camera.
+ * Cameras with a live AI feed (the team's camera AI on a Baton Rouge camera standing in for ours)
+ * come first and show the real video with vehicle boxes; the rest show a drawn view. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp, type MapScene, type Screen } from "@/components/app/AppContext";
 import CameraFeed, { type LiveCam, type SimBase } from "@/components/screens/Cameras/CameraFeed";
+import LiveFeedPanel, { FeedOffline } from "@/components/screens/Cameras/LiveFeedPanel";
+import LiveVideo from "@/components/screens/Cameras/LiveVideo";
+import { useLiveFeed } from "@/components/screens/Cameras/liveFeed";
 import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
 import { camName, parseSim } from "@/lib/format";
 import { C, ICON, LEVEL, type Level } from "@/lib/theme";
 
 const RANK: Record<Level, number> = { heavy: 2, moderate: 1, light: 0 };
 
+/** Has live video from the camera AI (or will once it's connected). */
+const hasFeed = (c: LiveCam) => !!c.live_feed && c.live_feed.status !== "offline" && c.live_feed.status !== "missing";
+
 type Pick = { area?: string; cam?: string };
 /** What each cameras screen (stack entry) was showing, so "Back" from "Why it's slow" returns to
  * the same camera. Keyed by the stack entry itself: opening the screen afresh starts fresh. */
 const memory = new WeakMap<Screen, Pick>();
 
-/** Worst first: level, then delay, then name. */
+/** Live AI feeds first, then worst first: level, then delay, then name. */
 function worstFirst(a: LiveCam, b: LiveCam): number {
-  return RANK[b.level] - RANK[a.level] || b.delay_min - a.delay_min || a.name.localeCompare(b.name);
+  return (
+    Number(hasFeed(b)) - Number(hasFeed(a)) ||
+    RANK[b.level] - RANK[a.level] ||
+    b.delay_min - a.delay_min ||
+    a.name.localeCompare(b.name)
+  );
 }
 
 /** "Galleria / Uptown" -> "Galleria", "Texas Medical Center" -> "Medical Center" */
@@ -38,6 +51,8 @@ interface Area {
   label: string;
   cams: LiveCam[];
   slow: number;
+  /** Cameras with live AI video */
+  feeds: number;
 }
 
 function Header({ onBack }: { onBack: () => void }) {
@@ -70,6 +85,16 @@ function CamRow({ cam, selected, onPick }: { cam: LiveCam; selected: boolean; on
           {cam.looking ?? "Live view"} · {LEVEL[cam.level].label} traffic
         </span>
       </span>
+      {hasFeed(cam) && (
+        <span
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-[0.08em] whitespace-nowrap"
+          style={{ background: "rgba(255,77,77,0.14)", color: C.heavyText }}
+          title="Real video with the camera AI's vehicle boxes"
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: C.heavy }} />
+          LIVE AI
+        </span>
+      )}
       <LevelDot level={cam.level} size={10} />
     </button>
   );
@@ -125,7 +150,8 @@ export default function Cameras() {
 
   const cams = useMemo(() => live?.cameras ?? [], [live]);
 
-  // Areas, most slow cameras first (then by name); each area's cameras worst first.
+  // Areas with live AI video first, then most slow cameras (then by name); each area's cameras
+  // live video first, then worst first.
   const areas = useMemo<Area[]>(() => {
     const byArea = new Map<string, LiveCam[]>();
     for (const c of cams) {
@@ -139,8 +165,9 @@ export default function Cameras() {
         label: shortArea(name),
         cams: [...list].sort(worstFirst),
         slow: list.filter((c) => c.level !== "light").length,
+        feeds: list.filter(hasFeed).length,
       }))
-      .sort((a, b) => b.slow - a.slow || a.name.localeCompare(b.name));
+      .sort((a, b) => b.feeds - a.feeds || b.slow - a.slow || a.name.localeCompare(b.name));
   }, [cams]);
 
   const picked = pick.cam ? cams.find((c) => c.id === pick.cam) : undefined;
@@ -149,6 +176,11 @@ export default function Cameras() {
   const area = (want ? areas.find((a) => a.name.toLowerCase() === want || a.label.toLowerCase() === want) : undefined) ?? areas[0];
   const cam = (picked && area?.cams.includes(picked) ? picked : undefined) ?? area?.cams[0];
   const name = cam ? camName(cam.name) : "";
+
+  // A camera with a live AI feed: its video, boxes, counts and incident check (polled while shown).
+  const feedState = useLiveFeed(cam?.live_feed ? cam.id : null);
+  const feed = cam?.live_feed ? (feedState.detail ?? cam.live_feed) : null;
+  const videoOn = !!feed && feed.status !== "offline" && feed.status !== "missing";
 
   // Once a camera is showing, keep it: a data refresh that re-sorts the list updates its picture
   // but doesn't switch to another camera (or drop pause / full screen).
@@ -251,8 +283,23 @@ export default function Cameras() {
         ))}
       </div>
 
-      <div ref={feedRef} className="scroll-mt-3">
-        <CameraFeed key={cam.id} cam={cam} name={name} base={base} />
+      <div ref={feedRef} className="flex scroll-mt-3 flex-col gap-2">
+        {videoOn && feed ? (
+          <LiveVideo
+            key={cam.id}
+            cam={cam}
+            name={name}
+            feed={feed}
+            track={feedState.track}
+            offset={feedState.offset}
+            delayMs={feedState.detail?.video_delay_ms ?? 2500}
+          />
+        ) : (
+          <>
+            <CameraFeed key={cam.id} cam={cam} name={name} base={base} />
+            <FeedOffline feed={feed} />
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -270,6 +317,8 @@ export default function Cameras() {
           <span className="text-[13px] text-soft">{note}</span>
         )}
       </div>
+
+      {videoOn && feed && <LiveFeedPanel feed={feed} detail={feedState.detail} />}
 
       <div className="mt-1 flex items-baseline justify-between gap-3">
         <h2 className="m-0 min-w-0 text-[16px] font-semibold">Cameras in {area.label}</h2>
