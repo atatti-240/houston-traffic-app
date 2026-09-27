@@ -149,12 +149,79 @@ export interface Route {
     crash_exposure: number;
     max_crash_risk: number;
     max_block_probability: number;
+    /** Door to door: minutes on the way to and from our main roads (included above) */
+    access_min?: number;
   };
   reasons: string[];
   hazards: Hazard[];
   geometry: LatLngTuple[];
   segments: RouteSegment[];
   crossings: RouteCrossing[];
+  /** Stable id of the route (its road segments) */
+  id?: string;
+  /** "via I-610": the road that sets it apart from the other routes */
+  label?: string;
+  /** The road it spends the most miles on */
+  main_road?: string;
+  /** Its biggest delays vs. empty roads, worst first (at most 3) */
+  delay_causes?: RouteDelayCause[];
+  /** Door-to-door directions (/route and /recommend with ?directions=true) */
+  directions?: RouteDirections;
+}
+
+export interface RouteDelayCause {
+  /** Matches the cause icons (CAUSE in lib/theme) */
+  kind: CauseKind;
+  /** "Rush hour on I-610 West Loop", "Train at Cullen Blvd" */
+  label: string;
+  /** The road, or the street a train crossing is on */
+  road: string;
+  minutes: number;
+}
+
+/**
+ * One turn-by-turn step. Road names come from OpenStreetMap (via OSRM): render them as text.
+ * A voice driving mode can read `instruction` and use `maneuver` + `distance_m` to time it.
+ */
+export interface RouteStep {
+  /** "Turn left onto Westheimer Rd", "Take exit 43A toward St Joseph Pkwy", "Merge onto I-45 Gulf Fwy" */
+  instruction: string;
+  /** From this maneuver to the next one, meters */
+  distance_m: number;
+  /** Typical time for it on OSRM's free-flowing roads (not our traffic-aware time), seconds */
+  duration_s: number;
+  maneuver: {
+    /** OSRM maneuver type: depart | turn | new name | continue | merge | on ramp | off ramp | fork | end of road |
+     * roundabout | rotary | roundabout turn | exit roundabout | exit rotary | notification | arrive */
+    type: string;
+    /** left | slight left | sharp left | right | slight right | sharp right | straight | uturn */
+    modifier: string | null;
+    /** Where it happens */
+    location: LatLngTuple;
+    /** Compass heading into and out of the maneuver, 0-359 */
+    bearing_before: number;
+    bearing_after: number;
+    /** Which exit to take at a roundabout */
+    exit: number | null;
+  };
+  /** The road you're on after it ("I-45 Gulf Fwy", "Westheimer Rd"); "" when it has no name */
+  road: string;
+  /** Lanes at the maneuver, left to right, only where OpenStreetMap maps turn lanes. `valid`: good for this maneuver.
+   * indications: left | slight left | sharp left | straight | right | slight right | sharp right | uturn |
+   * merge to left | merge to right | none */
+  lanes?: { valid: boolean; indications: string[] }[];
+}
+
+export interface RouteDirections {
+  /** ok: all along real roads. partial: real roads on and off our main roads, our roads' names between.
+   * unavailable: no steps (the map line is our own). pending: not fetched yet (POST /directions). */
+  status: "ok" | "partial" | "unavailable" | "pending";
+  steps: RouteStep[];
+  distance_m: number | null;
+  /** Minutes on OSRM's roads before joining and after leaving our main roads, when they count in the times
+   * (trips to or from an arbitrary point) */
+  access_min: { start: number; end: number } | null;
+  note: string | null;
 }
 
 export interface Recommendation {
@@ -171,6 +238,8 @@ export interface Recommendation {
   data_confidence: Confidence;
   route: Route;
   alternative: Route | null;
+  /** Up to 3 routes to pick from (routes[0] is `route`) */
+  routes?: Route[];
 }
 
 export interface Trip {
