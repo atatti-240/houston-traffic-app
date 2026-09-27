@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import ModeRouteLayer from "@/components/map/ModeRouteLayer";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import { camName } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
@@ -340,6 +341,7 @@ export default function TrafficMap({
           </span>
         ))}
       </Pane>
+      <ModeRouteLayer route={scene?.modeRoute} />
 
       {/* Crossings layer */}
       {interactive && layers.crossings &&
