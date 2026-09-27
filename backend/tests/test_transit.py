@@ -4,6 +4,7 @@ Two bus lines (Main: A1 -> A4, Pease: B1 -> B3, B1 a short walk from A3) and a l
 runs past midnight. Weekday and weekend service, with Labor Day on the weekend timetable.
 """
 
+import shutil
 import sqlite3
 import zipfile
 from datetime import datetime
@@ -161,6 +162,20 @@ def test_after_midnight_uses_the_previous_days_late_trips(index):
     assert ride["route"]["name"] == "Red Line" and ride["route"]["mode"] == "rail"
     assert ride["headsign"] == "Fannin South"
     assert ride["depart_at"] == datetime(2026, 9, 29, 0, 30)
+
+
+def test_late_trips_from_yesterday_compete_with_todays_first_ones(tmp_path):
+    """At 0:20 both timetables run: yesterday's 24:30 train (in at 0:46) beats today's 0:50 bus."""
+    feed = tmp_path / "feed"
+    shutil.copytree(FEED, feed)
+    with open(feed / "trips.txt", "a") as f:
+        f.write("010,WK,E1,DOWNTOWN TC,0,SMAIN\n")
+    with open(feed / "stop_times.txt", "a") as f:
+        f.write("E1, 0:50:00, 0:50:00,A1,1,0,0\nE1, 1:05:00, 1:05:00,A4,2,0,0\n")
+    build_index(feed, tmp_path / "t.db")
+    r = TransitIndex(tmp_path / "t.db").plan(HOME, NEAR_A4, datetime(2026, 9, 29, 0, 20))
+    assert [rides(o) for o in r["options"]] == [["Red Line"], ["10 Main"]]
+    assert [o["arrive_at"] for o in r["options"]] == [datetime(2026, 9, 29, 0, 46), datetime(2026, 9, 29, 1, 6)]
 
 
 def test_next_departures_near_the_start(index):

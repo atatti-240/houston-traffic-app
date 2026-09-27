@@ -23,6 +23,7 @@ PROFILES: dict[str, str] = {"walk": "routed-foot", "bike": "routed-bike"}
 USER_AGENT = "BlindSpot/0.1 (Houston traffic app; https://github.com/atatti-240/houston-traffic-app)"
 SOURCE = "Map data (c) OpenStreetMap contributors, routing by FOSSGIS (routing.openstreetmap.de)"
 TIMEOUT_S = 10
+MAX_BYTES = 8_000_000  # a walk or ride across Houston is well under 1 MB
 MIN_INTERVAL_S = 1.0  # at most one request a second
 MAX_WAIT_S = 4.0  # rather than queue longer than this, say it's busy
 CACHE_SIZE = 256
@@ -47,16 +48,31 @@ class BadRequest(ValueError):
     """Points outside the area, or too far apart for this mode."""
 
 
+def _read(r, deadline: float) -> bytes:
+    """The whole answer, within the time budget (the socket timeout alone lets a server that trickles
+    bytes hold a request forever) and a size cap."""
+    chunks, size = [], 0
+    while chunk := r.read(65536):
+        size += len(chunk)
+        if size > MAX_BYTES:
+            raise ValueError("routing answer too large")
+        if time.monotonic() > deadline:
+            raise TimeoutError("routing server too slow")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def http_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    deadline = time.monotonic() + TIMEOUT_S
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
-            return json.load(r)
+            return json.loads(_read(r, deadline))
     except urllib.error.HTTPError as e:
         # OSRM answers "no route" style errors as 400 with a JSON body.
         if e.code == 400:
             try:
-                return json.load(e)
+                return json.loads(_read(e, deadline))
             except ValueError:
                 pass
         raise
@@ -290,7 +306,10 @@ class WalkBikeRouter:
             body = self._fetch(route_url(mode, a, b))
         except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
             raise RoutingUnavailable(str(e)) from e
-        result = parse_route(mode, body)
+        try:
+            result = parse_route(mode, body)
+        except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
+            raise RoutingUnavailable(f"routing server sent something we can't read: {e!r}") from e
         with self._lock:
             self._cache[key] = (self._clock(), result)
             while len(self._cache) > CACHE_SIZE:

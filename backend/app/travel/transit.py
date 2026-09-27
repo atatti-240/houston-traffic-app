@@ -398,19 +398,21 @@ class TransitIndex:
 
         access = {s.id: d for s, d in near_start}
         egress = {s.id: d for s, d in near_end}
-        options: list[tuple[_Option, date, dict[int, list[Row]]]] = []
+        options: list[tuple[_Option, date, dict[int, list[Row]], int]] = []
         for ctx_day, base, services in contexts:
             found, rows = self._search(base, services, access, egress)
-            options += [(o, ctx_day, rows) for o in found]
-        options.sort(key=lambda x: x[0].cost)
-        picked = self._pick([o for o, _, _ in options])
+            # Times count from that service day's midnight: yesterday's late trips are a day ahead of today's.
+            shift = (day - ctx_day).days * 86400
+            options += [(o, ctx_day, rows, shift) for o in found]
+        options.sort(key=lambda x: x[0].cost - x[3])
+        picked = self._pick([(o, shift) for o, _, _, shift in options])
         if not picked:
             return {
                 **out,
                 "status": "no_trips",
                 "message": "No bus or train gets you there in the next 90 minutes, even with one change.",
             }
-        by_id = {id(o): (d, rows) for o, d, rows in options}
+        by_id = {id(o): (d, rows) for o, d, rows, _ in options}
         out["options"] = [self._option_json(o, *by_id[id(o)], origin, destination) for o in picked]
         return out
 
@@ -515,12 +517,13 @@ class TransitIndex:
             per_line.append(first)
         return per_line + list(changes.values()), rows
 
-    def _pick(self, options: list[_Option]) -> list[_Option]:
-        """The best few: sorted by cost, without ones that arrive much later than the best."""
+    def _pick(self, options: list[tuple[_Option, int]]) -> list[_Option]:
+        """The best few: sorted by cost, without ones that arrive much later than the best. Each option
+        comes with the shift that puts its times on today's clock."""
         if not options:
             return []
-        best_final = min(o.final for o in options)
-        return [o for o in options if o.final <= best_final + 30 * 60][:MAX_OPTIONS]
+        best_final = min(o.final - shift for o, shift in options)
+        return [o for o, shift in options if o.final - shift <= best_final + 30 * 60][:MAX_OPTIONS]
 
     def _ride_line(self, trip: int, stops: list[Stop]) -> list[list[float]]:
         """The ride along the route's shape between the two stops, or stop to stop when that fails."""
