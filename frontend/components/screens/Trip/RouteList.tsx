@@ -28,13 +28,16 @@ export function RouteList({
   selected,
   onPick,
   pendingTimes,
+  roughTimes,
 }: {
   routes: Route[];
   selected: Route;
   onPick: (id: string) => void;
   pendingTimes: (r: Route) => boolean;
+  roughTimes: (r: Route) => boolean;
 }) {
-  const ready = routes.filter((r) => !pendingTimes(r));
+  // Only door-to-door times are compared ("Fastest", "+4 min")
+  const ready = routes.filter((r) => !roughTimes(r));
   const fastest = ready.length ? Math.min(...ready.map(minutes)) : null;
   const keys = (e: KeyboardEvent<HTMLElement>) => {
     const d = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
@@ -53,7 +56,8 @@ export function RouteList({
         const pending = pendingTimes(r);
         // What stands out: a crash, a train, a closure... before plain traffic
         const cause = r.delay_causes?.find((c) => c.kind !== "rush" && c.minutes >= 2) ?? r.delay_causes?.[0];
-        const more = fastest !== null && !pending ? minutes(r) - fastest : 0;
+        const rough = roughTimes(r);
+        const more = fastest !== null && !rough ? minutes(r) - fastest : 0;
         return (
           <button
             key={r.id ?? r.summary}
@@ -89,10 +93,17 @@ export function RouteList({
             </span>
             {!pending && (
               <span className="flex shrink-0 flex-col items-end gap-0.5">
-                {fastest !== null && routes.length > 1 && (
-                  <span className="font-num text-[12px]" style={{ color: more ? C.soft : C.light }}>
-                    {more ? `+${more} min` : "Fastest"}
+                {rough ? (
+                  <span className="text-[12px] text-muted" title="Times cover the main roads only">
+                    Main roads only
                   </span>
+                ) : (
+                  fastest !== null &&
+                  routes.length > 1 && (
+                    <span className="font-num text-[12px]" style={{ color: more ? C.soft : C.light }}>
+                      {more ? `+${more} min` : "Fastest"}
+                    </span>
+                  )
                 )}
                 <span className="font-num text-[12px] text-muted">
                   <span className="sr-only">Arrive </span>
@@ -108,8 +119,8 @@ export function RouteList({
 }
 
 /** "Why this way" vs. the other routes. */
-export function Comparisons({ route, others, pendingTimes }: { route: Route; others: Route[]; pendingTimes: (r: Route) => boolean }) {
-  const lines = compareRoutes(route, others, pendingTimes);
+export function Comparisons({ route, others, roughTimes }: { route: Route; others: Route[]; roughTimes: (r: Route) => boolean }) {
+  const lines = compareRoutes(route, others, roughTimes);
   if (!lines.length) return null;
   return (
     <ul className="m-0 flex list-none flex-col gap-2 p-0">

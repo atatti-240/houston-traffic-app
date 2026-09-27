@@ -77,15 +77,15 @@ function upsides(route: Route, other: Route): string[] {
 
 /**
  * "Why this way", compared with each other route: "4 min faster than via I-610 and skips the train crossing at
- * Cullen Blvd", "3 min slower than via I-45, but avoids the crash on I-45 Gulf Fwy". `pendingTimes`: routes whose
- * times will still change (their directions are on the way), so no minutes are compared for them.
+ * Cullen Blvd", "3 min slower than via I-45, but avoids the crash on I-45 Gulf Fwy". `roughTimes`: routes whose
+ * times aren't door to door (their directions are on the way, or unavailable), so no minutes are compared for them.
  */
-export function compareRoutes(route: Route, others: Route[], pendingTimes: (r: Route) => boolean = () => false): string[] {
+export function compareRoutes(route: Route, others: Route[], roughTimes: (r: Route) => boolean = () => false): string[] {
   const out: string[] = [];
   for (const o of others) {
     const label = o.label ?? `via ${o.summary}`;
     const tail = upsides(route, o)[0] ?? "";
-    if (pendingTimes(route) || pendingTimes(o)) {
+    if (roughTimes(route) || roughTimes(o)) {
       if (tail) out.push(`Unlike ${label}, ${tail}`);
       continue;
     }

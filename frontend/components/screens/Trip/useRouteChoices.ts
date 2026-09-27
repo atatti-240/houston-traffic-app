@@ -15,6 +15,7 @@ import type { Location, Route } from "@/lib/types";
 
 const HISTORY_FIELD = "bsRoute";
 const FAILED_NOTE = "Turn-by-turn directions aren't available right now. The line follows our main roads.";
+const RETRY_MS = 60_000;
 
 function initialPick(): string | null {
   if (typeof window === "undefined") return null;
@@ -36,51 +37,63 @@ export interface RouteChoiceState {
   pick: (id: string) => void;
   /** Its times will still change (a trip to or from a point whose directions are on the way) */
   pendingTimes: (r: Route) => boolean;
+  /** Its times don't include the way to and from our main roads, so they can't be compared with door-to-door ones
+   * (a trip to or from a point whose directions are on the way or unavailable) */
+  roughTimes: (r: Route) => boolean;
 }
 
 export function useRouteChoices(routes: Route[], origin: Location | undefined, to: Location | undefined): RouteChoiceState {
   const [picked, setPicked] = useState<string | null>(initialPick);
-  const [patches, setPatches] = useState<Record<string, DirectionsPatch | "failed">>({});
+  // By trip, route and departure: the same roads leaving at another time have other times.
+  const [patches, setPatches] = useState<Record<string, DirectionsPatch>>({});
+  const [failed, setFailed] = useState<Record<string, number>>({});
   const busy = useRef(false);
   const trip = JSON.stringify([origin, to]);
   const timed = (origin !== undefined && typeof origin !== "string") || (to !== undefined && typeof to !== "string");
+  const keyOf = useCallback((r: Route) => `${trip}|${r.id}|${r.depart_at}`, [trip]);
 
   const merged = useMemo(
     () =>
       routes.map((r): Route => {
-        const p = r.id ? patches[`${trip}|${r.id}`] : undefined;
-        if (!p || r.directions?.status !== "pending") return r;
-        if (p === "failed") return { ...r, directions: { ...r.directions, status: "unavailable", note: FAILED_NOTE } };
-        return { ...r, ...p, breakdown: { ...r.breakdown, ...p.breakdown } };
+        if (!r.id || r.directions?.status !== "pending") return r;
+        const p = patches[keyOf(r)];
+        if (p) return { ...r, ...p, breakdown: { ...r.breakdown, ...p.breakdown } };
+        if (failed[keyOf(r)]) return { ...r, directions: { ...r.directions, status: "unavailable", note: FAILED_NOTE } };
+        return r;
       }),
-    [routes, patches, trip],
+    [routes, patches, failed, keyOf],
   );
   const selected = merged.find((r) => r.id === picked) ?? merged[0];
 
   useEffect(() => {
     if (busy.current || origin === undefined || to === undefined) return;
-    const waiting = merged.filter((r) => r.id && r.directions?.status === "pending");
+    // Still pending, and not given up on in the last minute (asked again on a later refresh)
+    const waiting = routes.filter((r) => r.id && r.directions?.status === "pending" && !patches[keyOf(r)] && !(Date.now() - (failed[keyOf(r)] ?? 0) < RETRY_MS));
     const next = waiting.find((r) => r.id === selected?.id) ?? waiting[0];
-    if (!next?.id) return;
-    const key = `${trip}|${next.id}`;
+    if (!next) return;
+    const key = keyOf(next);
     busy.current = true;
     routeDirections({ origin, destination: to, segment_ids: next.segments.map((s) => s.id), depart_at: next.depart_at })
       .then(
         (p) => setPatches((m) => ({ ...m, [key]: p })),
-        () => setPatches((m) => ({ ...m, [key]: "failed" })),
+        () => setFailed((m) => ({ ...m, [key]: Date.now() })),
       )
       .finally(() => {
         busy.current = false;
       });
-    // origin / to are in `trip`
+    // origin / to are in `trip` (keyOf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [merged, selected?.id, trip]);
+  }, [routes, patches, failed, selected?.id, keyOf]);
 
   const pick = useCallback((id: string) => {
     setPicked(id);
     rememberPick(id);
   }, []);
   const pendingTimes = useCallback((r: Route) => timed && r.directions?.status === "pending", [timed]);
+  const roughTimes = useCallback(
+    (r: Route) => timed && (r.directions?.status === "pending" || r.directions?.status === "unavailable"),
+    [timed],
+  );
 
-  return { routes: merged, selected, pick, pendingTimes };
+  return { routes: merged, selected, pick, pendingTimes, roughTimes };
 }
