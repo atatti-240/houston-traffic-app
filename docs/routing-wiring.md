@@ -45,7 +45,7 @@ comes from one snapshot of the data and says where that data came from.
 **Incidents:**
 
 - A closure shuts the road until it clears. The router treats it like a blocked crossing: it either waits for the road to reopen or goes around, whichever is cheaper. A closure never makes a trip impossible.
-- Other kinds slow it down until they clear: crash ×1.6, roadwork ×1.3, stall or hazard ×1.2, plus 0.25 for every extra blocked lane, up to ×3.
+- Other kinds slow it down until they clear: crash ×1.6, lane closure ×1.5, weather ×1.35, roadwork or event ×1.3, stall, hazard or other ×1.2, plus 0.25 for every extra blocked lane, up to ×3.
 - With no clear time we assume 45 min from the start, and at least 15 more minutes from now.
 
 **Feeds:** a live method that raises is marked down. Everything falls back to predictions, the route's `feeds_down` lists the feed, and the "why" bullets say so. Inputs in the next 30 min are marked low confidence: crossings when the train feed is down, and every road when the traffic or incident feed is down, since a crash or closure could be missing.
@@ -59,7 +59,8 @@ The records are defined in `app/conditions/live.py`:
 ```python
 LiveTraffic(segment_id, congestion, source, observed_at, confidence="high", detail="")
 Incident(id, title, kind, segment_id, started_at, source, updated_at, clears_at=None, lanes_blocked=1, detail="")
-CrossingStatus(crossing_id, blocked, sensor_up, updated_at, source, clears_at=None)
+# kind: crash | stall | roadwork | lane_closure | closure | event | weather | hazard | other
+CrossingStatus(crossing_id, blocked, sensor_up, updated_at, source, clears_at=None, blocked_since=None)
 ```
 
 Rules for real adapters:
@@ -83,9 +84,10 @@ The demo endpoints fake every live input:
 | `POST /demo/block-crossing` | a train blocking a crossing |
 | `POST /demo/crossing-sensor` | a crossing sensor going down or coming back |
 | `POST /demo/live-traffic` | camera or TranStar readings on segments |
-| `POST /demo/incident` | a crash, stall, roadwork or closure |
+| `POST /demo/incident` | a crash, stall, roadwork, lane closure, closure, event, weather or hazard |
 | `POST /demo/feed` | a whole feed going down (`trains`, `traffic`, `incidents`) |
 | `POST /demo/clear-live` | drop all of the above |
+| `POST /demo/scenario/evening` | Monday 5 PM with one of everything: a crash, a concert, lane closures, rain, construction, a freight train and a busy camera |
 
 Every one of them re-checks saved trips and re-plans watched plans right away.
 `GET /live` shows what the router currently sees. `tests/test_conditions.py`,
@@ -105,6 +107,7 @@ Every one of them re-checks saved trips and re-plans watched plans right away.
 - **Baseline.** The typed order, leaving now, on traffic-only routes. `saved_min_vs_baseline` compares drive minutes against it.
 - **Watched plans** (`watch: true`) are re-planned every 5 min until you leave, right away when live data changes, and on the tick your departure comes due, so "leave now" always uses fresh conditions. Their alerts are `plan`, `order_changed`, `leave_earlier`, `leave_later`, `leave_now` (one per leg) and `info`.
   - If the departure you were told gets pushed back just as it comes due, the alert is "Hold on: leave at …" (a `leave_later`) instead of "leave now". This happens at most once. After it, re-plans can only move the departure earlier, and "leave now" comes at the new time.
+  - Re-plans start no earlier than the plan's `depart_after` (or now). The Trip screen saves the departure it picked there, so when conditions get worse and that re-plan comes out late while `depart_after` is still ahead, it tries starting about as much earlier as it's late plus the buffer (up to 3 times, never before now) and keeps the least late plan. You get "Leave N min earlier" instead of a plan that goes late without a word, and not "leave now" the evening before.
   - If a re-plan fails, the last good plan and its alerts stay in place.
   - A re-plan keeps the current stop order unless another order is better on lateness or saves at least 3 min. The order is tracked by stop position (`order_index`), because two stops can share a name. That way near-equal orders don't flip back and forth with a "New stop order" alert every few minutes. First departures are tried on quarter-hour clock marks for the same reason.
   - Once every stop's window has closed, the departure can only move earlier, just like after a "Hold on". A late plan's "leave now" still comes at its planned departure. If you never left and that departure has passed too, the plan stops being watched and sends one "Missed" alert (`info`). Stops without an end time never expire this way. Once you've left, the remaining legs' "leave now" alerts still come.

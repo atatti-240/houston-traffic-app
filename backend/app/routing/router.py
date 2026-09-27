@@ -47,6 +47,18 @@ SOURCE_LABELS = {
     "demo": "demo feed",
     "history": "history",
 }
+# Incident kind -> how a route reason names it ("Heads up: lane closure on ...")
+INCIDENT_NOUNS = {
+    "crash": "crash",
+    "stall": "stalled vehicle",
+    "hazard": "hazard",
+    "other": "incident",
+    "roadwork": "roadwork",
+    "lane_closure": "lane closure",
+    "closure": "closure",
+    "event": "event traffic",
+    "weather": "bad weather",
+}
 
 
 def resolve_safety(safe_path: bool | None = None, safety_weight: float | None = None) -> float:
@@ -490,7 +502,7 @@ class Router:
                 )
             elif s.incident:
                 out.append(
-                    f"Rerouted around {s.name}: {s.incident.kind} reported "
+                    f"Rerouted around {s.name}: {INCIDENT_NOUNS.get(s.incident.kind, 'incident')} reported "
                     f"({_provenance(s.incident.source, s.incident.updated_at, now)})"
                 )
             elif s.live_weight >= 0.3 and s.congestion - s.predicted_congestion >= LIVE_REASON_EXTRA:
@@ -592,7 +604,8 @@ class Router:
                 seen_incidents.add(inc.id)
                 extra = s.travel_s * (1 - 1 / s.incident_slowdown) / 60
                 reasons.append(
-                    f"Heads up: {inc.kind} on {s.name} ({_provenance(inc.source, inc.updated_at, now)}), "
+                    f"Heads up: {INCIDENT_NOUNS.get(inc.kind, 'incident')} on {s.name} "
+                    f"({_provenance(inc.source, inc.updated_at, now)}), "
                     f"about +{max(1, round(extra))} min"
                 )
             elif not inc and s.live_weight >= 0.3 and s.congestion - s.predicted_congestion >= LIVE_REASON_EXTRA:

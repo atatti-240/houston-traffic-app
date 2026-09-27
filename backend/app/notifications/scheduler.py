@@ -8,21 +8,26 @@ due, then "leave now" per leg. A plan never started whose windows all closed is 
 """
 
 import logging
+import math
 from datetime import datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import Notification, SavedPlan, Trip, TripState
+from app.causes import CausesEngine, unusual
+from app.conditions.provider import FEEDS
+from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState
 from app.notifications.service import NotificationService
 from app.plan_io import plan_to_json, request_from_json
-from app.planner import plan_trip
+from app.planner import Plan, plan_trip
 from app.recommender import Recommendation, recommend_departure, route_summary
 from app.routing.router import Router
 
 LOOKAHEAD = timedelta(hours=3)  # start watching a trip this long before its arrive-by time
 SHIFT_ALERT = timedelta(minutes=5)
 REPLAN_EVERY = timedelta(minutes=5)
+SOONER_TRIES = 3  # a watched plan gone late: how many earlier starts to try
+WATCH_FOR = timedelta(hours=12)  # give up on a "notify me when it clears" after this
 DEFERRED_WATCH = timedelta(days=1)  # keep watching a trip past arrive-by this long for a deferred "leave now"
 
 log = logging.getLogger("houston.scheduler")
@@ -61,6 +66,11 @@ def _order_changed(new: dict, old: dict) -> bool:
     if "order_index" in old and "order_index" in new:
         return new["order_index"] != old["order_index"]
     return new["order"] != old["order"]
+
+
+def _lateness(plan: Plan) -> tuple[int, int]:
+    """Stops missed, then minutes late: lower is better."""
+    return len(plan.late_stops), round(sum(leg.late_min for leg in plan.late_stops))
 
 
 def _top_reason(rec: Recommendation) -> str:
@@ -102,7 +112,44 @@ class TripScheduler:
                     log.exception("scheduler: skipping plan %s", plan_id)
                     continue
                 sent.extend(notes)
+            try:
+                sent.extend(self._check_watches(session, now))
+                session.commit()
+            except Exception:
+                session.rollback()
+                log.exception("scheduler: skipping road watches")
         return sent
+
+    # --- "notify me when it clears" -------------------------------------------------------------
+
+    def _check_watches(self, session: Session, now: datetime) -> list[Notification]:
+        watches = list(session.scalars(select(SlowdownWatch).where(~SlowdownWatch.done)))
+        if not watches:
+            return []
+        engine = CausesEngine(self.router)
+        # A feed outage isn't "cleared": the crash (or reading, or train) may just be missing.
+        outage = any(engine.view.live.feed_down(f) for f in FEEDS)
+        notes = []
+        for w in watches:
+            seg = self.router.network.segments.get(w.segment_id)
+            if seg is None or now - w.created_at > WATCH_FOR:
+                w.done = True
+                continue
+            if outage:
+                continue
+            s = engine.analyze(seg, now)
+            if w.routine_only and not s.is_slowdown:
+                body = f"Traffic is moving normally again from {s.place} ({round(s.speed_mph)} mph)."
+            elif not w.routine_only and not unusual(s.causes):
+                body = (
+                    f"Nothing unusual left from {s.place}: it's back to typical traffic for this time "
+                    f"({round(s.speed_mph)} mph)."
+                )
+            else:
+                continue
+            notes.append(self.notifier.send(session, None, "cleared", f"{s.road} has cleared", body, now))
+            w.done = True
+        return notes
 
     # --- watched multi-stop plans -------------------------------------------------------------
 
@@ -145,10 +192,29 @@ class TripScheduler:
         if 0 not in sent and not (due and sp.held) and (replan_now or due or now - sp.last_planned_at >= REPLAN_EVERY):
             try:
                 start, stops, depart_after, weight, buffer_min = request_from_json(sp.request_json)
-                plan = plan_trip(
-                    self.router, start, stops, max(depart_after, now), now, weight,
-                    buffer_min=buffer_min, prefer_order=_current_order(result, stops),
-                )
+                view = self.router.view(now)
+
+                def replan(earliest: datetime):
+                    return plan_trip(
+                        self.router, start, stops, earliest, now, weight,
+                        buffer_min=buffer_min, view=view, prefer_order=_current_order(result, stops),
+                    )
+
+                earliest = max(depart_after, now)
+                plan = replan(earliest)
+                # depart_after is often the departure the app picked when the plan was saved. When
+                # traffic got worse since, that plan comes out late: try leaving about as much
+                # earlier as it's late (plus the buffer), a few times but never before now, and
+                # keep the least late. "Leave 20 min earlier", not going late without a word, and
+                # not "leave now" the evening before (the planner starts as early as it may).
+                for _ in range(SOONER_TRIES):
+                    if not plan.late_stops or earliest <= now:
+                        break
+                    shift = max(leg.late_min for leg in plan.late_stops) + buffer_min
+                    earliest = max(now, earliest - timedelta(minutes=5 * math.ceil(shift / 5)))
+                    sooner = replan(earliest)
+                    if _lateness(sooner) < _lateness(plan):
+                        plan = sooner
                 new = plan_to_json(plan, sp.id, created_at=sp.created_at, watch=True)
             except Exception:
                 # Keep the last good plan (and its "leave now" alerts); retry next tick.

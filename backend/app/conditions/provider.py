@@ -19,8 +19,9 @@ Road speed (entering at time T)
 
 Incidents
   - A closure shuts the road until it clears (the router waits for it to reopen or goes
-    around). Other incidents slow it down (crash x1.6, roadwork x1.3, stall/hazard x1.2,
-    +0.25 per extra blocked lane, max x3) until they clear. Without a clear time we assume
+    around). Other incidents slow it down (crash x1.6, lane closure x1.5, weather x1.35,
+    roadwork / event x1.3, stall/hazard x1.2, +0.25 per extra blocked lane, max x3) until
+    they clear. Without a clear time we assume
     45 min from the start, and at least 15 more min from now.
 
 Feeds down
@@ -32,6 +33,8 @@ Past times
   - Live data describes the present. For times more than 15 min before now (e.g. the map's
     time slider scrubbed back) live traffic and crossing status are ignored, and incidents
     count only if they had already started by then.
+  - as_of(T) is stricter, for "what was it like at T" (the speed-history chart): only
+    incidents that had started and readings taken by T, however close T is to now.
 """
 
 from collections import defaultdict
@@ -58,7 +61,16 @@ CLEAR_TRUST = timedelta(minutes=5)
 PAST_LIVE_TOLERANCE = timedelta(minutes=15)  # live data still applies this far before now
 INCIDENT_DEFAULT = timedelta(minutes=45)
 INCIDENT_MIN_REMAINING = timedelta(minutes=15)
-INCIDENT_SLOWDOWN = {"crash": 1.6, "roadwork": 1.3, "stall": 1.2, "hazard": 1.2, "other": 1.2}
+INCIDENT_SLOWDOWN = {
+    "crash": 1.6,
+    "lane_closure": 1.5,
+    "weather": 1.35,
+    "roadwork": 1.3,
+    "event": 1.3,
+    "stall": 1.2,
+    "hazard": 1.2,
+    "other": 1.2,
+}
 EXTRA_LANE_SLOWDOWN = 0.25
 MAX_INCIDENT_SLOWDOWN = 3.0
 STRONG_LIVE_WEIGHT = 0.4  # live weight at which we call a reading "the" source
@@ -250,6 +262,22 @@ class ConditionsView:
     def without_live(self) -> "ConditionsView":
         """Same moment, predictions only: what we'd do if no live data existed."""
         return ConditionsView(self.provider, LiveState(now=self.now, feeds=self.live.feeds))
+
+    def as_of(self, at: datetime) -> "ConditionsView":
+        """Same moment, but only incidents that had started and live readings taken by `at`:
+        what the road was like then (the speed-history chart), not what's reported now."""
+        live = self.live
+        traffic = {sid: [r for r in rs if r.observed_at <= at] for sid, rs in live.traffic.items()}
+        return ConditionsView(
+            self.provider,
+            LiveState(
+                now=self.now,
+                traffic={sid: rs for sid, rs in traffic.items() if rs},
+                incidents=[inc for inc in live.incidents if inc.started_at <= at],
+                crossings=live.crossings,
+                feeds=live.feeds,
+            ),
+        )
 
     @property
     def has_live(self) -> bool:

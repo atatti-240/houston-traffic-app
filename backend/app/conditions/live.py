@@ -34,7 +34,9 @@ class LiveTraffic:
     detail: str = ""  # human text, e.g. "29 vehicles vs 18 usual"
 
 
-IncidentKind = Literal["crash", "stall", "roadwork", "closure", "hazard", "other"]
+IncidentKind = Literal[
+    "crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other"
+]
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,7 @@ class CrossingStatus:
     updated_at: datetime
     source: str  # "trainwatch", "demo", ...
     clears_at: datetime | None = None  # when a blocked crossing is expected to clear
+    blocked_since: datetime | None = None  # when the current blockage started, if known
 
 
 @dataclass(frozen=True)
