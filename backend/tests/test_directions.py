@@ -666,3 +666,26 @@ def test_both_ends_by_the_same_node_go_door_to_door_directly(client, services):
     best = client.post("/route?directions=true", json={"origin": "downtown", "destination": near}).json()["best"]
     assert best["directions"]["status"] == "ok" and len(fake.urls) == 1 and vias_in(fake.urls[0]) == 0
     assert best["total_min"] > 0 and best["geometry"][-1] == pytest.approx([near["lat"], near["lng"]], abs=1e-5)
+
+
+def test_a_slow_server_gets_no_third_try(router, trained):
+    network = trained[0]
+    best, _ = router.route("downtown", "galleria", MON(12))
+    now = [0.0]
+    fake = FakeOsrm()
+
+    def slow_and_wandering(url, timeout):
+        now[0] += 3.5  # each answer takes 3.5 s ...
+        status, body = fake(url, timeout)
+        for leg in body["routes"][0]["legs"]:  # ... and is no good
+            leg["distance"] = 99_000
+            leg.get("annotation", {})["distance"] = [99_000] * len(leg.get("annotation", {}).get("distance", []))
+        return status, body
+
+    door = DoorDirections(
+        OsrmClient("http://osrm.test", fetch=slow_and_wandering, clock=lambda: now[0], sleep=lambda s: None)
+    )
+    segs, o, d = segments_of(network, best), place_end(network, "downtown"), place_end(network, "galleria")
+    path = door.build(segs, o, d)
+    assert path.status == "unavailable" and len(fake.urls) == 2 and "out of time" in path.tried[-1]
+    assert door.cached(segs, o, d) is None  # a slow moment isn't remembered
