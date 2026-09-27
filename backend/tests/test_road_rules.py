@@ -170,6 +170,26 @@ def test_no_toll_free_route_note(services):
     assert best.reasons[0] == f"No toll-free route: this one uses BW-8 Sam Houston Tollway ({best.segments[0].miles:.1f} mi)"
 
 
+def test_avoiding_both_still_stays_off_the_tollway_when_there_is_a_toll_free_way(services):
+    # No highway-free way from Greenspoint, but a toll-free one (I-45, 610, I-10): take that one,
+    # never the tollway with a false "No toll-free route".
+    both = avoiding(services.router, Avoid(tolls=True, highways=True))
+    best, alt = both.route("greenspoint", "energy", MORNING)
+    assert not any(s.toll for r in (best, alt) if r for s in r.segments)
+    assert best.reasons[0].startswith("No highway-free route: this one uses ")
+    assert not any(r.startswith("No toll-free route") for rt in (best, alt) if rt for r in rt.reasons)
+    for find in (both.best_route, both.traffic_only_route):
+        assert not any(s.toll for s in find("greenspoint", "energy", MORNING).segments)
+
+    # With truly no toll-free way (a map without US-290), both notes, and still as little as it can.
+    net = services.network
+    segs = {sid: s for sid, s in net.segments.items() if not sid.startswith("US290:")}
+    router = Router(Network(net.nodes, segs, net.crossings), services.models)
+    best, _ = avoiding(router, Avoid(tolls=True, highways=True)).route("290_bw8", "i10_bw8w", MORNING)
+    assert [s.id for s in best.segments] == ["BW8:290_bw8>i10_bw8w"]
+    assert [r.split(":")[0] for r in best.reasons[:2]] == ["No toll-free route", "No highway-free route"]
+
+
 def test_route_recommend_and_plan_take_the_options(client):
     body = {"origin": "greenspoint", "destination": "energy"}
     assert client.post("/route", json=body).json()["best"]["uses_toll"] is True
@@ -182,6 +202,9 @@ def test_route_recommend_and_plan_take_the_options(client):
 
     hwy = client.post("/route", json={"origin": "downtown", "destination": "medcenter", "avoid_highways": True}).json()["best"]
     assert {s["road_class"] for s in hwy["segments"]} == {"arterial"}
+
+    both = client.post("/route", json={**body, "avoid_tolls": True, "avoid_highways": True}).json()["best"]
+    assert both["uses_toll"] is False and not any(r.startswith("No toll-free") for r in both["reasons"])
 
     plan = client.post(
         "/plan",
