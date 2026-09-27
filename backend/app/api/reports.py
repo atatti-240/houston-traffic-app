@@ -19,7 +19,6 @@ from app.reports import (
     DriverReport,
     ReportKindId,
     Snap,
-    client_key,
     flooded_other_way,
     in_houston,
     nearest_place,
@@ -45,8 +44,8 @@ class VoteIn(BaseModel):
     still_there: bool
 
 
-def _client(request: Request) -> str:
-    return client_key(request.client.host if request.client else None)
+def _client(request: Request, svc: Services) -> str:
+    return svc.reports.client(request.client.host if request.client else None)
 
 
 def _houston(lat: float, lng: float) -> None:
@@ -141,7 +140,7 @@ def list_reports(request: Request, svc: Services = Depends(get_services)):
     not_there)."""
     now = svc.clock.now()
     rows = svc.reports.active(now)
-    mine = svc.reports.mine([r.id for r in rows], _client(request))
+    mine = svc.reports.mine([r.id for r in rows], _client(request, svc))
     effect = _delays(svc, rows)
     return {"generated_at": iso(now), "items": [report_json(svc, r, now, mine.get(r.id), effect) for r in rows]}
 
@@ -175,7 +174,7 @@ def create_report(
         sn = svc.reports.snap(body.lat, body.lng, body.segment_id)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    client = _client(request)
+    client = _client(request, svc)
     _too_many(svc.reports.report_limit.hit(client), "reports")
     now = svc.clock.now()
     r, merged = svc.reports.create(body.kind, body.lat, body.lng, body.note, client, now, sn)
@@ -198,7 +197,7 @@ def vote(
     """Still there (keeps it up longer) or not there (two more of those than "still there" take
     it down; the reporter's own "not there" withdraws it). One vote per client per report:
     voting again changes your vote."""
-    client = _client(request)
+    client = _client(request, svc)
     _too_many(svc.reports.vote_limit.hit(client), "votes")
     now = svc.clock.now()
     r = svc.reports.vote(report_id, client, body.still_there, now)

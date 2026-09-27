@@ -1,11 +1,13 @@
-"""Driver reports: snapping, limits, expiry, votes, what they do to roads, routes, causes and
-alerts, the demo's canned reports, and old databases."""
+"""Driver reports: snapping, limits, client keys, expiry, votes, pruning, what they do to roads,
+routes, causes and alerts, the demo's canned reports, and old databases."""
 
+import os
+from collections import Counter
 from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -17,6 +19,7 @@ from app.reports import (
     DriverReportVote,
     RateLimiter,
     ReportStore,
+    load_secret,
     offset_line,
     point_along,
 )
@@ -164,6 +167,54 @@ def test_rate_limiter_windows_and_stays_bounded():
     assert len(rl._hits) == 3 and "a" not in rl._hits
 
 
+# --- client keys ---------------------------------------------------------------------------------------
+
+
+def test_client_keys_are_keyed_with_the_install_secret_and_survive_a_restart(tmp_path, monkeypatch, services):
+    key_file = tmp_path / "data" / "reports.key"
+    monkeypatch.setattr("app.reports.SECRET_FILE", key_file)
+    engine = create_engine(f"sqlite:///{tmp_path / 'app.db'}", connect_args={"check_same_thread": False})
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    first = ReportStore(factory, lambda: services.network)
+    assert key_file.exists()
+    if os.name == "posix":
+        assert key_file.stat().st_mode & 0o777 == 0o600
+    me, you = first.client("10.0.0.1"), first.client("10.0.0.2")
+    assert me != you and "10.0.0.1" not in me
+    now = datetime(2026, 9, 28, 8, 0)
+    r, _ = first.create("crash", *point_along(services.network.segments[I69_OUT], 0.5), "", me, now)
+    first.vote(r.id, you, True, now)
+    # After a restart the same addresses have the same keys: still my report, still one vote each.
+    again = ReportStore(factory, lambda: services.network)
+    assert again.client("10.0.0.1") == me
+    assert again.mine([r.id], me) == {r.id: "reported"} and again.mine([r.id], you) == {r.id: "still_there"}
+    assert again.vote(r.id, again.client("10.0.0.2"), True, now).still_there == 1
+    # Another install's secret gives the same address another key.
+    assert ReportStore(factory, lambda: services.network, secret=b"x" * 32).client("10.0.0.1") != me
+    engine.dispose()
+
+
+def test_install_secret_is_made_once_and_a_damaged_one_replaced(tmp_path):
+    path = tmp_path / "reports.key"
+    secret = load_secret(path)
+    assert len(secret) == 32 and load_secret(path) == secret
+    path.write_text("not a key")
+    fresh = load_secret(path)
+    assert fresh != secret and load_secret(path) == fresh
+    # Nowhere to keep it: a secret for this run, not a crash.
+    (tmp_path / "a-file").write_text("")
+    assert len(load_secret(tmp_path / "a-file" / "reports.key")) == 32
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a-file", "reports.key"]  # no temp files left
+
+
+def test_a_database_in_memory_does_not_touch_the_secret_file(tmp_path, monkeypatch, services):
+    monkeypatch.setattr("app.reports.SECRET_FILE", tmp_path / "reports.key")
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    store = ReportStore(sessionmaker(bind=engine, expire_on_commit=False), lambda: services.network)
+    assert store.client("10.0.0.1") == store.client("10.0.0.1") != store.client("10.0.0.2")
+    assert not (tmp_path / "reports.key").exists()
+
+
 # --- expiry and votes --------------------------------------------------------------------------------
 
 
@@ -229,6 +280,38 @@ def test_reporter_not_there_withdraws_it(c, services):
     rep = report(c, services, "police", POLICE_ROAD)
     assert c.post(f"/reports/{rep['id']}/vote", json={"still_there": False}).json()["removed"] is True
     assert active_ids(c) == set()
+
+
+def stored(services) -> tuple[set[int], Counter]:
+    """Report ids in the database (up or not), and votes per report."""
+    with services.session_factory() as s:
+        return set(s.scalars(select(DriverReport.id))), Counter(s.scalars(select(DriverReportVote.report_id)))
+
+
+def test_reports_are_deleted_with_their_votes_a_day_after_they_end(app, c, services):
+    other = client_at(app, "10.0.4.1")
+    crash = report(c, services, "crash", I69_OUT)  # 8:00, ends 8:45
+    police = report(c, services, "police", POLICE_ROAD)
+    hazard = report(c, services, "hazard", FLOOD_ROAD)  # ends 10:00
+    for r in (crash, police, hazard):
+        other.post(f"/reports/{r['id']}/vote", json={"still_there": True})
+    c.post(f"/reports/{police['id']}/vote", json={"still_there": False})  # withdrawn at 8:00
+    advance(c, 24 * 60 + 30)  # 8:30 the next day
+    # Reading deletes nothing.
+    assert active_ids(c) == set() and stored(services)[0] == {crash["id"], police["id"], hazard["id"]}
+    # A write does: the withdrawn one (ended 8:00 yesterday) goes, with its vote.
+    pothole = report(c, services, "pothole", POLICE_ROAD)
+    ids, votes = stored(services)
+    assert ids == {crash["id"], hazard["id"], pothole["id"]} and police["id"] not in votes
+    advance(c, 20)  # 8:50: the crash ended a day ago too; a vote is a write
+    other.post(f"/reports/{pothole['id']}/vote", json={"still_there": True})
+    ids, votes = stored(services)
+    assert ids == {hazard["id"], pothole["id"]} and votes == Counter({hazard["id"]: 1, pothole["id"]: 1})
+    advance(c, 75)  # 10:05: the hazard ended at 10:00 yesterday
+    report(c, services, "crash", POLICE_ROAD)
+    ids, votes = stored(services)
+    assert hazard["id"] not in ids and hazard["id"] not in votes and pothole["id"] in ids
+    assert pothole["id"] in active_ids(c)
 
 
 def test_vote_on_a_missing_report_is_404(c):

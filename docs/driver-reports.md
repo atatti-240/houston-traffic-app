@@ -60,10 +60,14 @@ so routing, Why it's slow, Causes, Alerts, route reasons and "notify me when it 
 - **Not there:** two more *not there* than *still there* votes take it down. The reporter's own
   *not there* (**Take it down** on the card) withdraws it at once.
 - All times are the simulated clock, so the demo's clock jumps age and expire reports too.
+- A day after a report ends (expired, voted away or withdrawn) it's deleted with its votes, on the
+  next report or vote, so the tables only ever hold about a day of reports.
 
 ## Abuse limits
 
-- One vote per client per report (the client is its IP address, stored only as a hash). Voting
+- One vote per client per report. The client is its IP address, stored only as a hash keyed with
+  this install's secret (made on first run in `backend/data/reports.key`, gitignored), so a leaked
+  database alone doesn't give the addresses back, and votes still match after a restart. Voting
   again changes your vote. The reporter can't confirm their own report.
 - Per client, in real time: 6 reports and 30 votes per 10 minutes (429 with `Retry-After`). The
   limiter remembers at most 10,000 clients, and `POST /demo/reset` starts it over (so a rehearsal

@@ -150,6 +150,7 @@ __pycache__/
 
 # Backend runtime data
 backend/data/*.db
+backend/data/reports.key*
 
 # Next.js
 frontend/.next/

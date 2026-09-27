@@ -3,10 +3,12 @@
 /** The Report sheet: what (crash, police, hazard, pothole, stalled car, flooding), where (where
  * I am, or a spot picked on the map, snapped to the road direction it's on), an optional
  * detail, Send. Phone: a bottom sheet over the map. Desktop: a panel over the map, above the
- * Report button. While picking a spot it steps aside for a "Tap the map" banner. */
+ * Report button. While picking a spot it steps aside for a "Tap the map" banner. The map keeps
+ * the dot for where it goes in sight, next to the sheet. */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { useMap } from "react-leaflet";
 
 import { useApp } from "@/components/app/AppContext";
 import { Icon, PillButton } from "@/components/ui";
@@ -26,6 +28,7 @@ import {
   startPicking,
   upsertReport,
   useReports,
+  type ReportKind,
   type SnapResult,
 } from "@/lib/reports";
 import { C, ICON } from "@/lib/theme";
@@ -62,6 +65,31 @@ function WhereChoice({ where, onChange }: { where: "here" | "spot"; onChange: (w
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Phone: the kind you picked, folded, so the sheet leaves room above it for the map. */
+function ChosenKind({ kind, onChange }: { kind: ReportKind; onChange: () => void }) {
+  const m = REPORT_KINDS[kind];
+  return (
+    <div className="flex items-center gap-2.5 rounded-[14px] bg-card py-2 pr-2 pl-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: m.color }}>
+        <Icon d={m.icon} size={18} color={m.ink} width={2.2} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[14px] font-semibold text-ink">{m.label}</span>
+        <span className="text-[12px] text-muted">{m.hint}</span>
+      </span>
+      <button
+        type="button"
+        data-first=""
+        onClick={onChange}
+        aria-label="Change what you see"
+        className="h-10 cursor-pointer rounded-[20px] px-3 text-[13px] font-medium text-accent hover:bg-card-hi"
+      >
+        Change
+      </button>
     </div>
   );
 }
@@ -120,18 +148,30 @@ function Where({
 }
 
 export default function ReportSheet() {
-  const { here, isDesktop, refresh } = useApp();
+  const { here, isDesktop, refresh, screen } = useApp();
   const { draft, picking } = useReports();
+  const map = useMap();
   const [snap, setSnap] = useState<SnapResult | null>(null);
   const [snapFailed, setSnapFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [kindsOpen, setKindsOpen] = useState(false);
   const sheetRef = useRef<HTMLElement>(null);
   const opener = useRef<Element | null>(null);
 
   const open = !!draft && !picking;
+  // Phone: once you've said what you see, the kinds fold to your pick (Change opens them again),
+  // so the sheet is short enough to show the map above it.
+  const folded = !isDesktop && !!draft?.kind && !kindsOpen;
   const point = draft ? (draft.where === "here" ? (here ? { lat: here.lat, lng: here.lng } : null) : draft.spot) : null;
   const pointKey = point ? `${point.lat.toFixed(6)},${point.lng.toFixed(6)}` : "";
+  // A new point: drop the last point's road now, not after a render that puts the dot back there.
+  const [snapKey, setSnapKey] = useState(pointKey);
+  if (snapKey !== pointKey) {
+    setSnapKey(pointKey);
+    setSnap(null);
+    setSnapFailed(false);
+  }
 
   // Where the report would go (asked again whenever the point changes).
   useEffect(() => {
@@ -156,12 +196,35 @@ export default function ReportSheet() {
     setPreview(draft && pin ? { lat: pin.lat, lng: pin.lng } : null);
   }, [draft, pin?.lat, pin?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep that dot in sight: when it moves, or the sheet opens or folds, and it's outside the part
+  // of the map you can see (right of the panel on desktop, clear of the map's buttons; above the
+  // sheet on a phone, below the Live map's top controls), pan it to the middle of that part.
+  const coveredTop = !isDesktop && screen.name === "map" ? 164 : 24;
+  useEffect(() => {
+    if (!open || !pin) return;
+    const raf = requestAnimationFrame(() => {
+      const sheet = sheetRef.current?.getBoundingClientRect();
+      if (!sheet) return;
+      const box = map.getContainer().getBoundingClientRect();
+      const [left, top, right, bottom] = isDesktop
+        ? [sheet.right - box.left + 32, 80, box.width - 80, box.height - 96]
+        : [24, coveredTop, box.width - 24, sheet.top - box.top - 24];
+      if (right - left < 48 || bottom - top < 48) return; // no room to show it
+      const p = map.latLngToContainerPoint([pin.lat, pin.lng]);
+      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) return;
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      map.panBy([p.x - (left + right) / 2, p.y - (top + bottom) / 2], { animate: !reduced });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, folded, isDesktop, coveredTop, pin?.lat, pin?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Remember what opened the sheet (focus goes back there), start on the first kind, Escape closes.
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) {
       opener.current ??= document.activeElement;
       setError(null);
+      setKindsOpen(false);
       requestAnimationFrame(() => sheetRef.current?.querySelector<HTMLElement>("[data-first]")?.focus());
     }
     if (!draft && opener.current) {
@@ -213,6 +276,9 @@ export default function ReportSheet() {
   };
 
   const k = draft.kind ? REPORT_KINDS[draft.kind] : null;
+  // Folding or unfolding the kinds: keep focus in the sheet (on Change, or on the kind picked).
+  const focusSoon = (selector: string) =>
+    requestAnimationFrame(() => sheetRef.current?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true }));
   const body = (
     <>
       <div className="flex items-center justify-between">
@@ -233,29 +299,43 @@ export default function ReportSheet() {
         <span className={LABEL} id="report-what">
           What do you see?
         </span>
-        <div className="grid grid-cols-3 gap-2" role="group" aria-labelledby="report-what">
-          {REPORT_ORDER.map((kind, i) => {
-            const m = REPORT_KINDS[kind];
-            const on = draft.kind === kind;
-            return (
-              <button
-                key={kind}
-                type="button"
-                data-first={i === 0 ? "" : undefined}
-                aria-pressed={on}
-                onClick={() => editDraft({ kind })}
-                className="flex min-w-0 cursor-pointer flex-col items-center gap-1 rounded-[14px] px-1 pt-2 pb-1.5 hover:bg-card-hi"
-                style={{ background: on ? C.cardHi : C.card, border: `1.5px solid ${on ? C.accent : "transparent"}` }}
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full" style={{ background: m.color }}>
-                  <Icon d={m.icon} size={18} color={m.ink} width={2.2} />
-                </span>
-                <span className="text-[13px] font-semibold text-ink">{m.label}</span>
-                <span className="text-[11px] text-muted">{m.hint}</span>
-              </button>
-            );
-          })}
-        </div>
+        {folded && draft.kind ? (
+          <ChosenKind
+            kind={draft.kind}
+            onChange={() => {
+              setKindsOpen(true);
+              focusSoon('[aria-pressed="true"]');
+            }}
+          />
+        ) : (
+          <div className="grid grid-cols-3 gap-2" role="group" aria-labelledby="report-what">
+            {REPORT_ORDER.map((kind, i) => {
+              const m = REPORT_KINDS[kind];
+              const on = draft.kind === kind;
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  data-first={i === 0 ? "" : undefined}
+                  aria-pressed={on}
+                  onClick={() => {
+                    editDraft({ kind });
+                    setKindsOpen(false);
+                    if (!isDesktop) focusSoon("[data-first]");
+                  }}
+                  className="flex min-w-0 cursor-pointer flex-col items-center gap-1 rounded-[14px] px-1 pt-2 pb-1.5 hover:bg-card-hi"
+                  style={{ background: on ? C.cardHi : C.card, border: `1.5px solid ${on ? C.accent : "transparent"}` }}
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full" style={{ background: m.color }}>
+                    <Icon d={m.icon} size={18} color={m.ink} width={2.2} />
+                  </span>
+                  <span className="text-[13px] font-semibold text-ink">{m.label}</span>
+                  <span className="text-[11px] text-muted">{m.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -336,8 +416,12 @@ export default function ReportSheet() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-h"
-        className="relative flex max-h-[90dvh] flex-col gap-3.5 overflow-y-auto rounded-t-3xl border-t border-line bg-bg px-5 pt-4 pb-6 text-ink"
-        style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}
+        className="relative flex flex-col gap-3.5 overflow-y-auto rounded-t-3xl border-t border-line bg-bg px-5 pt-4 pb-6 text-ink"
+        style={{
+          // While the kinds are open, stop short of the top of the map (the rest scrolls), so the dot shows there too.
+          maxHeight: folded ? "90dvh" : `max(50dvh, calc(100dvh - ${coveredTop + 72}px))`,
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+        }}
       >
         {body}
       </section>
