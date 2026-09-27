@@ -8,12 +8,15 @@ when it was shared, the latest ETA we worked out and the main road. Nothing abou
 Two clocks, on purpose:
   - Leave time, ETAs and "now" are simulated Houston time, like the rest of the app.
   - Expiry is real time (UTC wall clock). A link goes to a real person and should stop
-    working 6 real hours later. With simulated expiry, a demo jump to 5 PM would kill every
-    link made that morning, and a demo reset back to Monday 7:15 would revive expired ones.
+    working 6 real hours after the trip starts: 6 h after it's made, plus the wait until the
+    planned leave time (so a link shared in the morning for the evening still works that
+    evening). With simulated expiry, a demo jump to 5 PM would kill every link made that
+    morning, and a demo reset back to Monday 7:15 would revive expired ones.
 
-The ETA assumes the driver left at the planned time and is driving this route; we don't know
-where they are. Each check re-scores the stored segments (Router.evaluate) from that leave time
-under the conditions known now, so a crash or train on the rest of the route pushes it back.
+The ETA assumes the driver left at the planned time, is driving this route and has kept to the
+latest ETA; we don't know where they are. Each check re-scores the part of the route still ahead
+of where that puts them (Router.evaluate, under the conditions known now), so a crash or train
+further on pushes the ETA back, and one on a road they've already driven doesn't.
 """
 
 import re
@@ -27,23 +30,17 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import JSON, DateTime, Float, String, delete, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app.conditions.provider import PAST_LIVE_TOLERANCE
 from app.db import Base
 from app.graph import Network
 from app.routing.router import Router
 
-SHARE_TTL = timedelta(hours=6)  # real time
+SHARE_TTL = timedelta(hours=6)  # real time, counted from when the trip starts
 MAX_SHARES = 1000  # when full, the oldest links go first
 MAX_SEGMENTS = 300
 MAX_NAME = 80
-MAX_AHEAD = timedelta(hours=24)  # latest leave time a link can be made for
+MAX_AHEAD = timedelta(hours=24)  # latest leave time a link can be made for (so a link lasts at most 30 h)
 RATE_LIMIT = 30  # new links per client address...
 RATE_WINDOW_S = 3600.0  # ...per hour
-# Once the latest ETA is this far behind the simulated now, it stays as it is: live data for
-# times further back is ignored (see conditions.provider), so a re-check would quietly swap the
-# ETA people were shown for a history-only one.
-SETTLE_AFTER = PAST_LIVE_TOLERANCE
-
 ID_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")  # secrets.token_urlsafe(16) is 22 chars
 
 
@@ -67,6 +64,7 @@ class Share(Base):
     created_wall: Mapped[datetime] = mapped_column(DateTime, index=True)  # UTC: oldest go first when full
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)  # UTC
     # Room for snapshot fields added later (e.g. door-to-door legs) without a new column.
+    # "enter_at": when they should get to each segment, from the latest ETA (ISO, simulated).
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
@@ -120,21 +118,49 @@ def main_road(network: Network, segment_ids: list[str]) -> str:
     return max(miles, key=lambda r: miles[r])
 
 
-def route_eta(router: Router, segment_ids: list[str], depart_at: datetime) -> datetime:
-    """When you'd arrive leaving at depart_at, under the conditions known now."""
+def route_eta(router: Router, segment_ids: list[str], depart_at: datetime) -> tuple[datetime, list[datetime]]:
+    """When you'd arrive leaving at depart_at, under the conditions known now, and when you'd
+    get to each segment on the way."""
     net = router.network
     origin, destination = net.segments[segment_ids[0]].from_node, net.segments[segment_ids[-1]].to_node
-    return router.evaluate(segment_ids, origin, destination, depart_at, 0.0, router.view()).arrive_at
+    route = router.evaluate(segment_ids, origin, destination, depart_at, 0.0, router.view())
+    return route.arrive_at, [s.enter_at for s in route.segments]
+
+
+def expires_at(wall: datetime, now: datetime, depart_at: datetime) -> datetime:
+    """SHARE_TTL of real time after the trip starts (the wait until the leave time counted as is)."""
+    return wall + SHARE_TTL + max(timedelta(0), depart_at - now)
+
+
+def set_schedule(share: Share, enter_at: list[datetime]) -> None:
+    share.extra = {**(share.extra or {}), "enter_at": [t.isoformat() for t in enter_at]}
+
+
+def schedule(share: Share) -> list[datetime] | None:
+    raw = (share.extra or {}).get("enter_at")
+    if not isinstance(raw, list) or len(raw) != len(share.segment_ids):
+        return None
+    try:
+        return [datetime.fromisoformat(t) for t in raw]
+    except (TypeError, ValueError):
+        return None
 
 
 def refresh(router: Router, share: Share, now: datetime) -> bool:
-    """Re-check share.eta under current conditions. False when it was left as it was: the trip
-    ended a while ago (the last ETA stands), or the road map no longer has these segments."""
-    if now >= share.eta + SETTLE_AFTER:
+    """Re-check share.eta under current conditions, for the part of the route still ahead of them.
+    Where they should be comes from the latest ETA; what's behind them stays as it was, so a
+    crash on a road they've already driven doesn't move it. False when it was left as it was: the
+    trip should be over by now (the last ETA stands), or the road map no longer has these segments."""
+    ids = share.segment_ids
+    if now >= share.eta or any(sid not in router.network.segments for sid in ids):
         return False
-    if any(sid not in router.network.segments for sid in share.segment_ids):
-        return False
-    share.eta = route_eta(router, share.segment_ids, share.depart_at)
+    enter = schedule(share)
+    # The segment they should be on (the first one until they leave), re-scored from when they got to it.
+    k = 0
+    if enter and now > share.depart_at:
+        k = max((i for i, t in enumerate(enter) if t <= now), default=0)
+    share.eta, ahead = route_eta(router, ids[k:], enter[k] if enter else share.depart_at)
+    set_schedule(share, (enter or [])[:k] + ahead)
     return True
 
 

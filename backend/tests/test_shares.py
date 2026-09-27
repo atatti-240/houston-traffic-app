@@ -144,19 +144,32 @@ def test_eta_is_rechecked_when_something_happens_on_the_route(client, services, 
     assert view["now"] == "2026-09-28T07:20:00"
 
 
-def test_eta_settles_once_the_trip_is_well_over(client, services, wall):
+def test_eta_stands_once_the_trip_should_be_over(client, services, wall):
     route = _route(client)
     made = _share(client, route).json()
     eta = datetime.fromisoformat(made["eta"])
-    client.post("/demo/advance-clock", json={"to": (eta + timedelta(minutes=5)).isoformat()})
+    client.post("/demo/advance-clock", json={"to": (eta + timedelta(minutes=1)).isoformat()})
+    # A closure on the last road now doesn't change what we said: they should be there already.
+    client.post("/demo/incident", json={"segment_id": route["segments"][-1]["id"], "kind": "closure", "minutes": 60})
     view = client.get(f"/shares/{made['id']}").json()
-    assert view["status"] == "arrived" and view["checked"] is True
-    last_eta = view["eta"]
-    # Later still, a crash on the route doesn't change what we said: that trip is over.
+    assert view["status"] == "arrived" and view["checked"] is False and view["eta"] == made["eta"]
     client.post("/demo/advance-clock", json={"minutes": 60})
-    client.post("/demo/incident", json={"segment_id": route["segments"][0]["id"], "kind": "closure", "minutes": 60})
     view = client.get(f"/shares/{made['id']}").json()
-    assert view["status"] == "arrived" and view["checked"] is False and view["eta"] == last_eta
+    assert view["status"] == "arrived" and view["checked"] is False and view["eta"] == made["eta"]
+
+
+def test_a_link_made_before_schedules_were_kept_is_still_rechecked(client, services, wall):
+    route = _route(client)
+    share_id = _share(client, route).json()["id"]
+    with services.session_factory() as s:
+        s.get(Share, share_id).extra = None
+        s.commit()
+    client.post("/demo/advance-clock", json={"minutes": 5})
+    client.post("/demo/incident", json={"segment_id": route["segments"][-1]["id"], "kind": "crash", "minutes": 60, "lanes_blocked": 3})
+    view = client.get(f"/shares/{share_id}").json()
+    assert view["checked"] is True and view["eta"] > route["arrive_at"]
+    with services.session_factory() as s:
+        assert len(shares.schedule(s.get(Share, share_id))) == len(route["segments"])
 
 
 def test_links_expire_after_six_real_hours(client, services, wall):
@@ -244,3 +257,31 @@ def test_main_road_is_the_one_with_the_most_miles(services):
     assert i69 > net.segments[ids[2]].length_miles
     assert shares.main_road(net, ids) == "I-69"
     assert shares.main_road(net, ids[2:]) == "Westheimer Rd"
+
+
+def test_a_closure_on_a_road_they_already_drove_doesnt_move_the_eta(client, services, wall):
+    route = _route(client, "greenspoint", "galleria")
+    made = _share(client, route).json()
+    first, last = route["segments"][0], route["segments"][-1]
+    # 10 min in they're past the first road (it takes about a minute): closing it now changes nothing.
+    client.post("/demo/advance-clock", json={"minutes": 10})
+    assert datetime.fromisoformat(route["segments"][1]["enter_at"]) < datetime(2026, 9, 28, 7, 25)
+    client.post("/demo/incident", json={"segment_id": first["id"], "kind": "closure", "minutes": 60})
+    view = client.get(f"/shares/{made['id']}").json()
+    assert view["checked"] is True and view["status"] == "on_the_way"
+    assert view["eta"] == made["eta"]
+    # A crash on the road still ahead of them does.
+    client.post("/demo/incident", json={"segment_id": last["id"], "kind": "crash", "minutes": 90, "lanes_blocked": 3})
+    view = client.get(f"/shares/{made['id']}").json()
+    assert view["eta"] > made["eta"]
+
+
+def test_a_link_for_a_later_trip_lasts_until_six_hours_after_it_leaves(client, services, wall):
+    route = _route(client)
+    made = _share(client, route, depart_at="2026-09-28T17:15:00").json()  # 10 h from now
+    assert made["expires_in_min"] == 16 * 60
+    start = wall["now"]
+    wall["now"] = start + timedelta(hours=15, minutes=59)
+    assert client.get(f"/shares/{made['id']}").status_code == 200
+    wall["now"] = start + timedelta(hours=16)
+    assert client.get(f"/shares/{made['id']}").status_code == 404
