@@ -197,8 +197,9 @@ export default function ReportSheet() {
   }, [draft, pin?.lat, pin?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep that dot in sight: when it moves, or the sheet opens or folds, and it's outside the part
-  // of the map you can see (right of the panel on desktop, clear of the map's buttons; above the
-  // sheet on a phone, below the Live map's top controls), pan it to the middle of that part.
+  // of the map you can see (right of the panel on desktop, or above it in a narrow window, clear of
+  // the map's buttons; above the sheet on a phone, below the Live map's top controls), pan it to
+  // the middle of that part.
   const coveredTop = !isDesktop && screen.name === "map" ? 164 : 24;
   useEffect(() => {
     if (!open || !pin) return;
@@ -206,9 +207,12 @@ export default function ReportSheet() {
       const sheet = sheetRef.current?.getBoundingClientRect();
       if (!sheet) return;
       const box = map.getContainer().getBoundingClientRect();
-      const [left, top, right, bottom] = isDesktop
-        ? [sheet.right - box.left + 32, 80, box.width - 80, box.height - 96]
-        : [24, coveredTop, box.width - 24, sheet.top - box.top - 24];
+      const beside = sheet.right - box.left + 32;
+      const [left, top, right, bottom] = !isDesktop
+        ? [24, coveredTop, box.width - 24, sheet.top - box.top - 24]
+        : box.width - 80 - beside >= 48
+          ? [beside, 80, box.width - 80, box.height - 96]
+          : [24, 80, box.width - 80, sheet.top - box.top - 24]; // a narrow window: above the panel
       if (right - left < 48 || bottom - top < 48) return; // no room to show it
       const p = map.latLngToContainerPoint([pin.lat, pin.lng]);
       if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) return;
@@ -418,8 +422,8 @@ export default function ReportSheet() {
         aria-labelledby="report-h"
         className="relative flex flex-col gap-3.5 overflow-y-auto rounded-t-3xl border-t border-line bg-bg px-5 pt-4 pb-6 text-ink"
         style={{
-          // While the kinds are open, stop short of the top of the map (the rest scrolls), so the dot shows there too.
-          maxHeight: folded ? "90dvh" : `max(50dvh, calc(100dvh - ${coveredTop + 72}px))`,
+          // Stop short of the top of the map (the rest scrolls), so the dot shows there too, on short phones as well.
+          maxHeight: `max(50dvh, calc(100dvh - ${coveredTop + 72}px))`,
           boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
         }}
       >
