@@ -131,7 +131,14 @@ function AlertCard({ a }: { a: TrafficAlert }) {
       className={`${CARD} cursor-pointer hover:bg-card-hi`}
     >
       <Dot color={alertColor(a)} icon={alertIcon(a)} />
-      <CardText title={a.title} time={clockTime(a.time, clock?.now)} place={shortRoad(a.place)} impact={tidy(a.impact)} />
+      {/* A train alert's detail is its caveat ("Sensor down, low confidence"); the rest keep the design's three lines */}
+      <CardText
+        title={a.title}
+        time={clockTime(a.time, clock?.now)}
+        place={shortRoad(a.place)}
+        impact={tidy(a.impact)}
+        body={a.group === "train" && a.detail ? tidy(a.detail) : undefined}
+      />
     </button>
   );
 }

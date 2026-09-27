@@ -40,7 +40,8 @@ export interface FeedInput {
   kind: string;
   level: Level;
   weather: boolean;
-  note: string;
+  /** A train is blocking the crossing right now */
+  blocked: boolean;
 }
 
 interface Lane {
@@ -142,16 +143,17 @@ function consist(rnd: () => number): { cars: RailCar[]; length: number } {
   return { cars, length: x };
 }
 
-/** Does this camera show a train at the crossing right now? */
-export function showsTrain(cam: FeedInput): boolean {
-  return cam.kind === "train" && /train/i.test(cam.note);
+/** Does this camera show a train at the crossing right now? Only when the crossing is blocked live
+ * (never from the note's text or a "Train likely" prediction; a missing flag means no train). */
+export function showsTrain(cam: { kind: string; crossing_blocked?: boolean | null }): boolean {
+  return cam.kind === "train" && cam.crossing_blocked === true;
 }
 
 export function createScene(cam: FeedInput): Scene {
   const rnd = rng(seedOf(cam.id));
   const heavy = cam.level === "heavy";
   const crossing = cam.kind === "train";
-  const blocked = crossing && showsTrain(cam);
+  const blocked = crossing && cam.blocked;
 
   const lanes: Lane[] = LANES.map((ln) => {
     const n = Math.max(1, Math.round(DENSITY[cam.level] * (0.7 + rnd() * 0.6)));

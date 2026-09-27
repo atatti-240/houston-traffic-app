@@ -112,6 +112,13 @@ export default function Cameras() {
   const { screen, back, go, live, clock, backendDown, setScene, scene } = useApp();
   const params = screen.name === "cameras" ? screen : { area: undefined, camId: undefined };
   const [pick, setPick] = useState<Pick>(() => memory.get(screen) ?? { area: params.area, cam: params.camId });
+  // A new entry with the same area and camera (the same map marker again, or Back to an earlier one)
+  // doesn't remount this screen: show what that entry asks for, or what it showed last.
+  const [entry, setEntry] = useState(screen);
+  if (entry !== screen) {
+    setEntry(screen);
+    setPick(memory.get(screen) ?? { area: params.area, cam: params.camId });
+  }
   useEffect(() => {
     memory.set(screen, pick);
   }, [screen, pick]);
@@ -143,6 +150,14 @@ export default function Cameras() {
   const cam = (picked && area?.cams.includes(picked) ? picked : undefined) ?? area?.cams[0];
   const name = cam ? camName(cam.name) : "";
 
+  // Once a camera is showing, keep it: a data refresh that re-sorts the list updates its picture
+  // but doesn't switch to another camera (or drop pause / full screen).
+  const camId = cam?.id;
+  const areaName = area?.name;
+  useEffect(() => {
+    if (camId && areaName && pick.cam !== camId) setPick({ area: areaName, cam: camId });
+  }, [camId, areaName, pick.cam]);
+
   // The simulated clock, running on from the last time the backend reported it (real seconds
   // when the demo clock is frozen, so the "live" picture's clock still ticks).
   const simNow = clock?.now;
@@ -172,7 +187,6 @@ export default function Cameras() {
 
   // Keep the selected area chip in view (it may be far down the row).
   const chipsRef = useRef<HTMLDivElement>(null);
-  const areaName = area?.name;
   useEffect(() => {
     const row = chipsRef.current;
     const chip = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
@@ -233,7 +247,7 @@ export default function Cameras() {
       {/* Clipped at the page padding as in the design; the 4px inset keeps focus rings visible. */}
       <div ref={chipsRef} role="group" aria-label="Choose an area" className="no-scrollbar -m-1 flex gap-2 overflow-x-auto p-1 pb-1.5">
         {areas.map((a) => (
-          <FilterChip key={a.name} label={a.label} selected={a.name === area.name} onClick={() => setPick({ area: a.name })} />
+          <FilterChip key={a.name} label={a.label} selected={a.name === area.name} onClick={() => setPick({ area: a.name, cam: a.cams[0].id })} />
         ))}
       </div>
 

@@ -2,7 +2,7 @@
 
 import { api } from "@/lib/api";
 import { parseSim, toSimIso } from "@/lib/format";
-import type { PlanResult, TripPlanRequest } from "@/lib/types";
+import type { Location, PlanResult, TripPlanRequest } from "@/lib/types";
 
 const MIN = 60_000;
 const STEP = 5 * MIN;
@@ -61,4 +61,39 @@ export async function planTrip(body: TripPlanRequest): Promise<TimedPlan> {
     arrive = lastArrive(p);
   }
   return best;
+}
+
+// ---- watched plans already saved ------------------------------------------------------------
+
+/** A place in a plan result ("places", beyond the contract): `node` is the place id for a named place. */
+interface PlanPlace {
+  node: string;
+  lat: number;
+  lng: number;
+}
+
+/** A saved plan as GET /plan/{id} returns it, with the places it was asked for (in the request's order). */
+export type SavedPlan = PlanResult & { places?: { start: PlanPlace; stops: PlanPlace[] } };
+
+function samePlace(p: PlanPlace | undefined, loc: Location): boolean {
+  if (!p) return false;
+  return typeof loc === "string" ? p.node === loc : Math.abs(p.lat - loc.lat) < 1e-6 && Math.abs(p.lng - loc.lng) < 1e-6;
+}
+
+/** The watched plans that are still running. */
+export async function watchedPlans(): Promise<SavedPlan[]> {
+  const running = (await api.plans()).filter((p) => p.watch && !p.done);
+  const plans = await Promise.all(running.map((p) => api.getPlan(p.plan_id).catch(() => null)));
+  return plans.filter((p): p is SavedPlan => p !== null);
+}
+
+/** Whether a saved plan is the one for these places, deadline ("HH:MM", null = leave now) and safety
+ * setting. The extra stops can be in any order: the planner picks the order. */
+export function isSamePlan(p: SavedPlan, start: Location, stops: string[], to: Location, by: string | null, safety: number): boolean {
+  const pl = p.places;
+  if (!pl || pl.stops.length !== stops.length + 1 || Math.abs(p.safety_weight - safety) > 1e-6) return false;
+  const end = p.legs[p.legs.length - 1]?.window.end;
+  if ((end ? end.slice(11, 16) : null) !== by) return false;
+  const extra = pl.stops.slice(0, -1).map((s) => s.node);
+  return samePlace(pl.start, start) && samePlace(pl.stops[pl.stops.length - 1], to) && extra.sort().join() === [...stops].sort().join();
 }

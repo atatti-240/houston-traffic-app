@@ -140,8 +140,9 @@ function HereCard() {
   return (
     <div className="relative isolate h-[262px] overflow-hidden rounded-[20px] border border-line bg-map">
       {center ? (
-        // The map stops at the caption bar so "you" sits in the middle of what's visible.
-        <div className="absolute inset-x-0 top-0 bottom-14 z-0" aria-hidden="true">
+        // The map stops at the caption bar so "you" sits in the middle of what's visible. Inert: just a
+        // picture, so its attribution links stay out of the tab order (the main map shows them).
+        <div className="absolute inset-x-0 top-0 bottom-14 z-0" inert aria-hidden="true">
           <ClientTrafficMap interactive={false} center={center} zoom={zoom} />
         </div>
       ) : (

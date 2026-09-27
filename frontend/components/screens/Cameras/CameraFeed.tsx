@@ -131,7 +131,7 @@ export default function CameraFeed({
   const trainRef = useRef<SVGGElement>(null);
   const lightRefs = useRef<(SVGCircleElement | null)[]>([]);
 
-  const trainKey = showsTrain(cam);
+  const train = showsTrain(cam);
   // Rebuild the picture only when what it shows changes (not on every data refresh).
   const scene = useMemo(
     () =>
@@ -140,9 +140,9 @@ export default function CameraFeed({
         kind: cam.kind,
         level: cam.level,
         weather: cam.weather,
-        note: trainKey ? "train" : "",
+        blocked: train,
       }),
-    [cam.id, cam.kind, cam.level, cam.weather, trainKey],
+    [cam.id, cam.kind, cam.level, cam.weather, train],
   );
   const first = useMemo(() => frame(scene), [scene]);
   const blocked = !!scene.train;

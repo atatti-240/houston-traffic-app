@@ -633,3 +633,50 @@ def test_fixed_order_start_only_and_end_only_windows_stay_today(client):
         {"name": "Kid pickup", "place": "galleria", "window_start": "22:00", "window_end": "22:30", "fixed_order": True},
     ]}).json()
     assert evening["legs"][1]["window"]["start"] == "2026-09-28T22:00:00" and evening["status"] == "ok"
+
+
+# --- fifth review round -------------------------------------------------------------------------
+
+
+# What the Trip screen saves for "Downtown -> Galleria -> Medical Center, arrive by 8:00": the
+# departure it picked (7:10) as depart_after, plus the absolute deadline.
+ERRANDS = {
+    "name": "Errands",
+    "start": {"place": "downtown"},
+    "stops": [{"place": "galleria"}, {"place": "medcenter", "fixed_order": True, "window_end": "2026-09-29T08:00:00"}],
+    "depart_after": "2026-09-29T07:10:00",
+    "watch": True,
+}
+ERRAND_CRASHES = ("I69:i69_610sw>midtown", "WHMR:galleria>i69_610sw", "SH288:midtown>tmc_288", "SH288:288_610s>tmc_288",
+                  "HOLC:tmc_288>medcenter", "MAIN:midtown>medcenter", "I69:midtown>i69_610sw", "L610S:i69_610sw>288_610s")
+
+
+def test_watched_arrive_by_plan_says_leave_earlier_instead_of_going_late(client):
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T20:00:00"})
+    plan = client.post("/plan", json=ERRANDS).json()
+    assert plan["status"] == "ok" and plan["legs"][0]["leave_at"] == "2026-09-29T07:10:00"
+    client.post("/demo/advance-clock", json={"to": "2026-09-29T06:30:00"})
+    notes = []
+    for seg in ERRAND_CRASHES:
+        r = client.post("/demo/incident", json={"segment_id": seg, "kind": "crash", "minutes": 180, "lanes_blocked": 3})
+        notes += r.json()["notifications"]
+    # Leaving at 7:10 is now too late...
+    assert client.post("/plan", json={**ERRANDS, "watch": False}).json()["status"] == "late"
+    # ...so the watch says leave earlier (and the plan stays on time) instead of going late quietly,
+    # by about as much as it would be late, not "leave now".
+    assert kinds(notes) == ["leave_earlier"]
+    got = client.get(f"/plan/{plan['plan_id']}").json()
+    assert got["status"] == "ok" and "2026-09-29T06:30:00" < got["legs"][0]["leave_at"] < "2026-09-29T07:10:00"
+
+
+def test_watched_plan_gone_late_the_evening_before_does_not_say_leave_now(client, services):
+    # Long-running trouble on the way shows up the evening before: leave a bit earlier tomorrow
+    # morning, not "leave 11 h earlier, leave now".
+    client.post("/demo/advance-clock", json={"to": "2026-09-28T20:00:00"})
+    plan = client.post("/plan", json=ERRANDS).json()
+    for seg in ERRAND_CRASHES:
+        services.sources.incidents.inject(seg, "crash", "Crash", MON(20, 30), 14 * 60, 3)
+    notes = client.post("/demo/advance-clock", json={"to": "2026-09-28T20:30:00"}).json()["notifications"]
+    assert kinds(notes) == ["leave_earlier"]
+    got = client.get(f"/plan/{plan['plan_id']}").json()
+    assert got["status"] == "ok" and "2026-09-29T06:00:00" < got["legs"][0]["leave_at"] < "2026-09-29T07:10:00"

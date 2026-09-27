@@ -210,6 +210,20 @@ def test_safety_weight_on_route_recommend_and_trips(client):
     assert old["safety_weight"] == 1.0
 
 
+def test_saving_the_same_trip_twice_keeps_one(client):
+    body = {"origin": "midtown", "destination": "medcenter", "arrive_by": "08:00", "days": [0, 1, 2, 3, 4], "safety_weight": 0.3, "device_id": "phone"}
+    first = client.post("/trips", json=body)
+    again = client.post("/trips", json={**body, "days": [4, 3, 2, 1, 0]})
+    assert first.status_code == 201 and again.status_code == 200 and again.json()["id"] == first.json()["id"]
+    later = client.post("/trips", json={**body, "arrive_by": "08:15"})
+    assert later.status_code == 201 and later.json()["id"] != first.json()["id"]
+    assert len(client.get("/trips").json()) == 2
+
+    # Only one alert per trip, however often it was saved.
+    notes = client.post("/demo/advance-clock", json={"to": "2026-09-29T06:30:00"}).json()["notifications"]
+    assert [n["trip_id"] for n in notes].count(first.json()["id"]) == 1
+
+
 def test_reset_clears_plans_and_live_data(client):
     client.post("/plan", json={**CONTRACT_REQUEST, "watch": True})
     client.post("/demo/incident", json={"segment_id": "I45S:gulf_ee>downtown", "kind": "closure"})

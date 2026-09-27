@@ -9,6 +9,9 @@ For a road segment at time T the delay (vs. free flow) is split into parts, each
     closure   wait until a closed road reopens     "Road closure"
     train     expected wait at its rail crossings  "Train"
 
+Rush hour / usual traffic is routine, and so is a train predicted from history at under 50%:
+it stays in the breakdown but never makes a slowdown unusual (or leads it, unless it's all there is).
+
 Status from effective speed vs. free-flow speed: heavy < 50%, moderate < 75%, else light. A
 segment is a slowdown when it's moderate or heavy, or at least 3 min slower than free flow.
 Everything is read from one ConditionsView, so it agrees with what the router sees.
@@ -29,6 +32,8 @@ MIN_DELAY_S = 3 * 60
 FEATURE_SHARE = 25  # a non-routine cause with at least this share of the delay is "the" cause
 TOP_ROUTINE = 3  # routine (rush hour) slowdowns highlighted on the map
 MIN_TRAIN_S = 30
+LIKELY_TRAIN_P = 0.5  # a predicted train below this chance is as routine as rush hour
+UNUSUAL_MIN_S = 60  # a non-routine cause smaller than this doesn't keep a "notify me" watch open
 HISTORY_SPAN = timedelta(hours=2)
 HISTORY_STEP = timedelta(minutes=10)
 EASE_HORIZON = timedelta(hours=4)
@@ -84,6 +89,15 @@ class Cause:
     incident_id: str | None = None
     crossing_id: str | None = None
     pct: int = 0
+    probability: float | None = None  # trains: chance of meeting one (1.0 when live-blocked)
+
+    @property
+    def routine(self) -> bool:
+        """Normal for the time of day: rush hour / usual traffic, or a history-based train
+        risk under 50% (a live train is never routine)."""
+        return self.kind == "rush" or (
+            self.kind == "train" and self.probability is not None and self.probability < LIKELY_TRAIN_P
+        )
 
 
 @dataclass
@@ -107,13 +121,13 @@ class Slowdown:
     @property
     def main(self) -> Cause:
         """The cause to lead with: a non-routine one (crash, train, rain...) with a real share
-        of the delay, otherwise the biggest."""
-        special = next((c for c in self.causes if c.kind != "rush" and c.pct >= FEATURE_SHARE), None)
-        return special or self.causes[0]
+        of the delay, otherwise the biggest (a routine train risk only when it's all there is)."""
+        special = next((c for c in self.causes if not c.routine and c.pct >= FEATURE_SHARE), None)
+        return special or next((c for c in self.causes if c.kind != "train" or not c.routine), self.causes[0])
 
     @property
     def routine(self) -> bool:
-        return self.main.kind == "rush"
+        return self.main.routine
 
     @property
     def delay_min(self) -> int:
@@ -136,7 +150,10 @@ class CausesEngine:
 
     def analyze(self, seg: SegmentInfo, at: datetime | None = None) -> Slowdown:
         at = at or self.now
-        view, cong = self.view, self.models.congestion
+        # Routing counts what's reported now from a moment before now (you can't get there any
+        # sooner). For "what was it like at 4:50", only incidents and readings from before then.
+        view = self.view if at >= self.now else self.view.as_of(at)
+        cong = self.models.congestion
         sc = view.segment(seg, at)
         free_s = seg.free_flow_seconds
         usual_s = cong.travel_time_for_score(seg.id, sc.predicted_congestion)
@@ -211,8 +228,8 @@ class CausesEngine:
         minutes = at.hour * 60 + at.minute
         rush = at.weekday() < 5 and next((w for s, e, w in RUSH_WINDOWS if s <= minutes < e), None)
         eases = self._eases_at(seg, at)
-        until = f"until about {fmt(eases)}" if eases else "for the next few hours"
         if rush:
+            until = f"until about {fmt(eases)}" if eases else "for the next few hours"
             return Cause(
                 "rush",
                 CAUSE_LABELS["rush"],
@@ -220,12 +237,13 @@ class CausesEngine:
                 f"Normal {_hour_label(at)} traffic",
                 f"Weekday {rush} rush. Traffic this heavy is typical here {until}.",
             )
+        then = f"it typically eases by about {fmt(eases)}" if eases else "it typically stays that way for a few hours"
         return Cause(
             "rush",
             CAUSE_LABELS["usual"],
             seconds,
             f"Usual {at.strftime('%A')} traffic",
-            f"This stretch is usually this slow around {_hour_label(at)}; it typically eases {until}.",
+            f"This stretch is usually this slow around {_hour_label(at)}; {then}.",
         )
 
     def _eases_at(self, seg: SegmentInfo, at: datetime) -> datetime | None:
@@ -281,14 +299,17 @@ class CausesEngine:
                 started_at=(st.blocked_since if st else None) or cc.updated_at,
                 source=cc.source,
                 crossing_id=c.id,
+                probability=1.0,
             )
+        likely = cc.block_probability >= LIKELY_TRAIN_P
         return Cause(
             "train",
             CAUSE_LABELS["train"],
             cc.expected_delay_s,
-            "Train likely at the crossing",
+            "Train likely at the crossing" if likely else "Chance of a train at the crossing",
             f"{cc.block_probability:.0%} chance of a train at {c.name} around {fmt(arrive)}.",
             crossing_id=c.id,
+            probability=cc.block_probability,
         )
 
     # --- the whole network --------------------------------------------------------------------
@@ -305,7 +326,8 @@ class CausesEngine:
         return found
 
     def history(self, seg: SegmentInfo) -> list[tuple[datetime, float]]:
-        """Speed every 10 min over the last 2 hours (live data only counts near now)."""
+        """Speed every 10 min over the last 2 hours (incidents and live readings only from when
+        they started)."""
         points = []
         t = self.now - HISTORY_SPAN
         while t <= self.now:
@@ -313,6 +335,12 @@ class CausesEngine:
             points.append((t, s.speed_mph))
             t += HISTORY_STEP
         return points
+
+
+def unusual(causes: list[Cause]) -> list[Cause]:
+    """What isn't normal for the time of day and adds at least a minute: a "notify me when it
+    clears" watch on a road with any of these clears once they're all gone."""
+    return [c for c in causes if not c.routine and c.seconds >= UNUSUAL_MIN_S]
 
 
 def _set_shares(causes: list[Cause]) -> None:

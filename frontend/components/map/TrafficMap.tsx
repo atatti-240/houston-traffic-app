@@ -5,7 +5,7 @@
 
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
@@ -149,43 +149,95 @@ export function CauseCard({ s, onWhy }: { s: Slowdown; onWhy?: () => void }) {
 }
 
 function CauseMarkers() {
-  const { slowdowns, layers, causeFilter, selected, select, go, mapTime, scene } = useApp();
+  const { slowdowns, layers, causeFilter, selected, mapTime, scene } = useApp();
   const items = useMemo(
     () => (slowdowns?.items ?? []).filter((s) => s.highlight && s.kind && (!causeFilter || s.kind === causeFilter)),
     [slowdowns, causeFilter],
   );
+  // The marker picked with the keyboard: its popup takes focus when it opens.
+  const byKey = useRef<string | null>(null);
   if (!layers.causes || mapTime || scene?.markers === false) return null;
   return (
     <>
-      {items.map((s) => {
-        const sel = selected === s.id;
-        return (
-          <Marker
-            key={`${s.id}-${sel}`}
-            position={[s.lat, s.lng]}
-            icon={markerIcon(s.kind as CauseKind, sel, LEVEL[s.level].color)}
-            zIndexOffset={sel ? 1000 : 0}
-            title={`${s.label}: ${s.title}, ${s.level} traffic, +${s.delay_min} min`}
-            ref={sel ? (m) => void (m && setTimeout(() => m.openPopup(), 0)) : undefined}
-            eventHandlers={{
-              click: () => select(s.id),
-              popupclose: () => sel && select(null),
-            }}
-          >
-            {!sel && (
-              <Tooltip direction="top" offset={[0, -18]} opacity={1} className="cause-tip">
-                <CauseCard s={s} />
-              </Tooltip>
-            )}
-            {sel && (
-              <Popup closeButton={false} autoPan offset={[0, -14]} className="cause-popup">
-                <CauseCard s={s} onWhy={() => go({ name: "why", id: s.id })} />
-              </Popup>
-            )}
-          </Marker>
-        );
-      })}
+      {items.map((s) => (
+        <CauseMarker key={s.id} s={s} sel={selected === s.id} byKey={byKey} />
+      ))}
     </>
+  );
+}
+
+/** One cause icon. Its popup opens (and pans into view) once per selection: the app re-renders every few
+ * seconds, and the popup's autoPan would otherwise pull the map back to it each time. */
+function CauseMarker({ s, sel, byKey }: { s: Slowdown; sel: boolean; byKey: RefObject<string | null> }) {
+  const { select, go } = useApp();
+  const marker = useRef<L.Marker>(null);
+  useEffect(() => {
+    if (!sel) return;
+    const t = setTimeout(() => marker.current?.openPopup(), 0);
+    return () => clearTimeout(t);
+  }, [sel]);
+  const shown = useCallback(
+    (card: HTMLElement) => {
+      const p = marker.current?.getPopup();
+      if (p) {
+        p.options.autoPan = true;
+        p.update();
+        p.options.autoPan = false;
+      }
+      if (byKey.current === s.id) {
+        byKey.current = null;
+        card.querySelector("button")?.focus({ preventScroll: true });
+      }
+    },
+    [s.id, byKey],
+  );
+  const card = useMemo(() => <PopupCard s={s} onWhy={() => go({ name: "why", id: s.id })} onShown={shown} />, [s, go, shown]);
+  return (
+    <Marker
+      key={String(sel)}
+      ref={marker}
+      position={[s.lat, s.lng]}
+      icon={markerIcon(s.kind as CauseKind, sel, LEVEL[s.level].color)}
+      zIndexOffset={sel ? 1000 : 0}
+      title={`${s.label}: ${s.title}, ${s.level} traffic, +${s.delay_min} min`}
+      eventHandlers={{
+        click: () => select(s.id),
+        // Enter / Space on a focused icon (Leaflet makes it a button but only handles clicks)
+        keypress: (e) => {
+          if (e.originalEvent.key !== "Enter" && e.originalEvent.key !== " ") return;
+          e.originalEvent.preventDefault();
+          if (sel) return;
+          byKey.current = s.id;
+          select(s.id);
+        },
+        popupclose: () => sel && select(null),
+      }}
+    >
+      {!sel && (
+        <Tooltip direction="top" offset={[0, -18]} opacity={1} className="cause-tip">
+          <CauseCard s={s} />
+        </Tooltip>
+      )}
+      {sel && (
+        <Popup closeButton={false} autoPan={false} offset={[0, -14]} className="cause-popup">
+          {card}
+        </Popup>
+      )}
+    </Marker>
+  );
+}
+
+/** The selected marker's card; tells its marker once it is on the page (to pan to it and maybe focus it). */
+function PopupCard({ s, onWhy, onShown }: { s: Slowdown; onWhy: () => void; onShown: (card: HTMLElement) => void }) {
+  const el = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (el.current) onShown(el.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div ref={el}>
+      <CauseCard s={s} onWhy={onWhy} />
+    </div>
   );
 }
 
@@ -264,16 +316,21 @@ export default function TrafficMap({
         </>
       )}
 
-      {/* Routes */}
-      {scene?.alternative && (
-        <Polyline positions={scene.alternative} pathOptions={{ color: C.muted, weight: 6, opacity: 0.7, dashArray: "8 8" }} interactive={false} />
-      )}
-      {(scene?.legs ?? (scene?.route ? [scene.route] : [])).map((leg, i) => (
-        <span key={`r-${i}`}>
-          <Polyline positions={leg} pathOptions={{ color: "#0E1015", weight: 12, opacity: 0.9 }} interactive={false} />
-          <Polyline positions={leg} pathOptions={{ color: C.accent, weight: 7, opacity: 1 }} interactive={false} />
-        </span>
-      ))}
+      {/* Routes: own panes over the traffic, the dashed alternative always under the main route (within a pane,
+          whichever line is added last is drawn on top) */}
+      <Pane name="alt-route" style={{ zIndex: 410 }}>
+        {scene?.alternative && (
+          <Polyline positions={scene.alternative} pathOptions={{ color: C.muted, weight: 6, opacity: 0.7, dashArray: "8 8" }} interactive={false} />
+        )}
+      </Pane>
+      <Pane name="route" style={{ zIndex: 420 }}>
+        {(scene?.legs ?? (scene?.route ? [scene.route] : [])).map((leg, i) => (
+          <span key={`r-${i}`}>
+            <Polyline positions={leg} pathOptions={{ color: "#0E1015", weight: 12, opacity: 0.9 }} interactive={false} />
+            <Polyline positions={leg} pathOptions={{ color: C.accent, weight: 7, opacity: 1 }} interactive={false} />
+          </span>
+        ))}
+      </Pane>
 
       {/* Crossings layer */}
       {interactive && layers.crossings &&

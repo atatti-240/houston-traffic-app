@@ -42,9 +42,16 @@ export function NoteCard({ n, onClose }: { n: AppNotification; onClose?: () => v
   );
 }
 
-export function Toasts({ toasts, dismiss }: { toasts: AppNotification[]; dismiss: (id: number) => void }) {
+/** `top`: px from the top of the screen (e.g. below the phone demo bar). */
+export function Toasts({ toasts, dismiss, top = 12 }: { toasts: AppNotification[]; dismiss: (id: number) => void; top?: number }) {
   return (
-    <div className="pointer-events-none fixed top-3 right-3 z-[1400] flex w-[min(92vw,380px)] flex-col gap-2">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
+      className="pointer-events-none fixed right-3 z-[1400] flex w-[min(92vw,380px)] flex-col gap-2"
+      style={{ top }}
+    >
       {toasts.map((n, i) => (
         <div key={n.id} className={`toast-in pointer-events-auto ${i > 0 ? "hidden md:block" : ""}`}>
           <NoteCard n={n} onClose={() => dismiss(n.id)} />

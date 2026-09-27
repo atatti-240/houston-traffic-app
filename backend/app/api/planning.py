@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 
 from app.api.deps import get_services, is_clock_time, resolve_location, resolve_time
@@ -60,7 +60,9 @@ def _trip_json(t: Trip) -> dict:
 
 
 @router.post("/trips", status_code=201)
-def create_trip(body: TripIn, svc: Services = Depends(get_services)):
+def create_trip(body: TripIn, response: Response, svc: Services = Depends(get_services)):
+    """Save a trip. The same trip saved again (same device, places, arrive-by, days and safety)
+    returns the one already saved (200) instead of a second copy that would alert twice."""
     for loc in (body.origin, body.destination):
         resolve_location(svc, loc)
     with svc.session_factory() as s:
@@ -74,6 +76,19 @@ def create_trip(body: TripIn, svc: Services = Depends(get_services)):
             safety_weight=body.safety_weight,
             device_id=body.device_id,
         )
+        same = s.scalars(
+            select(Trip).where(
+                Trip.device_id == trip.device_id,
+                Trip.origin == trip.origin,
+                Trip.destination == trip.destination,
+                Trip.arrive_by == trip.arrive_by,
+                Trip.days == trip.days,
+            )
+        )
+        existing = next((t for t in same if t.weight == trip.weight), None)
+        if existing is not None:
+            response.status_code = 200
+            return _trip_json(existing)
         s.add(trip)
         s.commit()
         return _trip_json(trip)

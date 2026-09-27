@@ -156,8 +156,8 @@ class SlowdownWatch(Base):
     segment_id: Mapped[str] = mapped_column(String, index=True)
     device_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)  # simulated time
-    # Nothing unusual when watched (just rush hour): "clears" means back to free flow.
-    # Otherwise it means the unusual part (crash, train, rain...) is gone.
+    # Nothing unusual when watched (causes.unusual: just rush hour, a train chance...): "clears"
+    # means it's no longer slow. Otherwise it means the unusual part (crash, train, rain...) is gone.
     routine_only: Mapped[bool] = mapped_column(Boolean, default=False)
     done: Mapped[bool] = mapped_column(Boolean, default=False)
 
