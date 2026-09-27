@@ -239,6 +239,40 @@ def test_no_route_and_bad_answers():
         make_router(FakeServer({"code": "Ok", "routes": []})).route("walk", DOWNTOWN, MIDTOWN)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["Ok"],  # not an object
+        {"code": "Ok", "routes": [{"geometry": {"coordinates": [[-95.37, 29.76], [-95.38, 29.74]]}}]},  # no distance
+        {"code": "Ok", "routes": [{"distance": 1, "duration": 1, "geometry": {"coordinates": [[1], [2]]}}]},
+    ],
+)
+def test_answers_we_cant_read_count_as_unavailable(body):
+    with pytest.raises(osrm.RoutingUnavailable):
+        make_router(FakeServer(body)).route("walk", DOWNTOWN, MIDTOWN)
+
+
+def test_a_server_that_trickles_bytes_runs_out_of_time(monkeypatch):
+    t = FakeTime()
+    monkeypatch.setattr(osrm.time, "monotonic", t.clock)
+
+    class Trickle(io.RawIOBase):
+        def read(self, n=-1):
+            t.t += 3  # a byte every 3 seconds, never done
+            return b" "
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: Trickle())
+    with pytest.raises(TimeoutError):
+        osrm.http_json("https://routing.openstreetmap.de/x")
+
+
+def test_a_huge_answer_is_refused(monkeypatch):
+    monkeypatch.setattr(osrm, "MAX_BYTES", 1000)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: io.BytesIO(b" " * 200_000))
+    with pytest.raises(ValueError, match="too large"):
+        osrm.http_json("https://routing.openstreetmap.de/x")
+
+
 def test_http_calls_have_a_timeout_and_a_user_agent(monkeypatch):
     seen = {}
 
@@ -298,6 +332,13 @@ def test_api_says_so_when_the_routing_service_is_down(client, error):
     r = ask(client, "bike")
     assert r.status_code == 503
     assert r.json()["detail"].startswith("Cycling directions aren't available right now")
+
+
+def test_api_turns_an_unreadable_answer_into_a_503(client):
+    unreadable = {"code": "Ok", "routes": [{"geometry": {"coordinates": [[-95.37, 29.76], [-95.38, 29.74]]}}]}
+    client.app.state.walk_bike = make_router(FakeServer(unreadable))
+    r = ask(client)
+    assert r.status_code == 503 and r.json()["detail"].startswith("Walking directions aren't available right now")
 
 
 def test_api_errors_in_plain_words(client):

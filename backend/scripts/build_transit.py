@@ -31,8 +31,13 @@ METRO_GTFS_URL = "https://metro.resourcespace.com/pages/download.php?ref=4835&ex
 
 def download(url: str, to: Path) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as r, open(to, "wb") as f:
-        shutil.copyfileobj(r, f)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(to, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except OSError as e:  # URLError, HTTPError and timeouts are all OSErrors
+        raise SystemExit(
+            f"Couldn't download {url}: {e}. Try again later, or download the GTFS zip from METRO's Developer Portal and use --zip."
+        ) from e
     if not zipfile.is_zipfile(to):
         raise SystemExit(f"{url} didn't send a zip file. Download the GTFS zip from METRO's Developer Portal and use --zip.")
 
