@@ -20,6 +20,7 @@ import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route,
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
+import ShareEta from "./Trip/ShareEta";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
 const MAX_STOPS = 2;
@@ -911,6 +912,15 @@ export default function Trip() {
                 : "We tell you when to leave each weekday, and if a train or crash changes the route."}
           </span>
         </div>
+      )}
+      {!hidden && result && (
+        <ShareEta
+          route={result.kind === "plan" || outdated ? null : result.kind === "rec" ? result.rec.route : result.best}
+          fromName={fromName}
+          toName={toName}
+          toPoint={endPt}
+          hasStops={result.kind === "plan"}
+        />
       )}
     </div>
   );
