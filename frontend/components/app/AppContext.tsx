@@ -12,6 +12,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
+import { parseTravel, type ModeRoute, type Travel } from "@/lib/modes";
 import { levelForScore, type Level } from "@/lib/theme";
 import type {
   AppNotification,
@@ -41,6 +42,8 @@ export type Screen =
       arriveBy?: string;
       /** Faster (0) .. Safer (1) */
       safety?: number;
+      /** Walk / Bike / Transit tab; omitted = Drive */
+      travel?: Travel;
     }
   | { name: "map" }
   | { name: "cameras"; area?: string; camId?: string }
@@ -76,6 +79,7 @@ function screenUrl(s: Screen): string {
     if (typeof s.from === "string") q.set("from", s.from);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
+    if (s.travel) q.set("travel", s.travel);
   }
   return `${window.location.pathname}?${q}`;
 }
@@ -95,6 +99,7 @@ function parseScreen(search: string): Screen | null {
       from: q.get("from") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      travel: parseTravel(q.get("travel")),
     };
   return null;
 }
@@ -139,6 +144,8 @@ export interface MapScene {
   fitPadding?: { topLeft: [number, number]; bottomRight: [number, number] };
   /** Show cause markers (default true) */
   markers?: boolean;
+  /** Walk / bike / transit route (Trip's other tabs) */
+  modeRoute?: ModeRoute;
 }
 
 export interface MapLayers {
