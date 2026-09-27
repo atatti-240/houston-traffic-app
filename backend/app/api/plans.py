@@ -12,6 +12,7 @@ from app.api.schemas import StopIn, TripPlanRequest
 from app.models import Notification, SavedPlan
 from app.plan_io import plan_to_json, request_to_json
 from app.planner import StopRequest, plan_trip
+from app.routing.avoid import Avoid, avoiding
 from app.routing.router import NoRouteError
 from app.services import Services
 
@@ -107,7 +108,7 @@ def create_plan(req: TripPlanRequest, svc: Services = Depends(get_services)):
         stops.append(StopRequest(resolve_place(svc, s), ws, we, s.dwell_min, s.fixed_order))
     try:
         plan = plan_trip(
-            svc.router,
+            avoiding(svc.router, req.avoid),
             start,
             stops,
             depart_after,
@@ -129,7 +130,10 @@ def create_plan(req: TripPlanRequest, svc: Services = Depends(get_services)):
                 id=plan_id,
                 name=req.name or " → ".join(plan.order_names),
                 device_id=req.device_id,
-                request_json=request_to_json(start, stops, depart_after, plan.safety_weight, req.buffer_min),
+                request_json={
+                    **request_to_json(start, stops, depart_after, plan.safety_weight, req.buffer_min),
+                    **req.avoid.to_json(),
+                },
                 result_json=result,
                 watch=req.watch,
                 created_at=now,
@@ -138,7 +142,7 @@ def create_plan(req: TripPlanRequest, svc: Services = Depends(get_services)):
         )
         s.commit()
     sent = svc.tick() if req.watch else []
-    return {**result, "notifications": [notification_json(n) for n in sent if n.plan_id == plan_id]}
+    return {**result, **req.avoid.to_json(), "notifications": [notification_json(n) for n in sent if n.plan_id == plan_id]}
 
 
 @router.get("/plans")
@@ -154,7 +158,7 @@ def get_plan(plan_id: str, svc: Services = Depends(get_services)):
         sp = s.get(SavedPlan, plan_id)
         if sp is None:
             raise HTTPException(404, "plan not found")
-        return {**sp.result_json, "watch": sp.watch, "done": sp.done}
+        return {**sp.result_json, **Avoid.from_json(sp.request_json).to_json(), "watch": sp.watch, "done": sp.done}
 
 
 @router.delete("/plan/{plan_id}", status_code=204)

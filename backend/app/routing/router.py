@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from app.conditions.live import Confidence, Incident, worst
 from app.conditions.provider import LIVE_WINDOW, ConditionsProvider, ConditionsView
 from app.graph import Network, SegmentInfo
+from app.routing.avoid import AVOID_PENALTY, Avoid, avoid_notes
 from app.scoring import Models
 
 # Seconds of penalty per mile at crash risk 1.0, at the two ends of the safety slider.
@@ -101,6 +102,8 @@ class SegmentOnRoute:
     miles: float
     geometry: list[list[float]]
     crossings: list[CrossingOnRoute] = field(default_factory=list)
+    speed_limit_mph: int | None = None  # posted limit (OpenStreetMap); None = not known
+    toll: bool = False
     predicted_congestion: float = 0.0
     congestion_source: str = "history"
     live_weight: float = 0.0
@@ -212,6 +215,10 @@ def _dedupe_live(reasons: list[str]) -> list[str]:
 
 
 class Router:
+    # Roads to stay off (avoid tolls / highways): set on a copy by app.routing.avoid.avoiding().
+    avoid = Avoid()
+    avoid_ids: frozenset[str] = frozenset()
+
     def __init__(self, network: Network, models: Models, conditions: ConditionsProvider | None = None) -> None:
         self.network = network
         self.models = models
@@ -267,6 +274,8 @@ class Router:
             miles=seg.length_miles,
             geometry=[list(p) for p in seg.geometry],
             crossings=crossings,
+            speed_limit_mph=seg.speed_limit_mph,
+            toll=seg.toll,
             predicted_congestion=sc.predicted_congestion,
             congestion_source=sc.congestion_source,
             live_weight=sc.live_weight,
@@ -300,13 +309,16 @@ class Router:
         view: ConditionsView,
         penalties: dict[str, float] | None = None,
         blind: bool = False,
+        strict: bool = True,
     ) -> list[str]:
         """Returns segment ids. `blind=True` routes on traffic only (live traffic and
         incidents included, trains and crash risk ignored): roughly what a typical nav app
-        picks. Used to explain what we avoided."""
+        picks. Used to explain what we avoided. Avoided roads (self.avoid_ids) are skipped;
+        with no route without them, `strict=False` uses as little of them as it can."""
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
+        skip = self.avoid_ids if strict else frozenset()
         # Label-setting search over (time so far, penalty so far), penalty = cost - time
         # (crash penalty, alternative-route multipliers). One label per node isn't enough
         # once roads can be waited on: reaching a closed road later means waiting less, so
@@ -321,7 +333,7 @@ class Router:
                 return list(path)
             now = depart_at + timedelta(seconds=elapsed)
             for seg in self.network.out_edges.get(node, []):
-                if seg.to_node in visited:
+                if seg.to_node in visited or seg.id in skip:
                     continue
                 s = self._eval_segment(seg, now, view)
                 if s.closed:
@@ -344,6 +356,9 @@ class Router:
                 heapq.heappush(
                     heap, (new_cost, new_elapsed, next(tie), seg.to_node, (*path, seg.id), visited | {seg.to_node})
                 )
+        if skip:  # no way around the avoided roads: use as little of them as we can
+            heavy = {sid: penalties.get(sid, 1.0) * AVOID_PENALTY for sid in skip}
+            return self._search(origin, destination, depart_at, lam, view, {**penalties, **heavy}, blind, strict=False)
         raise NoRouteError(f"no open route from {origin} to {destination}")
 
     def evaluate(
@@ -446,7 +461,9 @@ class Router:
         naive_ids = self._search(origin, destination, depart_at, lam, view, blind=True)
         naive = self.evaluate(naive_ids, origin, destination, depart_at, w, view)
         best.reasons = _dedupe_live(
-            self._live_reasons(origin, destination, depart_at, lam, view, best) + self._reasons(best, naive, view)
+            avoid_notes(best, self.avoid)
+            + self._live_reasons(origin, destination, depart_at, lam, view, best)
+            + self._reasons(best, naive, view)
         )
 
         alt = None
@@ -455,7 +472,7 @@ class Router:
         )
         if alt_ids != best_ids:
             alt = self.evaluate(alt_ids, origin, destination, depart_at, w, view)
-            alt.reasons = _dedupe_live(self._reasons(alt, naive, view))
+            alt.reasons = _dedupe_live(avoid_notes(alt, self.avoid) + self._reasons(alt, naive, view))
         return best, alt
 
     # --- explanations ---------------------------------------------------------------------
