@@ -159,7 +159,7 @@ def test_init_db_adds_columns_missing_from_older_databases():
 
 
 def test_avoided_reason_names_the_stretch_when_route_still_uses_that_road(services):
-    safe, _ = services.router.route("downtown", "hobby", MON(17, 10), safe_path=True)
+    safe, _ = services.router.route("midtown", "hobby", MON(17, 10), safe_path=True)
     assert "I-45 Gulf Fwy" in {s.name for s in safe.segments}
     avoided = [r for r in safe.reasons if r.startswith("Avoided I-45 Gulf Fwy")]
     assert avoided and all(" from " in r and " to " in r for r in avoided)

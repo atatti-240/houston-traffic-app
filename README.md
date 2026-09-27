@@ -11,7 +11,7 @@ Waze and Google Maps react to congestion after it has formed. This app predicts 
 
 Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, a **"Leave now"** alert, and **"it's cleared"** when a road you're watching is back to normal. Live train, traffic and incident reports override the predictions for the next half hour, and every answer says how sure it is and where the data came from. Errands with up to 3 stops get the best stop order and departure times.
 
-> Built in 48 hours. All data is synthetic for now, behind interfaces that the real TranStar / TrainWatch feeds plug into. See [How real data plugs in](#how-real-data-plugs-in).
+> Built in 48 hours. Traffic, train and incident data are synthetic for now (street crash risk is calibrated to real city data), behind interfaces that the real TranStar / TrainWatch feeds plug into. See [How real data plugs in](#how-real-data-plugs-in).
 
 ## Project docs
 
@@ -19,7 +19,7 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 - Design spec: [docs/specs/2026-09-25-houston-commute-planner-design.md](docs/specs/2026-09-25-houston-commute-planner-design.md)
 - Implementation plan (roles A-E, checkpoints): [docs/plans/2026-09-25-houston-commute-planner-plan.md](docs/plans/2026-09-25-houston-commute-planner-plan.md)
 - Outline + decisions: [docs/outline.md](docs/outline.md) · Data research: [docs/feature-notes.md](docs/feature-notes.md)
-- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` follow these shapes, with two differences: times are naive Houston local time (no `-05:00`), and fields a feed doesn't provide yet (camera vehicle counts, `stale`, `high_injury_segments_url`) are `null`. Both endpoints also return a few extra fields
+- Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` follow these shapes, with two differences: times are naive Houston local time (no `-05:00`), and fields a feed doesn't provide yet (camera vehicle counts, `stale`) are `null`. Both endpoints also return a few extra fields
 - Routing wiring (which decision uses which data, priority rules): [docs/routing-wiring.md](docs/routing-wiring.md)
 - Website style guide: [docs/website-style.md](docs/website-style.md)
 - Data-source spikes (throwaway): [spikes/](spikes/)
@@ -95,13 +95,15 @@ Every source is an interface in `backend/app/adapters/base.py`. Today each one h
 
 Live methods are called once per request, so cache the upstream for about a minute, and raise when it's down. The app marks the feed down and falls back to predictions.
 
+**Street crash risk is already calibrated to real data:** the City of Houston's Vision Zero High Injury Network 2025 (1,080 city-street segments, 4,620 crashes, 762 deaths; `backend/app/seed/hin2025.json`, bundled, no network calls). `app/seed/visionzero.py` matches each street link to the HIN segments with the same street name within 1 km, and scales its synthetic crash rate by `1 + its HIN crashes per mile / the citywide HIN average` (max ×4, so no street outranks the worst freeways). Streets not on the HIN keep the default, and freeways keep their hand-set values (the HIN has no freeway data). `GET /hazards/high-injury?limit=20&bbox=minLng,minLat,maxLng,maxLat` lists the worst segments.
+
 The one step real feeds need is **map matching**: snap each sensor, incident or crossing to a `RoadSegment` id. The seeded graph (`app/seed/network.py`) is a hand-built sketch of the major corridors; swapping in OpenStreetMap-derived segments keeps the same schema.
 
 Notifications work the same way: `NotificationService` has a mock (stored and polled by the app, plus browser notifications via the service worker). `WebPushNotificationService` is the stub where VAPID keys and `pywebpush` go.
 
 ## Status
 
-- ✅ Models, routing, recommender, multi-stop planner, causes, scheduler, API, UI, demo: all working, 170 backend tests
+- ✅ Models, routing, recommender, multi-stop planner, causes, scheduler, API, UI, demo: all working, 182 backend tests
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
