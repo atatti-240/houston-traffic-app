@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { PoiKind } from "@/components/places/store";
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
+import { parseTravel, type ModeRoute, type Travel } from "@/lib/modes";
 import { levelForScore, type Level } from "@/lib/theme";
 import type {
   AppNotification,
@@ -47,6 +48,8 @@ export type Screen =
       toPlace?: { osm?: string | null; address?: string | null; kind?: string | null };
       /** "tolls", "highways" or "tolls,highways"; omitted = what this device chose last */
       avoid?: string;
+      /** Walk / Bike / Transit tab; omitted = Drive */
+      travel?: Travel;
     }
   | { name: "map" }
   /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
@@ -89,6 +92,7 @@ function screenUrl(s: Screen): string {
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
     if (s.avoid !== undefined) q.set("avoid", s.avoid);
+    if (s.travel) q.set("travel", s.travel);
   }
   if (s.name === "nearby") q.set("kind", s.kind);
   return `${window.location.pathname}?${q}`;
@@ -121,6 +125,7 @@ function parseScreen(search: string): Screen | null {
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
       avoid: q.get("avoid") ?? undefined,
+      travel: parseTravel(q.get("travel")),
     };
   return null;
 }
@@ -168,6 +173,8 @@ export interface MapScene {
   /** Route choices (Trip): the unselected ones dashed with a label bubble; tapping one calls pickRoute */
   routes?: { id: string; geometry: LatLngTuple[]; label: string; time?: string; selected: boolean }[];
   pickRoute?: (id: string) => void;
+  /** Walk / bike / transit route (Trip's other tabs) */
+  modeRoute?: ModeRoute;
 }
 
 export interface MapLayers {

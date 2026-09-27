@@ -1,0 +1,4 @@
+route_id,agency_id,route_short_name,route_long_name,route_type,route_color,route_text_color
+010,TINY,010,Main,3,004080,FFFFFF
+020,TINY,020,Pease,3,004080,FFFFFF
+700,TINY,700,METRORAIL RED LINE,0,EF0000,FFFFFF
