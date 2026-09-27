@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
-from app.api import causes, demo, network, planning, plans
+from app.api import causes, cv, demo, network, planning, plans
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import RoadSegment, ScoreEntry
@@ -51,10 +51,17 @@ def create_app(services: Services | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         if services is None:
             app.state.services = bootstrap()
+        svc = app.state.services
         task = None
         if settings.scheduler_interval_s > 0 and services is None:
-            task = asyncio.create_task(_scheduler_loop(app.state.services, settings.scheduler_interval_s))
+            task = asyncio.create_task(_scheduler_loop(svc, settings.scheduler_interval_s))
+        if svc.cv is not None and services is None:
+            # A camera-confirmed incident starting or clearing re-plans watched trips right away.
+            svc.cv.on_incidents_changed = lambda: svc.tick(replan_now=True)
+            svc.cv.start()
         yield
+        if svc.cv is not None:
+            svc.cv.stop()
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -85,6 +92,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.include_router(plans.router)
     app.include_router(causes.router)
     app.include_router(demo.router)
+    app.include_router(cv.router)
     return app
 
 
