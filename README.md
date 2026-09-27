@@ -74,6 +74,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:
 - **Live beats predicted, carefully.** Fresh live data is blended in for the next 30 min, incidents slow or close roads, and a feed that goes down falls back to predictions and says so. See [docs/routing-wiring.md](docs/routing-wiring.md).
 - **Explainable.** Every route is compared with a traffic-only route (what a typical nav app would pick), and the differences become the "why" bullets.
 - **Causes.** For each road the delay against free flow is split into usual traffic (rush hour), live volume, incidents, closure waits and trains, from the same data the router uses. A crash at 5 PM shows up as a crash, not as rush hour. See [ARCHITECTURE.md](ARCHITECTURE.md#why-its-slow).
+- **Door to door.** Our router picks the corridor; the public OSRM router (OpenStreetMap) draws the whole trip on real roads to the door, with turn-by-turn steps and lane arrows, and up to 3 routes to pick from on the map. Checked against our route, cached, one request a second, and the app carries on without it. See [ARCHITECTURE.md](ARCHITECTURE.md#directions).
 
 ```
 backend/   FastAPI + SQLite: adapters (mock data), scoring models, router, recommender, planner, causes, scheduler, API
