@@ -6,12 +6,10 @@
 import type { KeyboardEvent } from "react";
 
 import { CauseDot, Icon } from "@/components/ui";
-import { compareRoutes } from "@/lib/directions";
+import { compareRoutes, shownMinutes as minutes } from "@/lib/directions";
 import { fmtTime } from "@/lib/format";
 import { CAUSE, C, ICON } from "@/lib/theme";
 import type { Route } from "@/lib/types";
-
-const minutes = (r: Route) => Math.max(1, Math.round(r.total_min));
 
 function Swatch({ on }: { on: boolean }) {
   return (

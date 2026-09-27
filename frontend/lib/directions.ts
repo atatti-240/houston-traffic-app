@@ -75,6 +75,9 @@ function upsides(route: Route, other: Route): string[] {
   return [...new Set(out)];
 }
 
+/** A route's time as the app shows it: whole minutes, at least 1. */
+export const shownMinutes = (r: Route) => Math.max(1, Math.round(r.total_min));
+
 /**
  * "Why this way", compared with each other route: "4 min faster than via I-610 and skips the train crossing at
  * Cullen Blvd", "3 min slower than via I-45, but avoids the crash on I-45 Gulf Fwy". `roughTimes`: routes whose
@@ -89,7 +92,8 @@ export function compareRoutes(route: Route, others: Route[], roughTimes: (r: Rou
       if (tail) out.push(`Unlike ${label}, ${tail}`);
       continue;
     }
-    const diff = Math.round(o.total_min - route.total_min);
+    // From the whole minutes the list and the map show (19.4 vs 20.5 reads "19" vs "21": 2 min, not 1)
+    const diff = shownMinutes(o) - shownMinutes(route);
     if (diff >= 1) out.push(`${diff} min faster than ${label}${tail ? ` and ${tail}` : ""}`);
     else if (diff <= -1) out.push(`${-diff} min slower than ${label}${tail ? `, but ${tail}` : ""}`);
     else out.push(`About as fast as ${label}${tail ? `, and ${tail}` : ""}`);
