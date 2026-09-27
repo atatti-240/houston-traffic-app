@@ -50,6 +50,7 @@ ACCESS_BEARING_RANGE = 60
 MAX_VIAS = 25
 SIMPLIFY_M = 4
 CACHE_SIZE = 256
+BUILD_WAIT_S = 15  # how long a request waits for the same trip's directions being built
 MPH = 0.44704  # m/s
 
 # Checks on what OSRM sends back.
@@ -224,6 +225,7 @@ class DoorDirections:
         self.client = client or OsrmClient()
         self._cache: OrderedDict[tuple, DoorPath] = OrderedDict()
         self._lock = threading.Lock()
+        self._building: dict[tuple, threading.Event] = {}  # key -> set when that build is done
 
     # --- cache ----------------------------------------------------------------------------
 
@@ -250,10 +252,30 @@ class DoorDirections:
     # --- building -------------------------------------------------------------------------
 
     def build(self, segments: list[SegmentInfo], origin: Endpoint, destination: Endpoint) -> DoorPath:
-        """Door-to-door directions along these segments (cached; may call OSRM)."""
-        hit = self.cached(segments, origin, destination)
+        """Door-to-door directions along these segments (cached; may call OSRM). Two requests for
+        the same trip at once share one build instead of queueing two OSRM calls."""
+        key = self.key([s.id for s in segments], origin, destination)
+        with self._lock:
+            hit = self._cache.get(key)
+            running = self._building.get(key)
+            if hit is None and running is None:
+                self._building[key] = threading.Event()
         if hit is not None:
             return hit
+        if running is not None:
+            running.wait(BUILD_WAIT_S)
+            return self.cached(segments, origin, destination) or self._unavailable(Corridor(segments), [])
+        try:
+            return self._build(segments, origin, destination)
+        finally:
+            with self._lock:
+                self._building.pop(key).set()
+
+    def _unavailable(self, corr: "Corridor", tried: list[str]) -> DoorPath:
+        note = OFF_NOTE if not self.client.enabled else UNAVAILABLE_NOTE
+        return DoorPath("unavailable", None, [], None, 0.0, corr.length, note=note, tried=tried)
+
+    def _build(self, segments: list[SegmentInfo], origin: Endpoint, destination: Endpoint) -> DoorPath:
         corr = Corridor(segments)
         d_from = corr.position(origin.latlng, 0)
         d_to = corr.position(destination.latlng, len(segments) - 1)
@@ -293,8 +315,7 @@ class DoorDirections:
             self._store(self.key([s.id for s in segments], origin, destination), path)
             return path
 
-        note = OFF_NOTE if not self.client.enabled else UNAVAILABLE_NOTE
-        path = DoorPath("unavailable", None, [], None, 0.0, corr.length, note=note, tried=tried)
+        path = self._unavailable(corr, tried)
         if tried and not transient:  # the same route would be turned down again: remember that
             log.warning("No door-to-door directions for %s: %s", [s.id for s in segments], "; ".join(tried))
             self._store(self.key([s.id for s in segments], origin, destination), path)

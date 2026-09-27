@@ -44,7 +44,7 @@ def door_patch(route: Route, path: DoorPath | None, corr: Corridor, timed: bool)
             "access_min": None
             if t is None
             else {"start": round(path.access_start_s / 60, 1), "end": round(path.access_end_s / 60, 1)},
-            "note": path.note,
+            "note": f"{path.note} Times cover the main roads only." if timed and t is None and path.note else path.note,
         }
     }
     if path.geometry:
