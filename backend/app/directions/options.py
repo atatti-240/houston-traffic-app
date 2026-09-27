@@ -111,9 +111,12 @@ def route_labels(network: Network, routes: list[Route]) -> list[tuple[str, str]]
 
         ranked = sorted(m, key=lambda n: (-unique(n), -m[n])) if others else sorted(m, key=lambda n: -m[n])
         fresh = [n for n in ranked if n not in picks and (not others or unique(n) > 0.3)]
-        picks.append(fresh[0] if fresh else next((n for n in ranked if n not in picks), ranked[0]))
+        picks.append(fresh[0] if fresh else next((n for n in ranked if n not in picks), ranked[0] if ranked else ""))
     out = []
     for i, (pick, m) in enumerate(zip(picks, miles)):
+        if not m:  # both ends at the same spot on our map: no main road at all
+            out.append(("via local streets", "Local streets"))
+            continue
         short = code.get(pick, pick)
         clash = any(code.get(p, p) == short for j, p in enumerate(picks) if j != i)
         out.append((f"via {pick if clash else short}", max(m, key=m.get)))

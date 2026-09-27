@@ -140,6 +140,8 @@ class Corridor:
 
     def position(self, p, k: int) -> float:
         """Where p is along the corridor, projected onto segment k."""
+        if not self.segments:  # both ends at the same node: no corridor
+            return 0.0
         i, j = self._span(k)
         line, cum = self.line[i : j + 1], self.cum[i : j + 1]
         if len(line) < 2:
