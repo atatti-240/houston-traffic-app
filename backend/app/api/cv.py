@@ -21,6 +21,8 @@ router = APIRouter(tags=["cameras"])
 
 MAX_STREAM_S = 30 * 60  # a forgotten tab stops streaming after this (the card reconnects)
 STREAM_IDLE_S = 15.0  # no new frame for this long: the feed stopped, end the stream
+MAX_STREAMS = 16  # videos open at once (each is a loop here); more get a 503 and the card retries
+OPEN = {"streams": 0}
 BOUNDARY = "frame"
 # Set when the server is told to stop: open video streams end, or it would wait for them forever.
 CLOSING = threading.Event()
@@ -84,22 +86,28 @@ async def cv_video(camera_id: str, request: Request, svc: Services = Depends(get
     bridge = _mapped(svc, camera_id)
     if not bridge.is_live(camera_id):
         raise HTTPException(503, "the live video isn't running right now")
+    if OPEN["streams"] >= MAX_STREAMS:
+        raise HTTPException(503, "too many live videos open right now")
 
     async def parts():
-        started = last = time.monotonic()
-        sent = None
-        while time.monotonic() - started < MAX_STREAM_S and not CLOSING.is_set():
-            if await request.is_disconnected():
-                return
-            bridge.touch(camera_id)
-            frame = bridge.frame(camera_id, time.time() - bridge.video_delay_s, before=True)
-            if frame is not None and frame.seq != sent:
-                sent, last = frame.seq, time.monotonic()
-                head = f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame.jpeg)}\r\n\r\n"
-                yield head.encode() + frame.jpeg + b"\r\n"
-            elif time.monotonic() - last > STREAM_IDLE_S:
-                return
-            await asyncio.sleep(1 / 30)
+        OPEN["streams"] += 1
+        try:
+            started = last = time.monotonic()
+            sent = None
+            while time.monotonic() - started < MAX_STREAM_S and not CLOSING.is_set():
+                if await request.is_disconnected():
+                    return
+                bridge.touch(camera_id)
+                frame = bridge.frame(camera_id, time.time() - bridge.video_delay_s, before=True)
+                if frame is not None and frame.seq != sent:
+                    sent, last = frame.seq, time.monotonic()
+                    head = f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame.jpeg)}\r\n\r\n"
+                    yield head.encode() + frame.jpeg + b"\r\n"
+                elif time.monotonic() - last > STREAM_IDLE_S:
+                    return
+                await asyncio.sleep(1 / 30)
+        finally:
+            OPEN["streams"] -= 1
 
     return StreamingResponse(
         parts(),
