@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import { Legend, LayersButton, LiveCamsButton, ZoomButtons } from "@/components/app/MapChrome";
+import ReportButton from "@/components/reports/ReportButton";
 import { CauseChip, CauseDot, Icon, LevelDot, Logo, RoundButton, ago } from "@/components/ui";
 import { fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { CAUSE, CAUSE_ORDER, C, ICON, type CauseKind } from "@/lib/theme";
@@ -202,6 +203,11 @@ export default function LiveMap() {
       <div className={`pointer-events-auto absolute right-4 ${expanded ? "z-[960]" : "z-[900]"}`} style={{ bottom: 84 + sheetH + (expanded ? -24 : 16) }}>
         <LiveCamsButton />
       </div>
+      {!expanded && (
+        <div className="pointer-events-auto absolute left-4 z-[900]" style={{ bottom: 84 + sheetH + 16 }}>
+          <ReportButton />
+        </div>
+      )}
       <section
         ref={sheetRef}
         aria-label="Houston right now"

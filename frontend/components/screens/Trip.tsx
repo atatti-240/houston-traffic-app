@@ -19,6 +19,7 @@ import { CAUSE, C, ICON } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
+import TripReports from "./Trip/Reports";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
@@ -803,6 +804,7 @@ export default function Trip() {
           )}
         </p>
       )}
+      <TripReports result={hidden ? null : result} />
 
       {/* When, and how */}
       <div className="flex flex-col gap-4">

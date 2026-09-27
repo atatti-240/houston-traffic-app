@@ -5,6 +5,7 @@
 import { useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
+import ReportButton from "@/components/reports/ReportButton";
 import { Icon, RoundButton } from "@/components/ui";
 import { C, ICON } from "@/lib/theme";
 
@@ -109,6 +110,9 @@ export default function MapChrome() {
           <LiveCamsButton />
         </div>
       )}
+      <div className="pointer-events-auto absolute bottom-6 left-4 z-[900]">
+        <ReportButton />
+      </div>
     </>
   );
 }
