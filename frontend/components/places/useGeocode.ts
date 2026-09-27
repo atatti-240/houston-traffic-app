@@ -35,7 +35,8 @@ function message(e: unknown): string {
   return "Search isn't working right now.";
 }
 
-export function useGeocode(query: string, near: { lat: number; lng: number } | null): GeoState {
+/** `attempt`: bump it to ask again after an error. */
+export function useGeocode(query: string, near: { lat: number; lng: number } | null, attempt = 0): GeoState {
   const q = query.trim().replace(/\s+/g, " ");
   const [debounced, setDebounced] = useState(q);
   useEffect(() => {
@@ -82,7 +83,7 @@ export function useGeocode(query: string, near: { lat: number; lng: number } | n
     if (debounced.length < MIN_CHARS) return setState({ key: "", value: { status: "idle" } });
     if (!busy.current) run(debounced);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, nearKey]);
+  }, [debounced, nearKey, attempt]);
 
   if (q.length < MIN_CHARS) return { status: "idle" };
   // Still typing (debouncing): keep what's on screen, marked as loading.

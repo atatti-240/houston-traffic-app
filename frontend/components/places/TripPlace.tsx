@@ -24,9 +24,11 @@ export function TripPlaceCard({ trip, arriveAt }: { trip: TripScreen | null; arr
     address: trip.toPlace?.address ?? null,
     kind: trip.toPlace?.kind ?? null,
   };
+  // To the minute: a re-plan that moves the arrival by seconds doesn't ask again.
+  const at = arriveAt ? `${arriveAt.slice(0, 16)}:00` : null;
   return (
     <div className="rounded-[14px] bg-card px-3.5 pt-2.5 pb-2">
-      <PlaceCard place={place} compact arriveAt={arriveAt} />
+      <PlaceCard place={place} compact arriveAt={at} />
     </div>
   );
 }
