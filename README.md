@@ -106,5 +106,5 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
-- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, full OSM road graph, real web push, the marketing website
