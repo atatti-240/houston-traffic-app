@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { useApp, type MapPoint } from "@/components/app/AppContext";
+import { useApp, type MapPoint, type Screen } from "@/components/app/AppContext";
 import { BackHeader, FilterChip, Icon } from "@/components/ui";
 import { C } from "@/lib/theme";
 import type { LatLngTuple } from "@/lib/types";
@@ -22,10 +22,14 @@ import { setNearbyMarkers, useNearbyMarkers, type PoiKind } from "./store";
 type State = { key: string; status: "loading" } | { key: string; status: "ok"; items: NearbyItem[] } | { key: string; status: "error" };
 
 const NOUN: Record<PoiKind, [string, string]> = {
-  fuel: ["gas station", "gas stations"],
-  ev: ["EV charger", "EV chargers"],
-  parking: ["parking lot", "parking lots"],
+  fuel: ["a gas station", "gas stations"],
+  ev: ["an EV charger", "EV chargers"],
+  parking: ["a parking lot", "parking lots"],
 };
+
+/** The kind each nearby screen (stack entry) showed, so Back from a place's trip returns to the same
+ * list. Keyed by the stack entry itself: opening "Gas near me" afresh starts with gas. */
+const memory = new WeakMap<Screen, PoiKind>();
 
 function refOf(it: NearbyItem) {
   return { name: it.name, lat: it.lat, lng: it.lng, osm: it.osm, kind: it.sub, color: POI[it.kind].color };
@@ -35,7 +39,15 @@ export default function Nearby() {
   const { screen, here, back, go, setScene, isDesktop, focus } = useApp();
   const params = screen.name === "nearby" ? screen : null;
   const route = params?.route;
-  const [kind, setKind] = useState<PoiKind>(params?.kind ?? "fuel");
+  const [kind, setKind] = useState<PoiKind>(() => memory.get(screen) ?? params?.kind ?? "fuel");
+  const [entry, setEntry] = useState(screen);
+  if (entry !== screen) {
+    setEntry(screen);
+    setKind(memory.get(screen) ?? params?.kind ?? "fuel");
+  }
+  useEffect(() => {
+    memory.set(screen, kind);
+  }, [screen, kind]);
   const [state, setState] = useState<State>({ key: "", status: "loading" });
   const [retry, setRetry] = useState(0);
   const { selected } = useNearbyMarkers();
@@ -172,7 +184,7 @@ export default function Nearby() {
         </ul>
       )}
       <p className="m-0 text-[12px] leading-snug text-muted">
-        From OpenStreetMap map data: no prices, and we can&apos;t tell if a {one} is open or busy unless its hours are listed.
+        From OpenStreetMap map data: no prices, and we can&apos;t tell if {one} is open or busy unless its hours are listed.
       </p>
     </div>
   );

@@ -128,6 +128,7 @@ export function usePoiHighlights(map: L.Map, gl: LibreMap | null) {
     const unsub = subscribePoiLayers(update);
     update();
     return () => {
+      gen++; // a load still on its way doesn't touch a map that's gone
       clearTimeout(timer);
       map.off("moveend", update);
       unsub();

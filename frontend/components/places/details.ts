@@ -16,12 +16,13 @@ export type DetailsState =
 
 const cache = new Map<string, Promise<PlaceDetails | null>>();
 
-/** What to ask for, or null when there's nothing to look up (our own named places, dropped pins). */
+/** What to ask for, or null when there's nothing to look up (our own named places, dropped pins,
+ * a spot saved as "where I am now"). */
 function lookup(p: PlaceRef | null): { osm?: string; name?: string; lat?: number; lng?: number } | null {
   if (!p || p.placeId) return null;
   if (p.osm) return { osm: p.osm };
   const name = p.name.trim();
-  if (!name || /^(dropped pin|place|parking|gas station|ev charger)$/i.test(name)) return null;
+  if (!name || /^(dropped pin|my location|place|parking|gas station|ev charger)$/i.test(name)) return null;
   return { name, lat: p.lat, lng: p.lng };
 }
 

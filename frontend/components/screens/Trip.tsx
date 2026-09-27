@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
-import { useApp, type MapPoint, type MapScene } from "@/components/app/AppContext";
+import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/app/AppContext";
 import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -41,6 +41,11 @@ type Result =
   | { kind: "route"; key: string; best: Route; alt: Route | null }
   | { kind: "rec"; key: string; rec: Recommendation }
   | ({ kind: "plan"; key: string } & TimedPlan);
+
+/** How each trip (stack entry) was set, so Back from "Gas on the way" (or a place's trip) returns to
+ * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. */
+type Settings = { mode: Mode; by: string; safety: number; stops: string[]; showAlt: boolean };
+const memory = new WeakMap<Screen, Settings>();
 
 /** `existing`: saved before (found on the server, not made on this screen), so an edit doesn't replace it. */
 type Watch = { key: string; tripId?: number; planId?: string; existing?: boolean };
@@ -338,12 +343,13 @@ export default function Trip() {
   const params = screen.name === "trip" ? screen : null;
   const paramsKey = JSON.stringify(params);
 
-  const [mode, setMode] = useState<Mode>(params?.arriveBy ? "by" : "now");
-  const [by, setBy] = useState(params?.arriveBy ?? "");
-  const [safety, setSafety] = useState(initialSafety(params?.safety));
-  const [stops, setStops] = useState<string[]>([]);
+  const kept = memory.get(screen);
+  const [mode, setMode] = useState<Mode>(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
+  const [by, setBy] = useState(kept?.by ?? params?.arriveBy ?? "");
+  const [safety, setSafety] = useState(kept?.safety ?? initialSafety(params?.safety));
+  const [stops, setStops] = useState<string[]>(kept?.stops ?? []);
   const [picking, setPicking] = useState(false);
-  const [showAlt, setShowAlt] = useState(false);
+  const [showAlt, setShowAlt] = useState(kept?.showAlt ?? false);
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -356,14 +362,17 @@ export default function Trip() {
   const [seenParams, setSeenParams] = useState(paramsKey);
   if (seenParams !== paramsKey) {
     setSeenParams(paramsKey);
-    setMode(params?.arriveBy ? "by" : "now");
-    setBy(params?.arriveBy ?? "");
-    setSafety(initialSafety(params?.safety));
-    setStops([]);
+    setMode(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
+    setBy(kept?.by ?? params?.arriveBy ?? "");
+    setSafety(kept?.safety ?? initialSafety(params?.safety));
+    setStops(kept?.stops ?? []);
     setPicking(false);
-    setShowAlt(false);
+    setShowAlt(kept?.showAlt ?? false);
     setWatch(null);
   }
+  useEffect(() => {
+    memory.set(screen, { mode, by, safety, stops, showAlt });
+  }, [screen, mode, by, safety, stops, showAlt]);
 
   const to = params?.to;
   const origin: Location | undefined = params?.from ?? here?.place;
