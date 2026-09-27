@@ -17,7 +17,7 @@ import { buildCourse, hazards as hazardsOn, locate, type Course, type Progress }
 import { offset, type Pt } from "@/lib/drive/geo";
 import { canReroute, failed, isOffRoute, NEAR_END_M, newHeavyAhead, onRoute, openGate, started, succeeded, trackOffRoute } from "@/lib/drive/reroute";
 import { simStep } from "@/lib/drive/simulate";
-import { browserSpeaker, readMuted, writeMuted, type Speaker } from "@/lib/drive/speech";
+import { browserSpeaker, primeSpeech, readMuted, writeMuted, type Speaker } from "@/lib/drive/speech";
 import { hazardCalls, leadDistances, nextHazard, turnCalls, type Say } from "@/lib/drive/voice";
 import type { LiveConditions, Location, Route, SlowdownList } from "@/lib/types";
 
@@ -127,6 +127,7 @@ export function useNavigation(trip: DriveTrip) {
     if (sp) {
       sp.muted = next;
       if (next) sp.cancel();
+      else primeSpeech();
     }
     writeMuted(next);
     setMuted(next);

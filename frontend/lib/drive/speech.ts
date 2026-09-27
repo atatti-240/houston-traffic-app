@@ -131,6 +131,17 @@ export function browserSpeaker(): Speaker {
   return new Speaker(synth, synth && typeof U === "function" ? (t) => new U(t) : null);
 }
 
+/** Some phones (iOS) only let a page speak after it spoke inside a tap: call this from the tap (Start, unmute). */
+export function primeSpeech(): void {
+  try {
+    const w = window as unknown as { speechSynthesis?: Synth; SpeechSynthesisUtterance?: new (t: string) => Utterance & { volume?: number } };
+    if (!w.speechSynthesis || typeof w.SpeechSynthesisUtterance !== "function") return;
+    const u = new w.SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    w.speechSynthesis.speak(u);
+  } catch {}
+}
+
 const MUTE_KEY = "blindspot.voiceMuted";
 
 export function readMuted(): boolean {

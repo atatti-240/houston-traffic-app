@@ -5,6 +5,7 @@
 import { useApp } from "@/components/app/AppContext";
 import { handOff, type DriveTrip } from "@/components/drive/store";
 import { Icon, PillButton } from "@/components/ui";
+import { primeSpeech } from "@/lib/drive/speech";
 import { ICON } from "@/lib/theme";
 import type { Route } from "@/lib/types";
 
@@ -19,6 +20,7 @@ export default function StartDrive({ route, trip, busy = false }: { route: Route
   return (
     <PillButton
       onClick={() => {
+        primeSpeech();
         handOff(named, route);
         go({ name: "drive", ...named });
       }}
