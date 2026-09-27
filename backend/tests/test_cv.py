@@ -348,6 +348,9 @@ def test_camera_endpoints(client, cv_services, monkeypatch):
     d = client.get(f"/cv/cameras/{GULF}").json()
     assert d["status"] == "live" and d["source_name"] == "I-10 @ College Dr" and d["stand_in"]
     assert d["detections"] and d["stats"]["counts"] and d["video_url"].endswith("/video")
+    ts = [x["t"] for x in d["detections"]]
+    newer = client.get(f"/cv/cameras/{GULF}", params={"since": ts[-2]}).json()["detections"]
+    assert [x["t"] for x in newer] == ts[-1:]  # only box sets the card doesn't have yet
     client.get(f"/cv/cameras/{KATY}")
     assert cv_services.cv.desired_view() == ("one", "009")  # watching a camera switches the CV app to it
 

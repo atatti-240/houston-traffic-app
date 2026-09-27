@@ -94,6 +94,11 @@ export class BoxTrack {
     this.pairs.clear();
   }
 
+  /** The newest box set's time, to ask only for newer ones. */
+  latest(): number | undefined {
+    return this.snaps.length ? this.snaps[this.snaps.length - 1].t : undefined;
+  }
+
   /** The boxes to draw on the video frame taken at `t` (server clock, ms). */
   at(t: number): DrawnBox[] {
     const s = this.snaps;
@@ -161,7 +166,7 @@ export function useLiveFeed(cameraId: string | null): LiveFeedState {
       const t0 = Date.now();
       let live = false;
       try {
-        const d = await api.cvCamera(cameraId);
+        const d = await api.cvCamera(cameraId, track.current.latest());
         const t1 = Date.now();
         if (stop) return;
         // The server's clock vs ours, from the answers with the least network delay.

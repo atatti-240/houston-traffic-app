@@ -540,12 +540,14 @@ class CvBridge:
         with self._lock:
             return self._summary(camera_id, now)
 
-    def detail(self, camera_id: str, now: float | None = None) -> dict | None:
+    def detail(self, camera_id: str, now: float | None = None, since_ms: float | None = None) -> dict | None:
         """Everything the camera card draws: the summary plus counts, rolling numbers and the
-        recent vehicle boxes (each with the time of its frame, on the video's clock)."""
+        recent vehicle boxes (each with the time of its frame, on the video's clock; only those
+        after `since_ms` when given, so a card polling twice a second gets each set once)."""
         if not self.enabled or camera_id not in self.by_camera:
             return None
         now = time.time() if now is None else now
+        oldest = max(now - DET_KEEP_S, (since_ms or 0) / 1000)
         with self._lock:
             out = self._summary(camera_id, now)
             feed = self._feeds.get(out["cv_camera"])
@@ -566,7 +568,7 @@ class CvBridge:
                 detections=[
                     {"t": round(d.t * 1000), "boxes": d.boxes}
                     for d in (feed.detections if feed else ())
-                    if d.t >= now - DET_KEEP_S
+                    if d.t >= oldest and (since_ms is None or round(d.t * 1000) > since_ms)
                 ],
                 server_time=round(now * 1000),
                 video_delay_ms=round(self.video_delay_s * 1000),
