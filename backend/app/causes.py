@@ -53,6 +53,9 @@ INCIDENT_CAUSE = {
     "closure": ("closure", "Road closure"),
     "event": ("event", "Event"),
     "weather": ("weather", "Weather"),
+    "flooding": ("weather", "Flooding"),
+    "police": ("crash", "Police"),
+    "pothole": ("crash", "Pothole"),
 }
 CAUSE_LABELS = {
     "rush": "Rush hour",

@@ -125,7 +125,10 @@ class LiveTrafficRequest(BaseModel):
 
 class IncidentRequest(BaseModel):
     segment_id: str
-    kind: Literal["crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other"] = "crash"
+    kind: Literal[
+        "crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other",
+        "flooding", "police", "pothole",
+    ] = "crash"
     title: str | None = None
     detail: str = Field("", max_length=300)
     minutes: float | None = Field(45, gt=0, le=600, description="How long until it clears; null = unknown")

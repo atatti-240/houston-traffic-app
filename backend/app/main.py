@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
 from app.api import causes, demo, network, planning, plans
+from app.api import reports
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import RoadSegment, ScoreEntry
@@ -85,6 +86,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.include_router(plans.router)
     app.include_router(causes.router)
     app.include_router(demo.router)
+    app.include_router(reports.router)
     return app
 
 
