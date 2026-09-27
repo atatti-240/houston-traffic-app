@@ -283,7 +283,7 @@ export default function TrafficMap({
       touchZoom={interactive}
       keyboard={interactive}
     >
-      <VectorBasemap />
+      <VectorBasemap places={interactive} />
       {interactive && <Register />}
       {interactive && <ClickAway />}
       {interactive && <FitScene fit={scene?.fit} padding={scene?.fitPadding} />}
