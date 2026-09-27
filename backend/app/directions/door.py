@@ -51,7 +51,7 @@ MAX_VIAS = 25
 SIMPLIFY_M = 4
 CACHE_SIZE = 256
 BUILD_BUDGET_S = 8  # no further OSRM attempt that could end later than this into a build
-BUILD_WAIT_S = 15  # how long a request waits for the same trip's directions being built
+BUILD_WAIT_S = 10  # how long a request waits for the same trip's directions being built
 MPH = 0.44704  # m/s
 
 # Checks on what OSRM sends back.
@@ -306,8 +306,8 @@ class DoorDirections:
                 tried.append(f"{label} unavailable ({e})")
                 transient = True
                 break
-            except (OsrmError, Rejected) as e:
-                tried.append(f"{label} rejected ({e})")
+            except (OsrmError, Rejected, LookupError, TypeError, ValueError) as e:  # incl. an odd "Ok" answer
+                tried.append(f"{label} rejected ({type(e).__name__}: {e})")
                 attempt = None
                 if kind == "vias":
                     blame = e.blame if isinstance(e, Rejected) else set()

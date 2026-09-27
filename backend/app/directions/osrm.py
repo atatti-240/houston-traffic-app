@@ -10,6 +10,7 @@ Polite and safe to call from a request:
 Road data (c) OpenStreetMap contributors, ODbL.
 """
 
+import http.client
 import json
 import logging
 import os
@@ -60,7 +61,7 @@ class OsrmClient:
         min_interval: float = 1.0,
         timeout: float = 4.0,
         cooldown: float = 60.0,
-        max_wait: float = 5.0,
+        max_wait: float = 2.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -137,7 +138,7 @@ class OsrmClient:
         started = self.clock()
         try:
             status, body = self.fetch(url, self.timeout)
-        except (OSError, ValueError) as e:  # refused, DNS, timeout, bad JSON
+        except (OSError, ValueError, http.client.HTTPException) as e:  # refused, DNS, timeout, cut off, bad JSON
             self._trip(type(e).__name__)
             raise OsrmUnavailable(str(e) or type(e).__name__) from e
         if status == 429:
