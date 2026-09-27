@@ -75,8 +75,8 @@ export function useGeocode(query: string, near: { lat: number; lng: number } | n
         .finally(() => {
           clearTimeout(timer);
           busy.current = false;
-          // Typed on meanwhile: ask for the latest query now.
-          if (wanted.current !== text && wanted.current.length >= MIN_CHARS) run(wanted.current);
+          // Typed on (or moved) meanwhile: ask for the latest query now.
+          if (keyOf(wanted.current, nearRef.current) !== key && wanted.current.length >= MIN_CHARS) run(wanted.current);
         });
     };
     wanted.current = debounced;
