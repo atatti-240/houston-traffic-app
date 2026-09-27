@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from app.conditions.live import Confidence, Incident, worst
 from app.conditions.provider import LIVE_WINDOW, ConditionsProvider, ConditionsView
 from app.graph import Network, SegmentInfo
-from app.routing.avoid import AVOID_PENALTY, Avoid, avoid_notes
+from app.routing.avoid import AVOID_PENALTY, Avoid, Step, avoid_notes
 from app.scoring import Models
 
 # Seconds of penalty per mile at crash risk 1.0, at the two ends of the safety slider.
@@ -218,6 +218,7 @@ class Router:
     # Roads to stay off (avoid tolls / highways): set on a copy by app.routing.avoid.avoiding().
     avoid = Avoid()
     avoid_ids: frozenset[str] = frozenset()
+    avoid_steps: tuple[Step, ...] = ()  # the searches to try in turn (app.routing.avoid.search_steps)
 
     def __init__(self, network: Network, models: Models, conditions: ConditionsProvider | None = None) -> None:
         self.network = network
@@ -309,16 +310,16 @@ class Router:
         view: ConditionsView,
         penalties: dict[str, float] | None = None,
         blind: bool = False,
-        strict: bool = True,
+        avoid_step: int = 0,
     ) -> list[str]:
         """Returns segment ids. `blind=True` routes on traffic only (live traffic and
         incidents included, trains and crash risk ignored): roughly what a typical nav app
-        picks. Used to explain what we avoided. Avoided roads (self.avoid_ids) are skipped;
-        with no route without them, `strict=False` uses as little of them as it can."""
+        picks. Used to explain what we avoided. Avoided roads are left out (self.avoid_steps);
+        with no route without them, the next step allows some, as little as it can."""
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
-        skip = self.avoid_ids if strict else frozenset()
+        skip, heavy = self.avoid_steps[avoid_step] if self.avoid_steps else (frozenset(), frozenset())
         # Label-setting search over (time so far, penalty so far), penalty = cost - time
         # (crash penalty, alternative-route multipliers). One label per node isn't enough
         # once roads can be waited on: reaching a closed road later means waiting less, so
@@ -346,6 +347,8 @@ class Router:
                 else:
                     step_time, step_cost = self._time(s), self._cost(s, lam)
                 step_cost *= penalties.get(seg.id, 1.0)
+                if seg.id in heavy:
+                    step_cost *= AVOID_PENALTY
                 new_elapsed, new_cost = elapsed + step_time, cost + step_cost
                 new_penalty = new_cost - new_elapsed
                 front = fronts.setdefault(seg.to_node, [])
@@ -356,9 +359,8 @@ class Router:
                 heapq.heappush(
                     heap, (new_cost, new_elapsed, next(tie), seg.to_node, (*path, seg.id), visited | {seg.to_node})
                 )
-        if skip:  # no way around the avoided roads: use as little of them as we can
-            heavy = {sid: penalties.get(sid, 1.0) * AVOID_PENALTY for sid in skip}
-            return self._search(origin, destination, depart_at, lam, view, {**penalties, **heavy}, blind, strict=False)
+        if avoid_step + 1 < len(self.avoid_steps):  # no way around the avoided roads: the next step
+            return self._search(origin, destination, depart_at, lam, view, penalties, blind, avoid_step + 1)
         raise NoRouteError(f"no open route from {origin} to {destination}")
 
     def evaluate(

@@ -4,7 +4,8 @@
 segments left out of every search it runs: best route, alternative, the traffic-only route it's
 compared with. When there's no way around them (with few surface streets on our map, "no
 highways" often has none), the search runs again with them AVOID_PENALTY times as costly, so the
-route uses as little of them as it can, and the route says so plainly (avoid_notes).
+route uses as little of them as it can, and the route says so plainly (avoid_notes). With both
+on, toll roads stay out as long as there's any toll-free way (search_steps).
 """
 
 import copy
@@ -40,13 +41,33 @@ class Avoid:
         return cls(bool(d.get("avoid_tolls")), bool(d.get("avoid_highways")))
 
 
+Step = tuple[frozenset[str], frozenset[str]]  # (roads left out, roads AVOID_PENALTY times as costly)
+
+
+def search_steps(avoid: Avoid, segments: Iterable["SegmentInfo"]) -> tuple[Step, ...]:
+    """The searches to try in turn until one finds a route: off every avoided road; then, avoiding
+    tolls and highways, at least off the toll roads (so "No toll-free route" is only ever said when
+    there is none); last, every road allowed but the avoided ones costly."""
+    segs = list(segments)
+    avoided = frozenset(s.id for s in segs if avoid.avoids(s))
+    if not avoided:
+        return ()
+    tolls = frozenset(s.id for s in segs if s.toll)
+    steps: list[Step] = [(avoided, frozenset())]
+    if avoid.tolls and avoid.highways and tolls and tolls < avoided:
+        steps.append((tolls, avoided - tolls))
+    steps.append((frozenset(), avoided))
+    return tuple(steps)
+
+
 def avoiding(router: "Router", avoid: Avoid) -> "Router":
     """The router, staying off the roads `avoid` names. Cheap: shares everything but that."""
     if not avoid:
         return router
     r = copy.copy(router)
     r.avoid = avoid
-    r.avoid_ids = frozenset(sid for sid, seg in router.network.segments.items() if avoid.avoids(seg))
+    r.avoid_steps = search_steps(avoid, router.network.segments.values())
+    r.avoid_ids = r.avoid_steps[0][0] if r.avoid_steps else frozenset()
     return r
 
 
