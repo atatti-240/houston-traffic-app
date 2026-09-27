@@ -37,6 +37,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Causes engine | `backend/app/causes.py`, `api/causes.py` | "Why is it slow?" Splits every road's delay into causes (rush hour, busier than usual, crash, construction, closure, event, weather, train) and powers the map's cause icons, the "Why it's slow" screen, traffic alerts and "notify me when it clears". See [Why it's slow](#why-its-slow). |
 | Departure recommender | `backend/app/recommender.py` | Tries departures every 5 minutes and picks the latest one that still arrives on time. Also returns a `leave_at_safe` with a margin that grows as confidence drops. |
 | Multi-stop planner | `backend/app/planner.py`, `plan_io.py` | Up to 3 stops with time windows, dwell and fixed-order stops. Picks the stop order and every departure time, and compares the result against a leave-now baseline in the typed order. |
+| Walk, bike, transit | `backend/app/travel/`, `api/travel.py` | The Trip screen's other tabs, apart from the traffic models: walking and cycling directions from OpenStreetMap routing, and METRO bus and rail trips on the scheduled timetable. See [Walk, bike and transit](#walk-bike-and-transit). |
 | Notifications | `backend/app/notifications/` | `NotificationService` interface (mock = stored in DB, WebPush = stub) + a scheduler that re-checks saved trips and watched plans on each clock tick. |
 | Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here. It runs at `CLOCK_SPEED` × real time from `SIM_START` (a Monday 7:15 AM), and the demo can jump it. |
 | Services | `backend/app/services.py` | Wires network + models + router + scheduler + clock together for the API. |
@@ -119,6 +120,16 @@ Endpoints: `GET /slowdowns` (every slowdown, worst first), `GET /slowdowns/{segm
 
 A watch on a road with something unusual (a non-routine cause of at least a minute: a crash, a live train, rain...) clears when nothing unusual is left, even if it's still rush hour. A watch on any other road clears when it's back to light traffic. One rule (`causes.unusual`) decides both. While the incidents, traffic or trains feed is down, watches stay open and aren't checked, since a missing crash would look like "cleared". Watches expire after 12 h.
 
+## Walk, bike and transit
+
+The Trip screen's Drive tab is everything above. The Walk, Bike and Transit tabs (`?travel=walk|bike|transit`) are simpler and never touch the traffic models.
+
+- **Walk / Bike**: `POST /travel/route` asks the FOSSGIS OpenStreetMap routers (`routing.openstreetmap.de`, `routed-foot` / `routed-bike`). The URL is built from two checked points in the Houston area, never from user text. Answers are cached for an hour, requests are spaced a second apart (the same question asked twice at once is asked once), every call has a 10 s timeout, and a slow or failing server becomes a 503 with a plain message. Short jogs (crossing a street) fold into the next turn, so the steps stay readable.
+- **Transit**: `make transit` downloads METRO's official static GTFS (linked from ridemetro.org's Developer Portal) and builds `backend/data/transit.db` (SQLite, about 55 MB, not committed): stops, routes, trips, stop times in seconds of the service day (times past 24:00 kept), the service calendar with its added and removed dates, and simplified route shapes. `POST /transit/trip` walks to stops within about 1 km, rides a bus or train directly or with one change (a short walk between stops allowed) and walks to the destination, on the scheduled times of the simulated Houston date (yesterday's trips that run past midnight included). It returns up to 3 options, ranked by arrival, time on the way, walking and changes, plus the next departures near the start. Without the index, or on a date the timetable doesn't cover, `status` says so instead of guessing. Walks are straight-line estimates, and there is no live bus tracking.
+- **Map**: `MapScene.modeRoute` is drawn by `components/map/ModeRouteLayer.tsx`: walks dotted, bike rides mint, bus and train rides blue, with the stops to get on and off at.
+
+METRO's terms ask for the legend "Route and arrival data provided by permission of METRO" wherever the data is shown; the Transit tab shows it.
+
 ## Request flow
 
 1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight. Saving the same trip again (same device, places, time, days and safety) returns the one already saved instead of a copy that would alert twice.
@@ -167,6 +178,7 @@ backend/
     plan_io.py         plan request/result JSON (docs/contracts shapes)
     causes.py          why it's slow: delay split into causes, slowdowns, speed history
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
+    travel/            walk and bike directions (OpenStreetMap routing), METRO transit index + trip search
     notifications/     service + scheduler
     api/               routers
     seed/              Houston network + synthetic generator
