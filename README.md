@@ -7,8 +7,9 @@ Waze and Google Maps react to congestion after it has formed. This app predicts 
 - **Freight trains blocking at-grade crossings.** Learned per crossing, per 15 minutes of the week.
 - **Crash-prone stretches of freeway.** Learned per road segment and hour, with a 🛡️ **Faster ↔ Safer** slider that steers around them.
 - **Tomorrow's congestion.** A congestion score per road × 15-minute slot, nudged every day by a moving average.
+- **Why it's slow.** Other maps paint a road red. BlindSpot splits the delay into its causes (rush hour, a crash, a concert, a freight train, lane closures, rain, construction, heavier than usual traffic) and puts an icon for each on the map.
 
-Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, and a **"Leave now"** alert. Live train, traffic and incident reports override the predictions for the next half hour, and every answer says how sure it is and where the data came from. Errands with up to 3 stops get the best stop order and departure times.
+Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, a **"Leave now"** alert, and **"it's cleared"** when a road you're watching is back to normal. Live train, traffic and incident reports override the predictions for the next half hour, and every answer says how sure it is and where the data came from. Errands with up to 3 stops get the best stop order and departure times.
 
 > Built in 48 hours. All data is synthetic for now, behind interfaces that the real TranStar / TrainWatch feeds plug into. See [How real data plugs in](#how-real-data-plugs-in).
 
@@ -46,20 +47,22 @@ API docs: http://localhost:8000/docs
 
 Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
 
-## The demo (≈2 minutes)
+## The demo (≈3 minutes)
 
-The **▶ Demo** button walks through this with narration. Click **Next** to go at your own pace.
+The **▶ Demo** button walks through this with narration. Click **Next** to go at your own pace. On a phone it's a compact bar at the top; tap the title for the narration.
 
-1. **Monday 7:05 AM.** The map shows predicted congestion building.
-2. **East End → Medical Center, arrive by 8:00.** A traffic-only route uses Cullen Blvd, where a train crosses ~72% of weekday mornings around 7:40. We route around it: *"Avoided Cullen Blvd @ UP: 72% chance of a train around 7:38 AM · about 7 min faster than a traffic-only route"*, and say **leave at 7:35**.
-3. **Save it.** The trip is now watched on weekdays; a plan alert arrives.
-4. **Live train on Old Spanish Trail.** A *"New route"* alert: *"Rerouted around Old Spanish Trail @ Almeda: blocked by a train right now"*.
-5. **7:35 AM.** *"Leave now"* alert with the route.
-6. **Evening: Downtown → Hobby.** The fastest route is the crash-prone I-45 Gulf Freeway.
-7. **Slide toward Safer.** The route skips the crash-prone stretch of the Gulf Freeway from downtown to 610: *"Safe Path: 35% less crash exposure than the traffic-only route for +6 min"*.
-8. **Live crash on I-45.** Back on Fastest, a crash reported on the Gulf Freeway reroutes you: *"Rerouted around I-45 Gulf Fwy: crash reported (demo feed, just now)"*.
+1. **Monday 7:05 AM.** *Where to?*, with the traffic around you right now.
+2. **East End → Medical Center, arrive by 8:00.** A traffic-only route uses Cullen Blvd, where a train crosses ~72% of weekday mornings around 7:40. BlindSpot routes around it (*"Avoided Cullen Blvd @ UP: 72% chance of a train around 7:38 AM"*) and says **leave at 7:35**.
+3. **Live train on Old Spanish Trail.** The trip re-plans right away: *"Rerouted around Old Spanish Trail @ Almeda: blocked by a train right now"*.
+4. **5 PM: why Houston is slow.** The live map shows an icon for every cause: rush hour, a concert at Toyota Center, a crash on the Gulf Freeway, a freight train on Navigation Blvd, lane closures on I-69, rain on the West Loop, construction on I-45 North, and a camera seeing more cars than usual on I-10.
+5. **Tap the crash.** *"Multi-vehicle crash. Two left lanes blocked."* Heavy traffic, +12 min.
+6. **Why it's slow.** 60% of the delay is the crash, 40% is rush hour, and the speed chart shows the drop at 4:52.
+7. **Live cams.** The West Loop camera by the Galleria, in the rain.
+8. **Alerts.** Incidents, roadwork, events, weather, trains and busier roads in one list, each with what it costs you.
+9. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
+10. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
-You can also use the app yourself: pick places or click the map (📍), scrub the time slider to watch rush hour build, toggle crash-risk / crossing / incident / camera layers, and use **+15m / +1h** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down.
+You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`.
 
 ## How it works
 
@@ -69,10 +72,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:
 - **Time-dependent routing.** Each road is scored at the time you'd actually reach it: predicted travel time + expected train delay + a crash-risk penalty that grows up to ×20 as you slide toward Safer.
 - **Live beats predicted, carefully.** Fresh live data is blended in for the next 30 min, incidents slow or close roads, and a feed that goes down falls back to predictions and says so. See [docs/routing-wiring.md](docs/routing-wiring.md).
 - **Explainable.** Every route is compared with a traffic-only route (what a typical nav app would pick), and the differences become the "why" bullets.
+- **Causes.** For each road the delay against free flow is split into usual traffic (rush hour), live volume, incidents, closure waits and trains, from the same data the router uses. A crash at 5 PM shows up as a crash, not as rush hour. See [ARCHITECTURE.md](ARCHITECTURE.md#why-its-slow).
 
 ```
-backend/   FastAPI + SQLite: adapters (mock data), scoring models, router, recommender, scheduler, API
-frontend/  Next.js PWA + Leaflet: map, trip planner, time slider, alerts, scripted demo
+backend/   FastAPI + SQLite: adapters (mock data), scoring models, router, recommender, planner, causes, scheduler, API
+frontend/  Next.js PWA + Leaflet, dark UI: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams, scripted demo
 ```
 
 ## How real data plugs in
@@ -97,7 +101,8 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 
 ## Status
 
-- ✅ Models, routing, recommender, multi-stop planner, scheduler, API, map UI, demo: all working, 143 backend tests
+- ✅ Models, routing, recommender, multi-stop planner, causes, scheduler, API, UI, demo: all working, 170 backend tests
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
-- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), multi-stop planner UI, OSM road graph, real web push, computer vision on camera feeds
+- ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
+- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, OSM road graph, real web push, the marketing website

@@ -1,33 +1,123 @@
 @import "tailwindcss";
 
+/* BlindSpot dark theme (from the design). Use these via Tailwind: bg-bg, bg-card, text-muted,
+   border-line, text-accent, bg-heavy ... or var(--c-*) in inline styles. */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-grotesk), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --color-bg: #111318; /* app background */
+  --color-map: #171a21; /* map background */
+  --color-nav: #15181e; /* bottom nav, raised panels */
+  --color-card: #1e222b; /* cards, inputs, chips */
+  --color-card-hi: #232a3a; /* selected card */
+  --color-pop: #232833; /* tooltips, popovers */
+  --color-pop-line: #353b48;
+  --color-line: #2a2f3b; /* dividers, bar tracks */
+  --color-edge: #2e3340; /* floating control borders */
+  --color-edge-strong: #3a404d; /* outline chips/buttons */
+  --color-ink: #ecedef; /* primary text */
+  --color-soft: #c4c8d2; /* secondary text on cards */
+  --color-muted: #9aa0ae; /* muted text */
+  --color-accent: #8fb0ff;
+  --color-accent-hi: #b5ccff;
+  --color-on-accent: #0e1015;
+  --color-heavy: #ff4d4d;
+  --color-heavy-text: #ff7a70;
+  --color-moderate: #f5c518;
+  --color-light: #2fbf6b;
+  --color-marker: #f2f3f5;
 }
 
 html,
 body {
-  background: #f1f5f9;
-  color: #0f172a;
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: #111318;
+  color: #ecedef;
+  font-family: var(--font-grotesk), system-ui, sans-serif;
 }
 
-/* Live-blocked crossing marker */
-@keyframes pulse-ring {
-  0%,
-  100% {
-    stroke-opacity: 1;
-    stroke-width: 3px;
-  }
-  50% {
-    stroke-opacity: 0.3;
-    stroke-width: 9px;
-  }
+a {
+  color: #8fb0ff;
 }
-.pulse {
-  animation: pulse-ring 1.4s ease-in-out infinite;
+a:hover {
+  color: #b5ccff;
 }
 
+.font-num {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-weight: 500;
+}
+
+/* Thin, dark scrollbars; hide them on horizontal chip rows */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2f3b transparent;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  filter: invert(0.7);
+}
+input[type="range"] {
+  accent-color: #8fb0ff;
+}
+
+/* ---- Leaflet, dark ------------------------------------------------------------------------ */
+.leaflet-container.leaflet-container {
+  background: #171a21;
+  font-family: var(--font-grotesk), system-ui, sans-serif;
+}
+/* Dark basemap tiles, nudged toward the design's blue-grey */
+.leaflet-tile-pane {
+  filter: saturate(0.6) brightness(0.95) hue-rotate(190deg);
+}
+.leaflet-control-attribution {
+  background: rgba(17, 19, 24, 0.7) !important;
+  color: #6b7080 !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a {
+  color: #8a91a0 !important;
+}
+.leaflet-tooltip.place-label {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9ca3b0;
+  text-shadow: 0 1px 2px #0e1015;
+}
+.leaflet-tooltip.place-label::before {
+  display: none;
+}
+.leaflet-tooltip.dark-tip {
+  background: #232833;
+  border: 1px solid #353b48;
+  border-radius: 10px;
+  color: #ecedef;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.leaflet-tooltip.dark-tip::before {
+  display: none;
+}
+/* Cause markers are divIcons; don't let Leaflet paint a white box behind them */
+.leaflet-div-icon.cause-icon {
+  background: transparent;
+  border: none;
+}
+
+/* ---- motion -------------------------------------------------------------------------------- */
 @keyframes toast-in {
   from {
     transform: translateY(-8px);
@@ -42,16 +132,58 @@ body {
   animation: toast-in 0.25s ease-out;
 }
 
-/* Small, quiet place labels on the map */
-.leaflet-tooltip.place-label {
-  background: rgba(255, 255, 255, 0.85);
-  border: none;
-  box-shadow: none;
-  padding: 0 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #0f172a;
+@keyframes pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 77, 77, 0);
+  }
 }
-.leaflet-tooltip.place-label::before {
-  display: none;
+.pulse {
+  animation: pulse-ring 1.6s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-in,
+  .pulse,
+  .fade-in {
+    animation: none;
+  }
+}
+
+/* Cause tooltip + popup: the design's dark card */
+.leaflet-tooltip.cause-tip,
+.cause-popup .leaflet-popup-content-wrapper {
+  background: #232833;
+  border: 1px solid #353b48;
+  border-radius: 14px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+  color: #ecedef;
+  padding: 14px;
+  white-space: normal;
+}
+.leaflet-tooltip.cause-tip::before {
+  border-top-color: #353b48;
+}
+.cause-popup .leaflet-popup-content {
+  margin: 0;
+  width: auto !important;
+}
+.cause-popup .leaflet-popup-tip {
+  background: #232833;
+  border: 1px solid #353b48;
 }

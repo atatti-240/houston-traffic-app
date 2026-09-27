@@ -19,7 +19,8 @@ from app.api.schemas import (
 )
 from app.conditions.live import LiveTraffic
 from app.config import settings
-from app.models import Notification, SavedPlan, Trip, TripState
+from app import demo_scenarios
+from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState
 from app.services import Services
 
 router = APIRouter(tags=["demo"])
@@ -105,8 +106,8 @@ def incident(req: IncidentRequest, svc: Services = Depends(get_services)):
         raise HTTPException(404, f"unknown segment {req.segment_id!r}")
     inject = _mock(svc.sources.incidents, "inject")
     start = resolve_time(svc, req.start)
-    title = req.title or f"{seg.name} - {req.kind.capitalize()}"
-    inc = inject(req.segment_id, req.kind, title, start, req.minutes, req.lanes_blocked)
+    title = req.title or f"{seg.name} - {req.kind.replace('_', ' ').capitalize()}"
+    inc = inject(req.segment_id, req.kind, title, start, req.minutes, req.lanes_blocked, req.detail)
     return {"incident": incident_json(inc), "notifications": _notes(svc)}
 
 
@@ -138,6 +139,17 @@ def clear_live(svc: Services = Depends(get_services)):
     return {"ok": True, "notifications": _notes(svc)}
 
 
+@router.post("/demo/scenario/{name}")
+def scenario(name: str, svc: Services = Depends(get_services)):
+    """Set up a scripted live situation. 'evening': Monday 5 PM with every kind of cause at
+    once (rush hour, a concert, a crash, a train, lane closures, rain, construction)."""
+    if name not in demo_scenarios.SCENARIOS:
+        raise HTTPException(404, f"unknown scenario {name!r}; try {', '.join(demo_scenarios.SCENARIOS)}")
+    _mock(svc.sources.incidents, "inject")
+    svc.clock.set(demo_scenarios.run(name, svc.sources, settings.sim_start))
+    return {**_clock_json(svc), "notifications": _notes(svc)}
+
+
 @router.post("/demo/clear-blockages")
 def clear_blockages(svc: Services = Depends(get_services)):
     clear = getattr(svc.sources.trains, "clear_injected", None)
@@ -157,7 +169,7 @@ def replay(days: int | None = None, svc: Services = Depends(get_services)):
 def reset(svc: Services = Depends(get_services)):
     """Back to Monday 7:15 AM with no trips, plans, notifications or live data."""
     with svc.session_factory() as s:
-        for model in (Notification, TripState, Trip, SavedPlan):
+        for model in (Notification, TripState, Trip, SavedPlan, SlowdownWatch):
             s.execute(delete(model))
         s.commit()
     svc.sources.clear_demo_live()
