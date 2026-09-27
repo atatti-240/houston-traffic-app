@@ -357,7 +357,8 @@ export default function WhereTo() {
           <button
             type="button"
             onClick={() => {
-              setSlot(picking, { name: "My location", lat: here.lat, lng: here.lng, address: here.street });
+              // Not `here.street`: that's the nearest named place's address, not this spot's.
+              setSlot(picking, { name: "My location", lat: here.lat, lng: here.lng, address: `Near ${here.name}` });
               setPicking(null);
             }}
             className="-mt-2 flex cursor-pointer items-center gap-2 text-left text-[15px] font-medium text-accent"
@@ -398,7 +399,14 @@ export default function WhereTo() {
                   </button>
                 </span>
               )}
-              {geo.status === "ok" && geo.stale && <span>Search isn&apos;t answering, so these are saved results.</span>}
+              {geo.status === "ok" && geo.stale && (
+                <span>
+                  Search isn&apos;t answering, so these are saved results.{" "}
+                  <button type="button" onClick={() => setAttempt((n) => n + 1)} className="cursor-pointer font-medium text-accent">
+                    Try again
+                  </button>
+                </span>
+              )}
               {nothing && geo.status === "ok" && <span>No places found in the Houston area.</span>}
               {searching && geo.status !== "error" && <span className="text-[11px]">Search by OpenStreetMap (Nominatim)</span>}
             </div>

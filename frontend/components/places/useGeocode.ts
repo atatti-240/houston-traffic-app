@@ -65,7 +65,8 @@ export function useGeocode(query: string, near: { lat: number; lng: number } | n
         .then(
           (r) => {
             const a = { results: r.results, stale: r.stale };
-            answers.set(key, a);
+            // An older answer from while the geocoder was down: ask again next time.
+            if (!r.stale) answers.set(key, a);
             if (wanted.current === text) setState({ key, value: { status: "ok", ...a } });
           },
           (e: unknown) => {
