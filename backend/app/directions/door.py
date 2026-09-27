@@ -50,6 +50,7 @@ ACCESS_BEARING_RANGE = 60
 MAX_VIAS = 25
 SIMPLIFY_M = 4
 CACHE_SIZE = 256
+BUILD_BUDGET_S = 8  # no further OSRM attempt that could end later than this into a build
 BUILD_WAIT_S = 15  # how long a request waits for the same trip's directions being built
 MPH = 0.44704  # m/s
 
@@ -291,9 +292,14 @@ class DoorDirections:
         attempt: tuple[str, list[Via]] | None = ("vias", full) if full else ("direct", [])
         tried: list[str] = []
         transient = False
+        started = self.client.clock()
         while attempt is not None:
             kind, vias = attempt
             label = f"{kind}:{len(vias)}"
+            if tried and self.client.clock() - started + self.client.timeout > BUILD_BUDGET_S:
+                tried.append(f"{label} skipped (out of time)")
+                transient = True
+                break
             try:
                 path = self._attempt(kind, corr, vias, origin, destination, d_from)
             except OsrmUnavailable as e:
