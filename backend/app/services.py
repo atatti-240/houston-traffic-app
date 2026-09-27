@@ -10,6 +10,7 @@ from app.clock import SimClock
 from app.config import settings
 from app.cv.bridge import CvBridge, build_bridge
 from app.cv.incidents import CameraAiIncidents
+from app.directions.door import DoorDirections
 from app.graph import Network, load_network
 from app.notifications.scheduler import TripScheduler
 from app.notifications.service import NotificationService, build_notifier
@@ -35,6 +36,7 @@ class Services:
         # Live AI camera feeds (CV_URL); None when off. Started by the app's lifespan.
         self.cv = cv if cv is not None else build_bridge(settings, session_factory)
         self.camera_ai = CameraAiIncidents(self.cv) if self.cv is not None else None
+        self.directions = DoorDirections()  # door-to-door directions (OSRM) and their cache
         # One tick at a time: the background loop and request handlers both tick, and two
         # at once would both send the same alert. Lives here, not on the scheduler, because
         # _install() swaps schedulers.

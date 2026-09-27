@@ -4,7 +4,8 @@
  * Trip: when to leave and which way, and why. No design exists for it; it follows the design's
  * language (Why it's slow tiles, dark cards, pill buttons).
  *  Phone: a bottom sheet (max 64dvh) with the route on the map above it. Desktop: the left panel.
- *  Single trip: leave now (/route) or arrive by (/recommend). With extra stops: /plan (best order).
+ *  Single trip: leave now (/route) or arrive by (/recommend), up to 3 routes to pick from, door to door with
+ *  turn-by-turn steps (Trip/RouteList, Trip/Steps, Trip/useRouteChoices). With extra stops: /plan (best order).
  *  Re-plans when the inputs change and whenever live data is refetched (a train blocking the
  *  route shows up as a reroute).
  */
@@ -15,6 +16,7 @@ import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/
 import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
+import { recommendChoices, routeChoices } from "@/lib/directions";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
 import { CAUSE, C, ICON } from "@/lib/theme";
@@ -23,8 +25,11 @@ import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route,
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import TripReports from "./Trip/Reports";
 import { AvoidToggles, RouteRules, TollLine, useAvoid } from "./Trip/RoadRules";
+import { Comparisons, RouteList } from "./Trip/RouteList";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
 import ShareEta from "./Trip/ShareEta";
+import Steps from "./Trip/Steps";
+import { useRouteChoices } from "./Trip/useRouteChoices";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
 const MAX_STOPS = 2;
@@ -42,14 +47,17 @@ function initialSafety(v: number | undefined): number {
 }
 
 type Result =
-  | { kind: "route"; key: string; best: Route; alt: Route | null }
+  | { kind: "route"; key: string; best: Route; alt: Route | null; routes: Route[] }
   | { kind: "rec"; key: string; rec: Recommendation }
   | ({ kind: "plan"; key: string } & TimedPlan);
 
 /** How each trip (stack entry) was set, so Back from "Gas on the way" (or a place's trip) returns to
- * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. */
-type Settings = { mode: Mode; by: string; safety: number; stops: string[]; showAlt: boolean };
+ * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. The
+ * picked route is kept by useRouteChoices (in the history entry and the URL). */
+type Settings = { mode: Mode; by: string; safety: number; stops: string[] };
 const memory = new WeakMap<Screen, Settings>();
+
+const NO_ROUTES: Route[] = [];
 
 /** `existing`: saved before (found on the server, not made on this screen), so an edit doesn't replace it. */
 type Watch = { key: string; tripId?: number; planId?: string; existing?: boolean };
@@ -298,29 +306,6 @@ function Reasons({ reasons }: { reasons: string[] }) {
   );
 }
 
-function Switch({ on, onChange, children }: { on: boolean; onChange: (v: boolean) => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-[14px] bg-card px-4 py-3 text-left text-[14px] font-medium text-ink"
-    >
-      <span className="flex min-w-0 items-center gap-2.5">
-        <span className="h-0 w-5 shrink-0 border-t-[3px] border-dashed" style={{ borderColor: C.muted }} aria-hidden="true" />
-        {children}
-      </span>
-      <span className="relative h-6 w-10 shrink-0 rounded-full transition-colors" style={{ background: on ? C.accent : C.edgeStrong }}>
-        <span
-          className="absolute top-1 h-4 w-4 rounded-full transition-[left]"
-          style={{ left: on ? 20 : 4, background: on ? C.onAccent : C.ink }}
-        />
-      </span>
-    </button>
-  );
-}
-
 const CONF_COLOR: Record<Confidence, string> = { high: C.soft, medium: C.soft, low: C.heavyText };
 
 function Headline({ leave, inMin, lines, loading }: { leave: string | null; inMin?: number | null; lines?: ReactNode; loading: boolean }) {
@@ -356,7 +341,6 @@ export default function Trip() {
   const [avoid, setAvoid] = useAvoid(params?.avoid, paramsKey);
   const [stops, setStops] = useState<string[]>(kept?.stops ?? []);
   const [picking, setPicking] = useState(false);
-  const [showAlt, setShowAlt] = useState(kept?.showAlt ?? false);
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -374,12 +358,11 @@ export default function Trip() {
     setSafety(kept?.safety ?? initialSafety(params?.safety));
     setStops(kept?.stops ?? []);
     setPicking(false);
-    setShowAlt(kept?.showAlt ?? false);
     setWatch(null);
   }
   useEffect(() => {
-    memory.set(screen, { mode, by, safety, stops, showAlt });
-  }, [screen, mode, by, safety, stops, showAlt]);
+    memory.set(screen, { mode, by, safety, stops });
+  }, [screen, mode, by, safety, stops]);
 
   const to = params?.to;
   const origin: Location | undefined = params?.from ?? here?.place;
@@ -427,19 +410,21 @@ export default function Trip() {
     const p: Promise<Result> = body
       ? planTrip(body).then((timed) => ({ kind: "plan", key, ...timed }))
       : k.mode === "by"
-        ? api
-            .recommend({
-              origin: o,
-              destination: d,
-              arrive_by: k.by as string,
-              safety_weight: k.safety,
-              safe_path: k.safety >= 1,
-              ...avoidBody(k.avoid),
-            })
-            .then((rec) => ({ kind: "rec", key, rec }))
-        : api
-            .route({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1, ...avoidBody(k.avoid) })
-            .then((r) => ({ kind: "route", key, best: r.best, alt: r.alternative }));
+        ? recommendChoices({
+            origin: o,
+            destination: d,
+            arrive_by: k.by as string,
+            safety_weight: k.safety,
+            safe_path: k.safety >= 1,
+            ...avoidBody(k.avoid),
+          }).then((rec) => ({ kind: "rec", key, rec }))
+        : routeChoices({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1, ...avoidBody(k.avoid) }).then((r) => ({
+            kind: "route",
+            key,
+            best: r.best,
+            alt: r.alternative,
+            routes: r.routes ?? [r.best],
+          }));
     p.then(
       (r) => {
         if (id !== reqId.current) return;
@@ -457,7 +442,11 @@ export default function Trip() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, generation, retry]);
 
-  // ---- the map: route (+ alternative) or the plan's legs, with start / stops / end ----------
+  // ---- route choices (single trips): the picked one, and directions for the others as they come ----
+  const options = !result || result.kind === "plan" ? NO_ROUTES : result.kind === "rec" ? (result.rec.routes ?? [result.rec.route]) : result.routes;
+  const choices = useRouteChoices(options, origin, to);
+
+  // ---- the map: the routes (picked one solid, others dashed) or the plan's legs, with start / stops / end ----
   const startPt = origin !== undefined ? placePoint(places, origin) : null;
   const endPt = to !== undefined ? placePoint(places, to) : null;
   useEffect(() => {
@@ -480,20 +469,30 @@ export default function Trip() {
       });
       return;
     }
-    const best = result.kind === "rec" ? result.rec.route : result.best;
-    const alt = result.kind === "rec" ? result.rec.alternative : result.alt;
+    const sel = choices.selected;
+    if (!sel) return;
     if (endPt) pts.push({ ...endPt, kind: "end", label: toName });
-    const shownAlt = showAlt && alt ? alt.geometry : undefined;
     setScene({
-      route: best.geometry,
-      alternative: shownAlt,
+      route: sel.geometry,
+      routes:
+        choices.routes.length > 1
+          ? choices.routes.map((r) => ({
+              id: r.id ?? "",
+              geometry: r.geometry,
+              label: r.label ?? r.summary,
+              time: choices.pendingTimes(r) ? undefined : `${Math.max(1, Math.round(r.total_min))} min`,
+              selected: r === sel,
+            }))
+          : undefined,
+      pickRoute: choices.pick,
       points: pts,
-      // With the start and end too: a real place can sit off our road map (or the route be tiny).
-      fit: [...best.geometry, ...(shownAlt ?? []), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
+      // All the routes as they first came (not refitted as their directions arrive, or on a pick), with the
+      // start and end too: a real place can sit off our road map (or the route be tiny).
+      fit: [...options.flatMap((r) => r.geometry), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
       fitPadding: sheetPadding(isDesktop),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, showAlt, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
+  }, [result, choices.routes, choices.selected, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
 
   // ---- alerts ---------------------------------------------------------------------------------
   // Alerts saved before (this trip opened from its own alert, or watched on an earlier visit).
@@ -583,23 +582,28 @@ export default function Trip() {
   // Arrive by with the time cleared: nothing to plan until there is one.
   const needTime = mode === "by" && !byOk;
   const hidden = sameSpot || needTime;
-  // Showing a result for other inputs (debouncing, or the new request is on its way).
-  const stale = result !== null && (loading || result.key !== inputs);
+  // Showing a result for other inputs (debouncing, or the new request is on its way), or the picked route's times
+  // are about to change (its door-to-door directions are on the way).
+  const stale = result !== null && (loading || result.key !== inputs || (!!choices.selected && choices.pendingTimes(choices.selected)));
 
   // ---- result -----------------------------------------------------------------------------------
   let head: ReactNode = null;
   let body: ReactNode = null;
 
-  if (result && (result.kind === "route" || result.kind === "rec")) {
+  if (result && (result.kind === "route" || result.kind === "rec") && choices.selected) {
     const rec = result.kind === "rec" ? result.rec : null;
-    const best = result.kind === "rec" ? result.rec.route : result.best;
-    const alt = result.kind === "rec" ? result.rec.alternative : result.alt;
-    const conf: Confidence = rec ? rec.confidence_label : best.confidence;
+    // The picked route (the best one unless another was picked); arrive-by keeps the recommended departure.
+    const best = choices.selected;
+    const isBest = best === choices.routes[0];
+    const others = choices.routes.filter((r) => r !== best);
+    const conf: Confidence = rec && isBest ? rec.confidence_label : best.confidence;
     const minutes = Math.max(1, Math.round(best.total_min));
+    const eta = best.arrive_at;
+    const onTime = rec ? parseSim(eta).getTime() + rec.buffer_min * 60000 <= parseSim(rec.arrive_by).getTime() : true;
     // Not on time: late when the ETA is past the deadline, else just inside the buffer (tight).
-    const pastDeadline = rec ? parseSim(rec.eta).getTime() > parseSim(rec.arrive_by).getTime() : false;
-    const late = rec && !rec.on_time && pastDeadline ? Math.max(1, minutesBetween(rec.arrive_by, rec.eta)) : 0;
-    const tight = rec !== null && !rec.on_time && !pastDeadline;
+    const pastDeadline = rec ? parseSim(eta).getTime() > parseSim(rec.arrive_by).getTime() : false;
+    const late = rec && !onTime && pastDeadline ? Math.max(1, minutesBetween(rec.arrive_by, eta)) : 0;
+    const tight = rec !== null && !onTime && !pastDeadline;
     const leaveNow = !rec || !rec.on_time || (now ? minutesBetween(now, rec.depart_at) <= 0 : false);
     const b = best.breakdown;
     // Whole minutes that add up to the trip's total (train + closure waits on top of driving).
@@ -618,7 +622,7 @@ export default function Trip() {
         lines={
           <>
             <span className="text-[14px] text-soft">
-              Arrive <span className="font-num">{when(rec ? rec.eta : best.arrive_at, rec ? rec.depart_at : best.depart_at)}</span> ·{" "}
+              Arrive <span className="font-num">{when(eta, rec ? rec.depart_at : best.depart_at)}</span> ·{" "}
               <span className="font-num">{minutes} min</span> · <span style={{ color: CONF_COLOR[conf] }}>{conf} confidence</span>
             </span>
             {rec && late > 0 && (
@@ -631,7 +635,7 @@ export default function Trip() {
                 Tight: less than {rec.buffer_min} min to spare for {fmtTime(rec.arrive_by)}
               </span>
             )}
-            {rec && rec.on_time && rec.leave_at_safe !== rec.depart_at && (
+            {rec && isBest && onTime && rec.leave_at_safe !== rec.depart_at && (
               <span className="text-[13px] text-muted">
                 Can&apos;t be late? Leave by <span className="font-num text-soft">{when(rec.leave_at_safe, rec.depart_at)}</span>
                 {rec.data_confidence !== "high" ? " (this route leans on predictions)" : ""}.
@@ -651,6 +655,15 @@ export default function Trip() {
             </span>
           </Banner>
         )}
+        {choices.routes.length > 1 && (
+          <RouteList
+            routes={choices.routes}
+            selected={best}
+            onPick={choices.pick}
+            pendingTimes={choices.pendingTimes}
+            roughTimes={choices.roughTimes}
+          />
+        )}
         <Card>
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-3">
@@ -662,6 +675,7 @@ export default function Trip() {
           <RouteRules route={best} />
           <div className="h-px bg-line" />
           <h3 className="m-0 text-[13px] font-semibold tracking-[0.08em] text-muted uppercase">Why this way</h3>
+          <Comparisons route={best} others={others} roughTimes={choices.roughTimes} />
           <Reasons reasons={best.reasons} />
         </Card>
         <div className="grid grid-cols-3 gap-2">
@@ -673,13 +687,7 @@ export default function Trip() {
             {third.value}
           </Tile>
         </div>
-        {alt && (
-          <Switch on={showAlt} onChange={setShowAlt}>
-            <span className="min-w-0 truncate">
-              Show alternative <span className="font-num text-soft">({Math.max(1, Math.round(alt.total_min))} min)</span>
-            </span>
-          </Switch>
-        )}
+        <Steps directions={best.directions} />
       </>
     );
   } else if (result && result.kind === "plan") {
@@ -794,9 +802,11 @@ export default function Trip() {
   const busy = !result && !error && !hidden;
   // The result on screen is for other inputs (a new one is on its way): don't act on it.
   const outdated = result !== null && result.key !== inputs;
+  // The route on screen for a single trip: the picked one (the best unless another was picked).
+  const picked = result && result.kind !== "plan" ? (choices.selected ?? null) : null;
   // For the destination's card ("closed when you get there") and "Gas on the way".
-  const arriveAt = result?.kind === "rec" ? result.rec.eta : result?.kind === "route" ? result.best.arrive_at : result?.plan.legs.at(-1)?.arrive_at;
-  const routeLine = result?.kind === "rec" ? result.rec.route.geometry : result?.kind === "route" ? result.best.geometry : result?.plan.legs.flatMap((l) => l.geometry);
+  const arriveAt = result?.kind === "plan" ? result.plan.legs.at(-1)?.arrive_at : picked?.arrive_at;
+  const routeLine = result?.kind === "plan" ? result.plan.legs.flatMap((l) => l.geometry) : picked?.geometry;
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-3 pb-8 md:pt-6">
@@ -835,7 +845,7 @@ export default function Trip() {
           )}
         </p>
       )}
-      <TripReports result={hidden ? null : result} />
+      <TripReports result={hidden || !result ? null : result.kind === "plan" ? result : picked ? { best: picked } : null} />
 
       {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
 
@@ -951,7 +961,7 @@ export default function Trip() {
       )}
       {!hidden && result && (
         <ShareEta
-          route={result.kind === "plan" || outdated ? null : result.kind === "rec" ? result.rec.route : result.best}
+          route={result.kind === "plan" || outdated ? null : picked}
           fromName={fromName}
           toName={toName}
           toPoint={endPt}
