@@ -187,7 +187,8 @@ export default function LiveMap() {
       <div className="pointer-events-auto absolute top-3 left-4 z-[900]">
         <Logo size={18} pill />
       </div>
-      <div className="pointer-events-auto absolute top-14 right-4 left-4 z-[900] flex items-center gap-2.5">
+      {/* Above the legend and zoom buttons: the layers menu opens down over them */}
+      <div className="pointer-events-auto absolute top-14 right-4 left-4 z-[910] flex items-center gap-2.5">
         <SearchBar onOpen={() => go({ name: "where" })} className="flex-1" />
         <LayersButton />
       </div>

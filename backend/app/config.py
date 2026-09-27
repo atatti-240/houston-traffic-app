@@ -39,6 +39,11 @@ class Settings:
     notification_channel: str = field(
         default_factory=lambda: os.environ.get("NOTIFICATION_CHANNEL", "mock")
     )
+    # Address and business search (OpenStreetMap's free geocoder). Point it at your own
+    # Nominatim for heavier use: the public one allows 1 request per second.
+    nominatim_url: str = field(
+        default_factory=lambda: os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
+    )
     cors_origins: list[str] = field(
         default_factory=lambda: os.environ.get(
             "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"

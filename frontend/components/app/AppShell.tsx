@@ -16,6 +16,7 @@ import DemoRunner from "@/components/app/DemoRunner";
 import MapChrome from "@/components/app/MapChrome";
 import ClientTrafficMap from "@/components/map/ClientTrafficMap";
 import { Toasts } from "@/components/Notifications";
+import Nearby from "@/components/places/Nearby";
 import Alerts from "@/components/screens/Alerts";
 import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
@@ -46,6 +47,8 @@ function ScreenView({ screen }: { screen: Screen }) {
       return <WhySlow key={screen.id} />;
     case "alerts":
       return <Alerts />;
+    case "nearby":
+      return <Nearby key={`${screen.kind}-${screen.route ? "route" : "here"}`} />;
   }
 }
 
@@ -151,9 +154,10 @@ function Shell() {
 
   const tabScreen = tabOf(screen) !== null;
   const isMap = screen.name === "map";
-  const isTrip = screen.name === "trip";
+  // Screens shown as a sheet over the lower part of the map on a phone (the route or places above it).
+  const isSheet = screen.name === "trip" || screen.name === "nearby";
   // Phone screens that cover the whole map: take the map out of the tab order and the a11y tree.
-  const mapHidden = !isDesktop && !isMap && !isTrip;
+  const mapHidden = !isDesktop && !isMap && !isSheet;
 
   let panel: ReactNode;
   if (isDesktop) {
@@ -172,7 +176,7 @@ function Shell() {
         <BottomNav />
       </div>
     );
-  } else if (isTrip) {
+  } else if (isSheet) {
     panel = (
       <div className="absolute inset-x-0 bottom-0 z-[1000] flex max-h-[64dvh] flex-col rounded-t-3xl border-t border-line bg-bg" style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}>
         <div className="min-h-0 flex-1 overflow-y-auto">
