@@ -116,9 +116,10 @@ def test_clean_phone():
 # ---- the geocoder ------------------------------------------------------------------------------
 
 
-def nominatim_row(osm_id: int, name: str, lat: float, lng: float, *, typ="cafe", importance=0.0001, tags=None, **address):
+def nominatim_row(osm_id: int, name: str, lat: float, lng: float, *, typ="cafe", category="amenity", importance=0.0001,
+                  tags=None, **address):
     return {
-        "osm_type": "way", "osm_id": osm_id, "lat": str(lat), "lon": str(lng), "category": "amenity", "type": typ,
+        "osm_type": "way", "osm_id": osm_id, "lat": str(lat), "lon": str(lng), "category": category, "type": typ,
         "name": name, "importance": importance, "display_name": f"{name}, Houston, Texas",
         "address": {"city": "Houston", **address}, "extratags": tags,
     }
@@ -198,12 +199,29 @@ def test_search_falls_back_to_all_of_houston_and_keeps_landmarks_on_top():
 
 
 def test_search_without_a_point_asks_all_of_houston():
-    fake = FakeNominatim(search={("1600 smith st", "houston"): [nominatim_row(9, "", 29.75, -95.37, typ="house",
+    fake = FakeNominatim(search={("1600 smith st", "houston"): [nominatim_row(9, "", 29.75, -95.37, typ="house", category="place",
                                                                                house_number="1600", road="Smith Street", suburb="Downtown")]})
     results, _ = make_geo(fake).search("1600 smith st")
     assert results == [{"id": "W9", "name": "1600 Smith Street", "address": "Downtown", "lat": 29.75, "lng": -95.37,
                         "kind": "Address", "importance": 0.0001, "phone": None, "website": None, "opening_hours": None,
                         "brand": None, "cuisine": None}]
+
+
+def test_kinds_and_address_lines():
+    def one(**kw):
+        row = nominatim_row(1, kw.pop("name", "X"), 29.75, -95.37, **kw)
+        return nominatim.place_json(row)
+
+    assert one(typ="residential", category="highway")["kind"] == "Street"
+    assert one(typ="motorway", category="highway")["kind"] == "Freeway"
+    assert one(typ="residential", category="building")["kind"] == "Apartments"
+    assert one(typ="yes", category="building")["kind"] == "Building"
+    assert one(typ="fuel")["kind"] == "Gas station"
+    assert one(typ="fast_food")["kind"] == "Fast food"
+    assert one(typ="ice_cream")["kind"] == "Ice cream"
+    # a house number without its street isn't an address line; other cities are named
+    assert one(house_number="3363", suburb="Uptown")["address"] == "Uptown"
+    assert one(road="Main Street", city="Katy")["address"] == "Main Street, Katy"
 
 
 def test_down_without_cache_raises_and_with_cache_serves_stale(session_factory):
