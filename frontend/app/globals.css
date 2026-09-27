@@ -72,8 +72,8 @@ input[type="range"] {
   background: #171a21;
   font-family: var(--font-grotesk), system-ui, sans-serif;
 }
-/* Dark basemap tiles, nudged toward the design's blue-grey */
-.leaflet-tile-pane {
+/* Raster fallback tiles (no WebGL), nudged toward the design's blue-grey */
+.leaflet-tile-pane .leaflet-tile {
   filter: saturate(0.6) brightness(0.95) hue-rotate(190deg);
 }
 .leaflet-control-attribution {

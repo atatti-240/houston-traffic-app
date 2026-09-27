@@ -1,0 +1,398 @@
+"""Find any address or business around Houston with OpenStreetMap's free geocoder, Nominatim.
+
+The public server's rules (https://operations.osmfoundation.org/policies/nominatim/): at most
+one request per second for the whole app, a User-Agent that says who we are, and cache what you
+get. So every call here goes through one rate limiter and a cache (in memory, and in SQLite so
+answers survive a restart). When the server is slow or down, an older cached answer is better
+than nothing; without one the caller gets GeoUnavailable and the app says search is down.
+
+Search asks around you first (a box about 5 km each way), then the whole Houston area when
+that finds little. Results come with the place's OpenStreetMap tags (hours, phone, website),
+which are cached per place too, so opening a result's card doesn't ask again.
+"""
+
+import json
+import logging
+import math
+import re
+import threading
+import time
+import urllib.parse
+import urllib.request
+from collections import OrderedDict
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.config import settings
+from app.models import GeoCache
+
+log = logging.getLogger("houston.geo")
+
+USER_AGENT = "BlindSpot/1.0 (Houston hackathon app)"
+TIMEOUT_S = 6.0
+MIN_INTERVAL_S = 1.0
+# A request that would wait longer than this for its turn gets "busy" instead of hanging.
+MAX_WAIT_S = 4.0
+# Greater Houston (Katy to Baytown, The Woodlands to Galveston Bay): left, top, right, bottom.
+HOUSTON_VIEWBOX = (-96.1, 30.4, -94.7, 29.2)
+NEAR_DEG = 0.05
+# Asked for per search (then cut to the caller's limit, closest first).
+NEAR_FETCH = 15
+# Enough results near you: don't ask the whole area too.
+NEAR_ENOUGH = 3
+# Nominatim's importance for a well-known place (roughly: it has a Wikipedia article).
+LANDMARK = 0.1
+SEARCH_TTL = timedelta(days=1)
+PLACE_TTL = timedelta(days=7)
+MISS_TTL = timedelta(hours=1)
+MEMORY_ITEMS = 500
+# A map dot looked up by name: the match must be this close to where it was tapped.
+FIND_BOX_DEG = 0.004
+FIND_MAX_M = 350
+
+DOWN = "Search is down right now. Try again in a minute."
+BUSY = "Search is busy right now. Try again in a moment."
+
+Fetch = Callable[[str], object]
+
+
+class GeoUnavailable(Exception):
+    """The geocoder didn't answer (down, slow, busy) and nothing usable was cached."""
+
+
+def http_json(url: str) -> object:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "en"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+        return json.load(r)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class RateLimiter:
+    """At most one call per `interval` seconds across all threads. Each caller takes the next
+    free slot and sleeps until it comes; one that would wait more than `max_wait` is refused."""
+
+    def __init__(self, interval: float = MIN_INTERVAL_S, max_wait: float = MAX_WAIT_S,
+                 clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> None:
+        self.interval, self.max_wait = interval, max_wait
+        self._clock, self._sleep = clock, sleep
+        self._next = 0.0
+        self._lock = threading.Lock()
+
+    def wait(self) -> None:
+        with self._lock:
+            now = self._clock()
+            slot = max(now, self._next)
+            if slot - now > self.max_wait:
+                raise GeoUnavailable(BUSY)
+            self._next = slot + self.interval
+        if slot > now:
+            self._sleep(slot - now)
+
+
+class Cache:
+    """Key -> (value, fetched_at): an LRU in memory in front of the geo_cache table."""
+
+    def __init__(self, session_factory: sessionmaker[Session] | None = None, size: int = MEMORY_ITEMS) -> None:
+        self.session_factory, self.size = session_factory, size
+        self._mem: OrderedDict[str, tuple[object, datetime]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> tuple[object, datetime] | None:
+        with self._lock:
+            if key in self._mem:
+                self._mem.move_to_end(key)
+                return self._mem[key]
+        if self.session_factory is None:
+            return None
+        try:
+            with self.session_factory() as s:
+                row = s.get(GeoCache, key)
+                hit = (row.value, row.fetched_at) if row else None
+        except Exception:  # the cache is a nice-to-have: never fail a request over it
+            log.exception("geo cache read failed")
+            return None
+        if hit:
+            self._remember(key, hit)
+        return hit
+
+    def put(self, key: str, value: object, at: datetime) -> None:
+        self.put_many({key: value}, at)
+
+    def put_many(self, items: dict[str, object], at: datetime) -> None:
+        """Several answers in one write (a search and each of its places)."""
+        for key, value in items.items():
+            self._remember(key, (value, at))
+        if self.session_factory is None or not items:
+            return
+        try:
+            with self.session_factory() as s:
+                for key, value in items.items():
+                    s.merge(GeoCache(key=key, value=value, fetched_at=at))
+                s.commit()
+        except Exception:
+            log.exception("geo cache write failed")
+
+    def _remember(self, key: str, hit: tuple[object, datetime]) -> None:
+        with self._lock:
+            self._mem[key] = hit
+            self._mem.move_to_end(key)
+            while len(self._mem) > self.size:
+                self._mem.popitem(last=False)
+
+
+# ---- turning Nominatim's answers into ours ----------------------------------------------------
+
+KIND = {
+    "fuel": "Gas station",
+    "charging_station": "EV charging",
+    "parking": "Parking",
+    "fast_food": "Fast food",
+    "aerodrome": "Airport",
+    "supermarket": "Grocery store",
+    "doctors": "Doctor",
+}
+# By category first: the same type means different things ("residential" street vs building).
+KIND_IN = {
+    "highway": {"motorway": "Freeway", "trunk": "Highway", "bus_stop": "Bus stop", "*": "Street"},
+    "building": {"apartments": "Apartments", "residential": "Apartments", "house": "House", "*": "Building"},
+    "place": {"house": "Address", "suburb": "Neighborhood", "neighbourhood": "Neighborhood", "quarter": "Neighborhood",
+              "city": "City", "town": "Town", "village": "Town", "*": "Area"},
+    "landuse": {"residential": "Residential"},
+    "boundary": {"*": "Area"},
+}
+
+
+def humanize(value: str | None) -> str | None:
+    if not value:
+        return None
+    first = value.split(";")[0].strip()
+    return first.replace("_", " ").capitalize() if first else None
+
+
+def kind_of(r: dict) -> str:
+    t = r.get("type") or ""
+    by_cat = KIND_IN.get(r.get("category") or "", {})
+    return by_cat.get(t) or by_cat.get("*") or KIND.get(t) or humanize(t if t != "yes" else None) or humanize(r.get("category")) or "Place"
+
+
+def osm_ref(r: dict) -> str | None:
+    kind, oid = (r.get("osm_type") or "")[:1].upper(), r.get("osm_id")
+    return f"{kind}{oid}" if kind in ("N", "W", "R") and oid else None
+
+
+def place_json(r: dict) -> dict:
+    """A search result: name, a short address line and the point."""
+    a = r.get("address") or {}
+    # A house number alone ("3363") isn't an address line.
+    street = " ".join(x for x in (a.get("house_number"), a.get("road")) if x) if a.get("road") else ""
+    area = a.get("neighbourhood") or a.get("suburb") or a.get("quarter") or a.get("city_district")
+    city = a.get("city") or a.get("town") or a.get("village") or a.get("hamlet")
+    name = (r.get("name") or "").strip() or street or (r.get("display_name") or "").split(",")[0].strip() or "Place"
+    parts = [p for p in (street if street != name else None, area if area != name else None) if p]
+    if city and city != "Houston" and city not in parts and city != name:
+        parts.append(city)
+    if not parts and city and city != name:
+        parts.append(city)
+    return {
+        "id": osm_ref(r),
+        "name": name,
+        "address": ", ".join(parts) or None,
+        "lat": float(r["lat"]),
+        "lng": float(r["lon"]),
+        "kind": kind_of(r),
+        "importance": float(r.get("importance") or 0),
+    }
+
+
+def clean_url(value: str | None) -> str | None:
+    """A website we're happy to link to: http(s) only, with a real host name."""
+    if not value:
+        return None
+    v = value.split(";")[0].strip()
+    if not v or re.search(r"[\s<>\"']", v):
+        return None
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", v, re.I):
+        if not re.match(r"^[\w-]+(\.[\w-]+)+(/|$)", v):
+            return None
+        v = f"https://{v}"
+    try:
+        p = urllib.parse.urlsplit(v)
+    except ValueError:
+        return None
+    host = p.hostname or ""
+    if p.scheme.lower() not in ("http", "https") or "." not in host or p.username or p.password:
+        return None
+    return v
+
+
+def clean_phone(value: str | None) -> dict | None:
+    """{"display": "(713) 522-3029", "tel": "+17135223029"}, or None when it isn't a phone number."""
+    if not value:
+        return None
+    v = value.split(";")[0].strip()
+    digits = re.sub(r"\D", "", v)
+    if not 7 <= len(digits) <= 15:
+        return None
+    if len(digits) == 10 and not v.startswith("+"):
+        digits = f"1{digits}"
+    if not v.startswith("+") and len(digits) != 11:
+        return {"display": v, "tel": digits}
+    if len(digits) == 11 and digits.startswith("1"):
+        return {"display": f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}", "tel": f"+{digits}"}
+    return {"display": v, "tel": f"+{digits}"}
+
+
+def details_json(r: dict) -> dict:
+    """A place with what OpenStreetMap knows about it (no ratings: OSM has none)."""
+    t = r.get("extratags") or {}
+    return {
+        **place_json(r),
+        "phone": clean_phone(t.get("phone") or t.get("contact:phone")),
+        "website": clean_url(t.get("website") or t.get("contact:website") or t.get("url")),
+        "opening_hours": (t.get("opening_hours") or "").strip() or None,
+        "brand": t.get("brand"),
+        "cuisine": humanize(t.get("cuisine")),
+    }
+
+
+def _rows_ok(value: object) -> bool:
+    """A cached answer we can read (Nominatim rows)."""
+    return isinstance(value, list) and all(isinstance(r, dict) and "lat" in r and "lon" in r for r in value)
+
+
+def in_houston(lat: float, lng: float) -> bool:
+    left, top, right, bottom = HOUSTON_VIEWBOX
+    return left <= lng <= right and bottom <= lat <= top
+
+
+def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6_371_000 * math.asin(math.sqrt(a))
+
+
+class Geocoder:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session] | None = None,
+        fetch: Fetch = http_json,
+        base_url: str | None = None,
+        limiter: RateLimiter | None = None,
+        now: Callable[[], datetime] = _utcnow,
+    ) -> None:
+        self.base_url = (base_url or settings.nominatim_url).rstrip("/")
+        self.fetch, self.now = fetch, now
+        self.limiter = limiter or RateLimiter()
+        self.cache = Cache(session_factory)
+
+    # ---- plumbing ---------------------------------------------------------------------------
+
+    def _url(self, path: str, **params: object) -> str:
+        base = {"format": "jsonv2", "addressdetails": 1, "extratags": 1}
+        return f"{self.base_url}/{path}?{urllib.parse.urlencode({**base, **params})}"
+
+    def _get(self, key: str, url: str, ttl: timedelta, offline: bool = False) -> tuple[list[dict], bool]:
+        """(Nominatim's rows, stale): the cached answer while fresh, else ask (then cache). If
+        asking fails, an expired cached answer comes back with stale=True, else GeoUnavailable.
+        `offline`: it just failed, so don't ask again (a second wait for the same outage); only
+        the cache answers. The raw rows are cached (not our reading of them), so a better
+        reading applies to old answers too."""
+        hit = self.cache.get(key)
+        if hit is not None and not _rows_ok(hit[0]):
+            hit = None
+        if hit is not None:
+            value, at = hit
+            if self.now() - at < (ttl if value else MISS_TTL):
+                return value, False
+        if offline:
+            if hit is not None:
+                return hit[0], True
+            raise GeoUnavailable(DOWN)
+        try:
+            self.limiter.wait()
+            data = self.fetch(url)
+            if not isinstance(data, list):
+                raise ValueError("unexpected answer")
+            rows = [r for r in data if isinstance(r, dict) and "lat" in r and "lon" in r]
+        except GeoUnavailable:
+            if hit is not None:
+                return hit[0], True
+            raise
+        except Exception as e:  # timeouts, HTTP errors, bad JSON: all mean "down" to the user
+            log.warning("geocoder failed (%s): %s", url, e)
+            if hit is not None:
+                return hit[0], True
+            raise GeoUnavailable(DOWN) from e
+        items: dict[str, object] = {key: rows}
+        # Every row carries its tags: that's its details too, so opening it doesn't ask again.
+        if not key.startswith("place|"):
+            items.update({f"place|{ref}": [r] for r in rows if (ref := osm_ref(r))})
+        self.cache.put_many(items, self.now())
+        return rows, False
+
+    def _search(
+        self, q: str, box: tuple[float, float, float, float], key: str, limit: int, offline: bool = False
+    ) -> tuple[list[dict], bool]:
+        url = self._url("search", q=q, limit=limit, viewbox=",".join(f"{v:.4f}" for v in box), bounded=1, countrycodes="us")
+        rows, stale = self._get(key, url, SEARCH_TTL, offline)
+        return [details_json(r) for r in rows], stale
+
+    # ---- what the API uses ------------------------------------------------------------------
+
+    def search(self, q: str, near: tuple[float, float] | None = None, limit: int = 6) -> tuple[list[dict], bool]:
+        """Places matching `q` in the Houston area, the ones around `near` first. (results, stale)
+
+        Near you, the geocoder ranks a chain's branches all the same, so we ask for more of them
+        and keep the closest; well-known places (a university, the airport) stay on top. A point
+        outside the Houston area only orders the results: the search itself stays in Houston."""
+        q = " ".join(q.split())
+        norm = q.lower()
+        results: list[dict] = []
+        stale = False
+        failed: GeoUnavailable | None = None
+        if near and in_houston(*near):
+            lat, lng = near
+            box = (lng - NEAR_DEG, lat + NEAR_DEG, lng + NEAR_DEG, lat - NEAR_DEG)
+            try:
+                results, stale = self._search(q, box, f"search|{norm}|{lat:.2f},{lng:.2f}", NEAR_FETCH)
+            except GeoUnavailable as e:
+                # Nothing saved for around here: the whole area's saved answer is better than nothing.
+                failed, stale = e, True
+        if len(results) < NEAR_ENOUGH:
+            try:
+                # After a failure, only a saved answer (don't wait for the same outage twice).
+                more, more_stale = self._search(q, HOUSTON_VIEWBOX, f"search|{norm}|houston", NEAR_FETCH, offline=stale)
+            except GeoUnavailable as e:
+                if not results:
+                    raise (failed or e) from None
+                more, more_stale = [], True  # keep what we found near you
+            seen = {r["id"] for r in results}
+            results = results + [r for r in more if r["id"] not in seen]
+            stale = stale or more_stale
+        if near:
+            results = sorted(
+                results,
+                key=lambda r: (r.get("importance", 0) < LANDMARK, distance_m(near[0], near[1], r["lat"], r["lng"])),
+            )
+        return results[:limit], stale
+
+    def place(self, osm: str) -> tuple[dict | None, bool]:
+        """Details for an OpenStreetMap object ("N123", "W456", "R789")."""
+        rows, stale = self._get(f"place|{osm}", self._url("lookup", osm_ids=osm), PLACE_TTL)
+        return (details_json(rows[0]) if rows else None), stale
+
+    def find(self, name: str, lat: float, lng: float) -> tuple[dict | None, bool]:
+        """Details for a named place at a point (a map dot we have no OpenStreetMap id for)."""
+        name = " ".join(name.split())
+        box = (lng - FIND_BOX_DEG, lat + FIND_BOX_DEG, lng + FIND_BOX_DEG, lat - FIND_BOX_DEG)
+        url = self._url("search", q=name, limit=5, viewbox=",".join(f"{v:.5f}" for v in box), bounded=1)
+        rows, stale = self._get(f"find|{name.lower()}|{lat:.4f},{lng:.4f}", url, PLACE_TTL)
+        close = [(distance_m(lat, lng, d["lat"], d["lng"]), d) for d in map(details_json, rows)]
+        close = [c for c in close if c[0] <= FIND_MAX_M]
+        return (min(close, key=lambda c: c[0])[1] if close else None), stale

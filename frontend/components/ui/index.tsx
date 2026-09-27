@@ -2,7 +2,7 @@
 
 /** Small shared UI pieces in the design's style. Screens should build from these. */
 
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 
 import { parseSim } from "@/lib/format";
 import { CAUSE, C, ICON, LEVEL, type CauseKind, type Level } from "@/lib/theme";
@@ -219,4 +219,30 @@ export function ago(iso: string | null | undefined, now: string | null | undefin
   if (m < 60) return `${m} min ago`;
   const h = Math.floor(m / 60);
   return `${h} h ago`;
+}
+
+/** A small ⓘ button; the note behind it shows only when tapped, so fine print stays out of the way. */
+export function InfoToggle({ children, label = "About this" }: { children: ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={id}
+        aria-label={open ? `Hide: ${label}` : label}
+        title={label}
+        className="-m-1.5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0"
+      >
+        <Icon d={ICON.info} size={17} color={open ? C.ink : C.muted} />
+      </button>
+      {open && (
+        <p id={id} className="m-0 text-[12px] leading-snug text-muted">
+          {children}
+        </p>
+      )}
+    </div>
+  );
 }

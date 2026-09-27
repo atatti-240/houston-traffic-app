@@ -5,19 +5,18 @@ counts, from the public ArcGIS layer (spikes/crash_hotspots.py). City streets on
 has no freeways, so freeway links keep their hand-set crash_mult.
 
 A street link matches the HIN rows with the same street name whose midpoint lies within
-MATCH_RADIUS_M of it. Our links are straight lines between nodes, so the radius is wide; the
-name has to match too, so the same street on the far side of town doesn't count.
+MATCH_RADIUS_M of its road shape (the real street, see network.segment_geometry). The name has
+to match too, so a cross street or the same street on the far side of town doesn't count.
 """
 
 import json
 import math
-import re
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
 SOURCE = "City of Houston Vision Zero HIN 2025"
-MATCH_RADIUS_M = 1000.0
+MATCH_RADIUS_M = 400.0  # half a HIN segment (0.5 mi): any segment overlapping the street counts
 MAX_FACTOR = 4.0  # x ARTERIAL_CRASH_MULT (0.5) = 2.0, below the worst freeway links (2.2-2.6)
 
 _SUFFIXES = {"RD", "ST", "BLVD", "AVE", "AV", "DR", "TRL", "TRAIL", "PKWY", "LN", "WAY", "HWY"}
@@ -70,13 +69,17 @@ def _dist_to_line_m(p: tuple[float, float], a: tuple[float, float], b: tuple[flo
     return math.hypot(ax + t * dx, ay + t * dy)
 
 
-def match(name: str, a: tuple[float, float], b: tuple[float, float]) -> list[HinSegment]:
-    """HIN rows on the street `name` near the link a-b."""
+def _dist_to_shape_m(p: tuple[float, float], shape) -> float:
+    return min(_dist_to_line_m(p, tuple(a), tuple(b)) for a, b in zip(shape, shape[1:]))
+
+
+def match(name: str, shape) -> list[HinSegment]:
+    """HIN rows on the street `name` near the road shape (a list of [lat, lng])."""
     keys = street_keys(name)
     return [
         s
         for s in hin_segments()
-        if street_keys(s.name) & keys and _dist_to_line_m((s.lat, s.lng), a, b) <= MATCH_RADIUS_M
+        if street_keys(s.name) & keys and _dist_to_shape_m((s.lat, s.lng), shape) <= MATCH_RADIUS_M
     ]
 
 
@@ -88,11 +91,11 @@ def citywide_rate() -> float:
 
 
 @cache
-def crash_factor(name: str, a: tuple[float, float], b: tuple[float, float]) -> float:
+def crash_factor(name: str, shape: tuple[tuple[float, float], ...]) -> float:
     """How much more crash-prone this street link is than a typical street: 1 + its HIN crashes
     per mile / the HIN average, capped at MAX_FACTOR. 1.0 if it's not on the HIN. Being on the
     HIN at all puts a street above a typical one, so a matched link never comes out below 1."""
-    hits = match(name, a, b)
+    hits = match(name, shape)
     if not hits:
         return 1.0
     rate = sum(s.crashes for s in hits) / sum(s.miles for s in hits)

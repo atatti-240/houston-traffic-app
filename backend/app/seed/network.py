@@ -9,10 +9,13 @@ generator only (they are the "ground truth" the models should rediscover from hi
 Street crash multipliers come from the city's real Vision Zero crash data (seed/visionzero.py).
 """
 
+import json
 import math
 from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Camera, Node, RailCrossing, RoadSegment, ScoreEntry
@@ -198,6 +201,50 @@ def node_latlng(node_id: str) -> tuple[float, float]:
     return (lat, lng)
 
 
+ROAD_SHAPES = Path(__file__).with_name("road_shapes.json")
+
+
+@cache
+def road_shapes() -> dict:
+    """Real road shapes per segment and rail crossings on their streets (OpenStreetMap, traced
+    by scripts/fetch_road_shapes.py). Empty when the file isn't there: straight lines then."""
+    if not ROAD_SHAPES.exists():
+        return {"segments": {}, "crossings": {}}
+    return json.loads(ROAD_SHAPES.read_text())
+
+
+def segment_geometry(sid: str, frm: str, to: str) -> list[list[float]]:
+    """The segment's line: its real road shape pinned to the two nodes (so consecutive segments
+    join and a route starts and ends exactly at its places), or a straight line."""
+    a, b = list(node_latlng(frm)), list(node_latlng(to))
+    shape = road_shapes()["segments"].get(sid)
+    if not shape:
+        return [a, b]
+    pts = [list(p) for p in shape]
+    if haversine_m(tuple(pts[0]), tuple(a)) > 1:
+        pts.insert(0, a)
+    if haversine_m(tuple(pts[-1]), tuple(b)) > 1:
+        pts.append(b)
+    return pts
+
+
+def crossing_latlng(c: "CrossingDef") -> tuple[float, float]:
+    at = road_shapes()["crossings"].get(c.id)
+    return (at[0], at[1]) if at else (c.lat, c.lng)
+
+
+def _middle(geometry: list[list[float]]) -> tuple[float, float]:
+    """Halfway along a line (by distance)."""
+    lengths = [haversine_m(tuple(p), tuple(q)) for p, q in zip(geometry, geometry[1:])]
+    half, run = sum(lengths) / 2, 0.0
+    for (p, q), d in zip(zip(geometry, geometry[1:]), lengths):
+        if run + d >= half and d > 0:
+            t = (half - run) / d
+            return (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+        run += d
+    return tuple(geometry[0])
+
+
 def iter_directed():
     """Yield (link, from_node, to_node) for both directions of every link."""
     for link in LINKS:
@@ -212,7 +259,8 @@ def segment_profiles() -> list[SegmentProfile]:
         detour = 1.1 if link.road_class == "freeway" else 1.25
         crash_mult = link.crash_mult
         if link.road_class == "arterial":
-            crash_mult *= crash_factor(link.name, node_latlng(link.a), node_latlng(link.b))
+            shape = segment_geometry(segment_id(link, link.a, link.b), link.a, link.b)
+            crash_mult *= crash_factor(link.name, tuple(map(tuple, shape)))
         profiles.append(
             SegmentProfile(
                 segment_id=segment_id(link, frm, to),
@@ -254,19 +302,20 @@ def seed_network(session: Session) -> dict[str, int]:
                 to_node=to,
                 length_m=round(profiles[sid].length_m, 1),
                 free_flow_mph=profiles[sid].free_flow_mph,
-                geometry=[list(a), list(b)],
+                geometry=segment_geometry(sid, frm, to),
             )
         )
     session.flush()
 
     for link in LINKS:
         for c in link.crossings:
+            lat, lng = crossing_latlng(c)
             session.add(
                 RailCrossing(
                     id=c.id,
                     name=c.name,
-                    lat=c.lat,
-                    lng=c.lng,
+                    lat=lat,
+                    lng=lng,
                     rail_line=c.rail_line,
                     segment_id=segment_id(link, link.a, link.b),
                     reverse_segment_id=segment_id(link, link.b, link.a),
@@ -277,8 +326,8 @@ def seed_network(session: Session) -> dict[str, int]:
                     id=f"cam_{c.id}",
                     kind="train",
                     name=f"{c.name} crossing",
-                    lat=c.lat,
-                    lng=c.lng,
+                    lat=lat,
+                    lng=lng,
                     url=f"https://cameras.example/houston/train/{c.id}",
                     crossing_id=c.id,
                 )
@@ -288,8 +337,8 @@ def seed_network(session: Session) -> dict[str, int]:
     for link in LINKS:
         if link.code in CAMERA_LINKS and link.code not in seen or link.crash_mult >= 2:
             seen.add(link.code)
-            a, b = node_latlng(link.a), node_latlng(link.b)
             sid = segment_id(link, link.a, link.b)
+            mid = _middle(segment_geometry(sid, link.a, link.b))
             # "I-45 Gulf Fwy @ Telephone Rd", not "I-45 Gulf Fwy @ I-45 Gulf Fwy @ Telephone Rd"
             at = NODES[link.b][0]
             if at.startswith(link.highway):
@@ -299,8 +348,8 @@ def seed_network(session: Session) -> dict[str, int]:
                     id=f"cam_{link.code}_{link.a}_{link.b}",
                     kind="highway",
                     name=f"{link.highway} {link.name} @ {at}",
-                    lat=(a[0] + b[0]) / 2,
-                    lng=(a[1] + b[1]) / 2,
+                    lat=round(mid[0], 6),
+                    lng=round(mid[1], 6),
                     url=f"https://cameras.example/houston/transtar/{link.code.lower()}-{link.a}-{link.b}",
                     segment_id=sid,
                 )
@@ -311,3 +360,34 @@ def seed_network(session: Session) -> dict[str, int]:
         "segments": len(profiles),
         "crossings": len(crossing_defs()),
     }
+
+
+def refresh_shapes(session: Session) -> int:
+    """Bring an existing database's road shapes, rail crossings and camera spots up to date with
+    road_shapes.json, without reseeding (scores and saved trips stay). Returns rows changed."""
+    changed = 0
+    for seg in session.scalars(select(RoadSegment)):
+        geom = segment_geometry(seg.id, seg.from_node, seg.to_node)
+        if seg.geometry != geom:
+            seg.geometry, changed = geom, changed + 1
+    at = {c.id: crossing_latlng(c) for c in crossing_defs()}
+    for x in session.scalars(select(RailCrossing)):
+        if x.id in at and (x.lat, x.lng) != at[x.id]:
+            x.lat, x.lng = at[x.id]
+            changed += 1
+    for cam in session.scalars(select(Camera)):
+        if cam.crossing_id in at:
+            spot = at[cam.crossing_id]
+        elif cam.segment_id:
+            seg = session.get(RoadSegment, cam.segment_id)
+            if seg is None:
+                continue
+            mid = _middle(seg.geometry)
+            spot = (round(mid[0], 6), round(mid[1], 6))
+        else:
+            continue
+        if (cam.lat, cam.lng) != spot:
+            cam.lat, cam.lng = spot
+            changed += 1
+    session.commit()
+    return changed
