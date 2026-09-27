@@ -22,6 +22,7 @@ import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
 import LiveMap from "@/components/screens/LiveMap";
 import Trip from "@/components/screens/Trip";
+import ModeTrip from "@/components/screens/Trip/ModeTrip";
 import WhereTo from "@/components/screens/WhereTo";
 import WhySlow from "@/components/screens/WhySlow";
 import { Icon } from "@/components/ui";
@@ -36,7 +37,7 @@ function ScreenView({ screen }: { screen: Screen }) {
     case "where":
       return <WhereTo />;
     case "trip":
-      return <Trip key={JSON.stringify(screen.to)} />;
+      return screen.travel ? <ModeTrip key={JSON.stringify(screen.to)} /> : <Trip key={JSON.stringify(screen.to)} />;
     case "map":
       return <LiveMap />;
     case "cameras":

@@ -40,6 +40,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 | Directions | `backend/app/directions/`, `api/directions.py` | Door-to-door directions on real roads (public OSRM), turn-by-turn steps with lane arrows, and up to 3 different routes to pick from. See [Directions](#directions). |
 | Departure recommender | `backend/app/recommender.py` | Tries departures every 5 minutes and picks the latest one that still arrives on time. Also returns a `leave_at_safe` with a margin that grows as confidence drops. |
 | Multi-stop planner | `backend/app/planner.py`, `plan_io.py` | Up to 3 stops with time windows, dwell and fixed-order stops. Picks the stop order and every departure time, and compares the result against a leave-now baseline in the typed order. |
+| Walk, bike, transit | `backend/app/travel/`, `api/travel.py` | The Trip screen's other tabs, apart from the traffic models: walking and cycling directions from OpenStreetMap routing, and METRO bus and rail trips on the scheduled timetable. See [Walk, bike and transit](#walk-bike-and-transit). |
 | Notifications | `backend/app/notifications/` | `NotificationService` interface (mock = stored in DB, WebPush = stub) + a scheduler that re-checks saved trips and watched plans on each clock tick. |
 | Simulated clock | `backend/app/clock.py` | The whole app reads "now" from here. It runs at `CLOCK_SPEED` × real time from `SIM_START` (a Monday 7:15 AM), and the demo can jump it. |
 | Services | `backend/app/services.py` | Wires network + models + router + scheduler + clock together for the API. |
@@ -183,6 +184,16 @@ Our router still picks the corridor (it knows traffic, trains and incidents), bu
 
 API: `POST /route?directions=true` and `POST /recommend?directions=true` add `routes` (up to 3, `routes[0]` is `best` / `route`) with `id`, `label`, `main_road`, `delay_causes` and `directions` (`status`, `steps`, `distance_m`, `access_min`, `note`); `geometry` becomes the door-to-door line. Without the flag the answer is as before plus `routes` (no OSRM). `POST /directions` takes `origin`, `destination`, a route's `segment_ids` and `depart_at` and returns what changes in that route. Directions that are unavailable only for now (OSRM down, busy or slow) are not cached and carry `retry_after_s`; the Trip screen asks again up to 3 times, further apart each time (5 s, 20 s, 60 s, or later when the server says so) and updates the route in place. `POST /directions` is limited per client (by address) to 6 asks that may call OSRM, refilled at 10 a minute; past that it answers 429 with `retry_after_s`, which the app treats as "try again later". The Trip screen keeps the picked route in its history entry and URL (`&route=<id>`); `/?screen=trip&to=29.739,-95.463&toName=The%20Galleria&from=downtown` opens a trip to a point.
 
+## Walk, bike and transit
+
+The Trip screen's Drive tab is everything above. The Walk, Bike and Transit tabs (`?travel=walk|bike|transit`) are simpler and never touch the traffic models.
+
+- **Walk / Bike**: `POST /travel/route` asks the FOSSGIS OpenStreetMap routers (`routing.openstreetmap.de`, `routed-foot` / `routed-bike`). The URL is built from two checked points in the Houston area, never from user text. Answers are cached for an hour, requests are spaced a second apart (the same question asked twice at once is asked once), every call has a 10 s timeout, and a slow or failing server becomes a 503 with a plain message. Short jogs (crossing a street) fold into the next turn, so the steps stay readable. An end the router snaps into downtown's pedestrian tunnels (or a skywalk) moves to the closest named street within 100 m, found with the same server's `/nearest` and remembered for a day; if that fails, the trip keeps the point as it is. The app offers "Try again" only when asking again can help (the service was down, slow or busy), not for a trip that's too far or has no route.
+- **Transit**: `make transit` downloads METRO's official static GTFS (linked from ridemetro.org's Developer Portal) and builds `backend/data/transit.db` (SQLite, about 55 MB, not committed): stops, routes, trips, stop times in seconds of the service day (times past 24:00 kept), the service calendar with its added and removed dates, and simplified route shapes. `POST /transit/trip` walks to stops within about 1 km, rides a bus or train directly or with one change (a short walk between stops allowed) and walks to the destination, on the scheduled times of the simulated Houston date (yesterday's trips that run past midnight included). It returns up to 3 options, ranked by arrival, time on the way, walking and changes, plus the next departures near the start. Without the index, or on a date the timetable doesn't cover, `status` says so instead of guessing. Walks are straight-line estimates, and there is no live bus tracking.
+- **Map**: `MapScene.modeRoute` is drawn by `components/map/ModeRouteLayer.tsx`: walks dotted, bike rides mint, bus and train rides blue, with the stops to get on and off at.
+
+METRO's terms ask for the legend "Route and arrival data provided by permission of METRO" wherever the data is shown; the Transit tab shows it.
+
 ## Request flow
 
 1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight. Saving the same trip again (same device, places, time, days and safety) returns the one already saved instead of a copy that would alert twice.
@@ -239,10 +250,12 @@ backend/
     geo/               place search and details (Nominatim client, cache, rate limit), opening hours
     cv/                live AI camera feeds: bridge to the CV app, camera-confirmed incidents
     shares.py          Share ETA links: snapshot, re-checked ETA, expiry, limits
+    directions/        door-to-door directions (OSRM), turn-by-turn steps, up to 3 route choices
+    travel/            walk and bike directions (OpenStreetMap routing), METRO transit index + trip search
     notifications/     service + scheduler
     api/               routers
     seed/              Houston network + synthetic generator
-  scripts/             seed.py, replay_history.py, fetch_road_shapes.py, fake_cv.py (+ fake_cv_frames/)
+  scripts/             seed.py, replay_history.py, fetch_road_shapes.py, fetch_road_limits.py, build_transit.py, fake_cv.py (+ fake_cv_frames/)
   tests/
 frontend/
   app/                 Next.js entry, fonts, theme (globals.css), PWA manifest

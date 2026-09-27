@@ -30,9 +30,12 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 Needs [uv](https://docs.astral.sh/uv/) (Python 3.11+) and Node 20+.
 
 ```bash
-make setup   # install backend + frontend deps
-make dev     # API on :8000, app on :3000
+make setup     # install backend + frontend deps
+make transit   # once: download METRO's timetable (~13 MB) for the Transit tab
+make dev       # API on :8000, app on :3000
 ```
+
+**Running the demo? Run `make transit` once first** on that machine. It downloads METRO's bus and rail timetable and builds `backend/data/transit.db` (not in git). Without it the Transit tab only says the timetable isn't loaded; everything else works.
 
 Open http://localhost:3000 and hit **▶ Demo**.
 
@@ -46,6 +49,7 @@ API docs: http://localhost:8000/docs
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
 | `make limits` | look up speed limits and toll roads in OpenStreetMap (writes `backend/app/seed/road_limits.json`) |
+| `make transit` | download METRO's bus and rail timetable (GTFS, about 13 MB) and build `backend/data/transit.db` for the Transit tab |
 | `make test` | backend pytest + frontend typecheck |
 | `make cv-fake` | a stand-in for the CV app on :8500 (recorded Baton Rouge frames, scripted incident); see [Live AI camera feeds](#live-ai-camera-feeds) |
 | `make dev-cv` | `make dev` plus the fake CV app, with `CV_URL` set: live AI cameras without the CV app |
@@ -69,7 +73,7 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 11. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
 12. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
-You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>`, `trip&to=hobby&from=downtown&by=17:45&safety=1` or `nearby&kind=fuel` (`ev`, `parking`).
+You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>`, `trip&to=hobby&from=downtown&by=17:45&safety=1` or `nearby&kind=fuel` (`ev`, `parking`). On a trip, the **Walk**, **Bike** and **Transit** tabs give walking and cycling directions and METRO bus and rail trips (`trip&to=galleria&from=downtown&travel=transit`; run `make transit` once to load the timetable).
 
 ### Places
 
@@ -173,4 +177,5 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for its card and directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - ✅ Places: search any Houston address or business, place cards with hours / phone / website, Home / Work / favorites, gas / EV / parking near you or along your route (all OpenStreetMap, free, no keys)
 - ✅ Live AI cameras: real video from the team's CV app with vehicle boxes, counts, rough speeds and its incident check; confirmed incidents drive causes, alerts and routing. Baton Rouge video stands in for Houston cameras; a fake CV server with recorded frames covers tests and Mac-less demos
+- ✅ Walk / Bike / Transit tabs: walking and cycling directions from OpenStreetMap ([FOSSGIS routing](https://routing.openstreetmap.de)), and METRO\* trips with at most one change on the scheduled [GTFS](https://www.ridemetro.org/about/business-to-business/developer-portal) timetable (no live bus tracking). Route and arrival data provided by permission of METRO\*. (\* METRO is the registered trademark of the Metropolitan Transit Authority of Harris County, Texas. All rights reserved.)
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), Houston live camera video, full OSM road graph, real web push, the marketing website

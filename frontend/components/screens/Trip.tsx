@@ -30,6 +30,7 @@ import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared"
 import ShareEta from "./Trip/ShareEta";
 import Steps from "./Trip/Steps";
 import { useRouteChoices } from "./Trip/useRouteChoices";
+import TravelTabs from "./Trip/TravelTabs";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
 const MAX_STOPS = 2;
@@ -819,6 +820,7 @@ export default function Trip() {
         }
         right={stale && !hidden ? <span className="font-num text-[12px] text-muted">Updating…</span> : undefined}
       />
+      <TravelTabs drive={{ arriveBy: mode === "by" && byOk ? by : undefined, safety }} />
 
       {sameSpot ? (
         <Headline

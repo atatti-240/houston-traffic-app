@@ -12,6 +12,7 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
+import ModeRouteLayer from "@/components/map/ModeRouteLayer";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import PlacesLayer from "@/components/places/PlacesLayer";
 import { camName, hasLiveVideo } from "@/lib/format";
@@ -344,6 +345,7 @@ export default function TrafficMap({
           </span>
         ))}
       </Pane>
+      <ModeRouteLayer route={scene?.modeRoute} />
 
       {/* Crossings layer */}
       {interactive && layers.crossings &&
