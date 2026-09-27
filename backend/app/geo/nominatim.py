@@ -146,21 +146,18 @@ KIND = {
     "charging_station": "EV charging",
     "parking": "Parking",
     "fast_food": "Fast food",
-    "house": "Address",
-    "yes": "Building",
-    "residential": "Street",
-    "primary": "Street",
-    "secondary": "Street",
-    "tertiary": "Street",
-    "motorway": "Freeway",
-    "trunk": "Highway",
-    "suburb": "Neighborhood",
-    "neighbourhood": "Neighborhood",
-    "city": "City",
-    "town": "Town",
     "aerodrome": "Airport",
     "supermarket": "Grocery store",
     "doctors": "Doctor",
+}
+# By category first: the same type means different things ("residential" street vs building).
+KIND_IN = {
+    "highway": {"motorway": "Freeway", "trunk": "Highway", "bus_stop": "Bus stop", "*": "Street"},
+    "building": {"apartments": "Apartments", "residential": "Apartments", "house": "House", "*": "Building"},
+    "place": {"house": "Address", "suburb": "Neighborhood", "neighbourhood": "Neighborhood", "quarter": "Neighborhood",
+              "city": "City", "town": "Town", "village": "Town", "*": "Area"},
+    "landuse": {"residential": "Residential"},
+    "boundary": {"*": "Area"},
 }
 
 
@@ -173,9 +170,8 @@ def humanize(value: str | None) -> str | None:
 
 def kind_of(r: dict) -> str:
     t = r.get("type") or ""
-    if r.get("category") == "highway" and t not in KIND:
-        return "Street"
-    return KIND.get(t) or humanize(t) or humanize(r.get("category")) or "Place"
+    by_cat = KIND_IN.get(r.get("category") or "", {})
+    return by_cat.get(t) or by_cat.get("*") or KIND.get(t) or humanize(t if t != "yes" else None) or humanize(r.get("category")) or "Place"
 
 
 def osm_ref(r: dict) -> str | None:
@@ -186,7 +182,8 @@ def osm_ref(r: dict) -> str | None:
 def place_json(r: dict) -> dict:
     """A search result: name, a short address line and the point."""
     a = r.get("address") or {}
-    street = " ".join(x for x in (a.get("house_number"), a.get("road")) if x)
+    # A house number alone ("3363") isn't an address line.
+    street = " ".join(x for x in (a.get("house_number"), a.get("road")) if x) if a.get("road") else ""
     area = a.get("neighbourhood") or a.get("suburb") or a.get("quarter") or a.get("city_district")
     city = a.get("city") or a.get("town") or a.get("village") or a.get("hamlet")
     name = (r.get("name") or "").strip() or street or (r.get("display_name") or "").split(",")[0].strip() or "Place"
@@ -257,6 +254,11 @@ def details_json(r: dict) -> dict:
     }
 
 
+def _rows_ok(value: object) -> bool:
+    """A cached answer we can read (Nominatim rows)."""
+    return isinstance(value, list) and all(isinstance(r, dict) and "lat" in r and "lon" in r for r in value)
+
+
 def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp, dl = p2 - p1, math.radians(lng2 - lng1)
@@ -284,17 +286,24 @@ class Geocoder:
         base = {"format": "jsonv2", "addressdetails": 1, "extratags": 1}
         return f"{self.base_url}/{path}?{urllib.parse.urlencode({**base, **params})}"
 
-    def _get(self, key: str, url: str, ttl: timedelta, parse: Callable[[object], object]) -> tuple[object, bool]:
-        """(value, stale): the cached value while fresh, else ask (then cache). If asking fails,
-        an expired cached value comes back with stale=True, else GeoUnavailable."""
+    def _get(self, key: str, url: str, ttl: timedelta) -> tuple[list[dict], bool]:
+        """(Nominatim's rows, stale): the cached answer while fresh, else ask (then cache). If
+        asking fails, an expired cached answer comes back with stale=True, else GeoUnavailable.
+        The raw rows are cached (not our reading of them), so a better reading applies to old
+        answers too."""
         hit = self.cache.get(key)
+        if hit is not None and not _rows_ok(hit[0]):
+            hit = None
         if hit is not None:
             value, at = hit
-            if self.now() - at < (ttl if value not in (None, []) else MISS_TTL):
+            if self.now() - at < (ttl if value else MISS_TTL):
                 return value, False
         try:
             self.limiter.wait()
-            value = parse(self.fetch(url))
+            data = self.fetch(url)
+            if not isinstance(data, list):
+                raise ValueError("unexpected answer")
+            rows = [r for r in data if isinstance(r, dict) and "lat" in r and "lon" in r]
         except GeoUnavailable:
             if hit is not None:
                 return hit[0], True
@@ -304,26 +313,19 @@ class Geocoder:
             if hit is not None:
                 return hit[0], True
             raise GeoUnavailable(DOWN) from e
-        self.cache.put(key, value, self.now())
-        return value, False
-
-    def _results(self, data: object) -> list[dict]:
-        """Search results, each also cached as its place's details (same tags)."""
-        if not isinstance(data, list):
-            raise ValueError("unexpected answer")
-        out, now = [], self.now()
-        for r in data:
-            if not isinstance(r, dict) or "lat" not in r:
-                continue
-            d = details_json(r)
-            if d["id"]:
-                self.cache.put(f"place|{d['id']}", d, now)
-            out.append(d)
-        return out
+        now = self.now()
+        self.cache.put(key, rows, now)
+        # Every row carries its tags: that's its details too, so opening it doesn't ask again.
+        if not key.startswith("place|"):
+            for r in rows:
+                if ref := osm_ref(r):
+                    self.cache.put(f"place|{ref}", [r], now)
+        return rows, False
 
     def _search(self, q: str, box: tuple[float, float, float, float], key: str, limit: int) -> tuple[list[dict], bool]:
         url = self._url("search", q=q, limit=limit, viewbox=",".join(f"{v:.4f}" for v in box), bounded=1, countrycodes="us")
-        return self._get(key, url, SEARCH_TTL, self._results)  # type: ignore[return-value]
+        rows, stale = self._get(key, url, SEARCH_TTL)
+        return [details_json(r) for r in rows], stale
 
     # ---- what the API uses ------------------------------------------------------------------
 
@@ -359,22 +361,15 @@ class Geocoder:
 
     def place(self, osm: str) -> tuple[dict | None, bool]:
         """Details for an OpenStreetMap object ("N123", "W456", "R789")."""
-
-        def first(data: object) -> dict | None:
-            items = self._results(data)
-            return items[0] if items else None
-
-        return self._get(f"place|{osm}", self._url("lookup", osm_ids=osm), PLACE_TTL, first)  # type: ignore[return-value]
+        rows, stale = self._get(f"place|{osm}", self._url("lookup", osm_ids=osm), PLACE_TTL)
+        return (details_json(rows[0]) if rows else None), stale
 
     def find(self, name: str, lat: float, lng: float) -> tuple[dict | None, bool]:
         """Details for a named place at a point (a map dot we have no OpenStreetMap id for)."""
         name = " ".join(name.split())
         box = (lng - FIND_BOX_DEG, lat + FIND_BOX_DEG, lng + FIND_BOX_DEG, lat - FIND_BOX_DEG)
-
-        def nearest(data: object) -> dict | None:
-            close = [(distance_m(lat, lng, r["lat"], r["lng"]), r) for r in self._results(data)]
-            close = [c for c in close if c[0] <= FIND_MAX_M]
-            return min(close, key=lambda c: c[0])[1] if close else None
-
         url = self._url("search", q=name, limit=5, viewbox=",".join(f"{v:.5f}" for v in box), bounded=1)
-        return self._get(f"find|{name.lower()}|{lat:.4f},{lng:.4f}", url, PLACE_TTL, nearest)  # type: ignore[return-value]
+        rows, stale = self._get(f"find|{name.lower()}|{lat:.4f},{lng:.4f}", url, PLACE_TTL)
+        close = [(distance_m(lat, lng, d["lat"], d["lng"]), d) for d in map(details_json, rows)]
+        close = [c for c in close if c[0] <= FIND_MAX_M]
+        return (min(close, key=lambda c: c[0])[1] if close else None), stale
