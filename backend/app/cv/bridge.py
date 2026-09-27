@@ -467,7 +467,13 @@ class CvBridge:
             return "connecting"
         if feed.status == "live" and feed.frame_at is not None and now - feed.frame_at <= LIVE_WITHIN_S:
             return "live"
-        asked = self.view_mode == "all" or (self._view_set is not None and self._view_set[1] == cv_id)
+        # Paused, but it's what we asked for (or are about to): the CV app is starting it.
+        watched = max(((t, cam) for cam, t in self._watched.items() if now - t <= WATCH_S), default=(0, None))[1]
+        asked = (
+            self.view_mode == "all"
+            or (self._view_set is not None and self._view_set[1] == cv_id)
+            or (self.view_mode == "follow" and watched is not None and self.by_camera[watched] == cv_id)
+        )
         return "paused" if feed.status == "paused" and not asked else "connecting"
 
     def _incident_json(self, feed: FeedCamera | None, now: float) -> dict:
@@ -564,6 +570,7 @@ class CvBridge:
                 ],
                 server_time=round(now * 1000),
                 video_delay_ms=round(self.video_delay_s * 1000),
+                clear_after_s=self.clear_after_s,
             )
             return out
 

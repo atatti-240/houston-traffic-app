@@ -199,6 +199,12 @@ def test_paused_cameras_have_no_live_video(cams):
     b.handle_message({"updates": [raw("009", 0, status="paused")]})
     s = b.summary(KATY)
     assert s["status"] == "paused" and b.frame(KATY) is None
+    b.touch(KATY)  # someone opens it: with CV_VIEW=follow the CV app is about to switch to it
+    assert b.summary(KATY)["status"] == "connecting"
+    off = make_bridge(cams, view="off")
+    off.handle_message({"updates": [raw("009", 0, status="paused")]})
+    off.touch(KATY)
+    assert off.summary(KATY)["status"] == "paused"  # we never switch it: it stays on the other camera
     b.handle_message({"updates": [raw("009", 1, status="connecting")]})
     assert b.summary(KATY)["status"] == "connecting"
 
@@ -356,6 +362,11 @@ def test_camera_endpoints(client, cv_services, monkeypatch):
     r = client.get(f"/cv/cameras/{GULF}/video")
     assert r.status_code == 200 and r.headers["content-type"].startswith("multipart/x-mixed-replace; boundary=frame")
     assert r.content.startswith(b"--frame\r\nContent-Type: image/jpeg\r\n") and r.content.count(b"--frame\r\n") >= 1
+
+    # Told to stop: open streams end right away (uvicorn waits for them before shutting down)
+    monkeypatch.setattr("app.api.cv.MAX_STREAM_S", 60)
+    monkeypatch.setattr("app.api.cv.CLOSING", type("Set", (), {"is_set": lambda self: True})())
+    assert client.get(f"/cv/cameras/{GULF}/video").content == b""
 
     assert client.get(f"/cv/cameras/{KATY}/video").status_code == 503  # not live
     assert client.get(f"/cv/cameras/{KATY}/frame.jpg").status_code == 503
