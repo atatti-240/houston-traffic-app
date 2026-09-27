@@ -44,6 +44,7 @@ API docs: http://localhost:8000/docs
 | `make backend` / `make frontend` | run one side |
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
+| `make limits` | look up speed limits and toll roads in OpenStreetMap (writes `backend/app/seed/road_limits.json`) |
 | `make test` | backend pytest + frontend typecheck |
 
 Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
