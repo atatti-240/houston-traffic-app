@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 
 import type { MapScene } from "@/components/app/AppContext";
+import { TravelError } from "@/lib/modes";
 
 /** On a phone the sheet covers the lower 64% of the map: fit the route into the strip above it. */
 export function sheetPadding(isDesktop: boolean): MapScene["fitPadding"] {
@@ -17,6 +18,11 @@ export function describeError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (/failed to fetch|networkerror|load failed/i.test(msg)) return "Can't reach BlindSpot right now.";
   return msg;
+}
+
+/** Whether "Try again" can help: not for a trip outside the area, too far or with no route. */
+export function canRetry(e: unknown): boolean {
+  return !(e instanceof TravelError) || e.retry;
 }
 
 export function BigLine({ title, aside, children }: { title: ReactNode; aside?: ReactNode; children?: ReactNode }) {

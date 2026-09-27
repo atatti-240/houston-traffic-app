@@ -27,7 +27,7 @@ import {
 } from "@/lib/modes";
 import { C } from "@/lib/theme";
 
-import { BigLine, describeError, ErrorLine, Loading, sheetPadding } from "./modeParts";
+import { BigLine, canRetry, describeError, ErrorLine, Loading, sheetPadding } from "./modeParts";
 
 // METRO's terms: the legend (from the API), and this note wherever the name METRO is used.
 const TRADEMARK = "* METRO is the registered trademark of the Metropolitan Transit Authority of Harris County, Texas. All rights reserved.";
@@ -216,7 +216,7 @@ export default function Transit({ start, end, fromName, toName }: { start: LatLn
   const { clock, setScene, isDesktop, screen, go } = useApp();
   const key = JSON.stringify({ start, end });
   const minute = clock?.now.slice(0, 16);
-  const [res, setRes] = useState<{ key: string; plan?: TransitPlan; error?: string } | null>(null);
+  const [res, setRes] = useState<{ key: string; plan?: TransitPlan; error?: string; canRetry?: boolean } | null>(null);
   const [retry, setRetry] = useState(0);
   const [sel, setSel] = useState(0);
   const [seenKey, setSeenKey] = useState(key);
@@ -230,7 +230,7 @@ export default function Transit({ start, end, fromName, toName }: { start: LatLn
     let live = true;
     travelApi.transitTrip({ origin: start, destination: end }).then(
       (plan) => live && setRes({ key, plan }),
-      (e: unknown) => live && setRes((prev) => (prev?.key === key && prev.plan ? prev : { key, error: describeError(e) })),
+      (e: unknown) => live && setRes((prev) => (prev?.key === key && prev.plan ? prev : { key, error: describeError(e), canRetry: canRetry(e) })),
     );
     return () => {
       live = false;
@@ -277,10 +277,14 @@ export default function Transit({ start, end, fromName, toName }: { start: LatLn
     return (
       <ErrorLine
         message={current.error ?? "Something went wrong."}
-        onRetry={() => {
-          setRes(null);
-          setRetry((n) => n + 1);
-        }}
+        onRetry={
+          current.canRetry
+            ? () => {
+                setRes(null);
+                setRetry((n) => n + 1);
+              }
+            : undefined
+        }
       />
     );
 
