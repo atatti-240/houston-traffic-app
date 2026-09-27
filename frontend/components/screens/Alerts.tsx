@@ -12,6 +12,7 @@ import { NOTE_STYLE } from "@/components/Notifications";
 import { FilterChip, Icon } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtTime, parseSim } from "@/lib/format";
+import { avoidParam } from "@/lib/roadrules";
 import { ALERT_GROUP, CAUSE, C, ICON, type AlertGroup } from "@/lib/theme";
 import type { AppNotification, TrafficAlert } from "@/lib/types";
 
@@ -173,6 +174,7 @@ function NoteRow({ n }: { n: AppNotification }) {
         from: trip.origin,
         arriveBy: trip.arrive_by.slice(0, 5),
         safety: trip.safety_weight ?? (trip.safe_path ? 1 : 0),
+        avoid: avoidParam(trip),
       });
     } catch {
       setState("idle");

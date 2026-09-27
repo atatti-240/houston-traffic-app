@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import { BackHeader, Card, PillButton, Title } from "@/components/ui";
+import { SpeedLimitSign } from "@/components/ui/SpeedLimitSign";
 import { api } from "@/lib/api";
 import { parseSim } from "@/lib/format";
 import { CAUSE, C, LEVEL, type Level } from "@/lib/theme";
@@ -159,6 +160,16 @@ function CauseBar({ c }: { c: SlowdownCause }) {
   );
 }
 
+/** The road's posted limit (OpenStreetMap), or plainly that we don't know it. Floats right of the title. */
+function PostedLimit({ mph }: { mph: number | null }) {
+  return (
+    <div className="float-right mb-1 ml-3 flex flex-col items-center gap-1">
+      <SpeedLimitSign mph={mph} size={40} />
+      {mph === null && <span className="text-[11px] leading-none text-muted">Not known</span>}
+    </div>
+  );
+}
+
 function Bone({ h, w = "100%", r = 10 }: { h: number; w?: string; r?: number }) {
   return <div className="bg-card motion-safe:animate-pulse" style={{ height: h, width: w, borderRadius: r }} />;
 }
@@ -284,9 +295,10 @@ export default function WhySlow() {
     <div className={PAGE}>
       <BackHeader onBack={back} label="Selected road" />
 
-      <div className="flex flex-col gap-1.5">
+      <div className="flow-root">
+        {d.speed_limit_mph !== undefined && <PostedLimit mph={d.speed_limit_mph} />}
         <Title>{d.road}</Title>
-        <span className="text-[14px] text-muted">
+        <span className="mt-1.5 block text-[14px] text-muted">
           {d.place} · {d.miles} mi
         </span>
       </div>

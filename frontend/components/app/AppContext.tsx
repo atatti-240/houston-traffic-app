@@ -41,6 +41,8 @@ export type Screen =
       arriveBy?: string;
       /** Faster (0) .. Safer (1) */
       safety?: number;
+      /** "tolls", "highways" or "tolls,highways"; omitted = what this device chose last */
+      avoid?: string;
     }
   | { name: "map" }
   | { name: "cameras"; area?: string; camId?: string }
@@ -76,6 +78,7 @@ function screenUrl(s: Screen): string {
     if (typeof s.from === "string") q.set("from", s.from);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
+    if (s.avoid !== undefined) q.set("avoid", s.avoid);
   }
   return `${window.location.pathname}?${q}`;
 }
@@ -95,6 +98,7 @@ function parseScreen(search: string): Screen | null {
       from: q.get("from") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      avoid: q.get("avoid") ?? undefined,
     };
   return null;
 }
