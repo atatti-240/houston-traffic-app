@@ -102,9 +102,14 @@ def crossings(at: datetime | None = None, svc: Services = Depends(get_services))
     return {"at": t, "crossings": out}
 
 
+def live_feed(svc: Services, camera_id: str) -> dict | None:
+    """The camera's live AI feed (a CV app camera standing in for it), or None."""
+    return svc.cv.summary(camera_id) if svc.cv is not None else None
+
+
 @router.get("/cameras")
 def cameras(svc: Services = Depends(get_services)):
-    return svc.sources.cameras.cameras()
+    return [{**cam, "live_feed": live_feed(svc, cam["id"])} for cam in svc.sources.cameras.cameras()]
 
 
 def _congestion_label(score: float | None) -> str:
@@ -184,6 +189,9 @@ def live(svc: Services = Depends(get_services)):
                 "mock": cam.get("mock", False),
                 # What the camera's road looks like right now (area, direction, level, why).
                 **camera_status(engine, svc.network, cam),
+                # Live video, vehicle boxes and the incident check from the CV app (a Baton Rouge
+                # camera standing in for this one), or None. Counts above stay Houston-only.
+                "live_feed": live_feed(svc, cam["id"]),
             }
         )
 
