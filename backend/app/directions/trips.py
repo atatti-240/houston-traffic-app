@@ -10,6 +10,7 @@ trip shows up after one OSRM call instead of three (the public server allows ~1 
 import math
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import cache
 
 from app.api.schemas import LatLng, Location, recommendation_json, route_json
 from app.conditions.provider import ConditionsView
@@ -113,7 +114,7 @@ def route_response(
     directions: bool,
 ) -> dict:
     """POST /route: best + alternative (as before) + the routes list."""
-    naive = svc.router.traffic_only_route(best.origin, best.destination, best.depart_at, view)
+    naive = cache(lambda: svc.router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
     routes = route_options(svc.router, best, alt, view, naive)
     items = routes_json(svc, routes, endpoint(svc, origin), endpoint(svc, destination), directions)
     return {"best": items[0], "alternative": _alternative(alt, items), "routes": items}
@@ -145,8 +146,9 @@ def recommend_response(
         if extra:
             rec = recommend_by(extra)
             rec.buffer_min = buffer_min
-    naive = svc.router.traffic_only_route(rec.route.origin, rec.route.destination, rec.depart_at, view)
-    routes = route_options(svc.router, rec.route, rec.alternative, view, naive)
+    r0 = rec.route
+    naive = cache(lambda: svc.router.traffic_only_route(r0.origin, r0.destination, r0.depart_at, view))
+    routes = route_options(svc.router, r0, rec.alternative, view, naive)
     items = routes_json(svc, routes, o, d, directions)
     body = recommendation_json(rec)
     body.update(route=items[0], alternative=_alternative(rec.alternative, items), routes=items)

@@ -9,6 +9,7 @@ route we have) and not much slower (at most 40% or 7 min slower than the best, w
 
 import hashlib
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
 
 from app.causes import INCIDENT_CAUSE, RUSH_WINDOWS
@@ -50,10 +51,18 @@ def shared(network: Network, a: Route, b: Route) -> float:
 
 
 def route_options(
-    router: Router, best: Route, alt: Route | None, view: ConditionsView, naive: Route | None = None
+    router: Router,
+    best: Route,
+    alt: Route | None,
+    view: ConditionsView,
+    naive: Callable[[], Route] | None = None,
 ) -> list[Route]:
     """[best, up to two alternatives]. `alt` is the router's own alternative (kept when it's
-    different enough); `naive` (the traffic-only route) explains the extra ones."""
+    different enough); `naive()` (the traffic-only route, only asked for when a route is added
+    here) explains the extra ones.
+
+    NOTE: the extra searches only know the safety weight. Any other option given to
+    router.route() (say, roads to avoid) has to be passed on to router._search here too."""
     net = router.network
     kept, seen = [best], [best]
 
@@ -83,7 +92,7 @@ def route_options(
             continue
         cand = router.evaluate(ids, best.origin, best.destination, best.depart_at, best.safety_weight, view)
         if consider(cand) and naive is not None:
-            cand.reasons = _dedupe_live(router._reasons(cand, naive, view))
+            cand.reasons = _dedupe_live(router._reasons(cand, naive(), view))
     return kept
 
 

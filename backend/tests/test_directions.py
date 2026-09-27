@@ -4,6 +4,7 @@ OSRM is never called for real: a fake answers from the request itself (straight 
 the points it was given), and each test bends that answer to what it wants to check.
 """
 
+import http.client
 import socket
 import threading
 import time
@@ -491,7 +492,7 @@ def test_up_to_three_different_routes(router, trained, o, d, h):
     t = MON(h, 30)
     view = router.view(t)
     best, alt = router.route(o, d, t, view=view)
-    routes = route_options(router, best, alt, view, router.traffic_only_route(o, d, t, view))
+    routes = route_options(router, best, alt, view, lambda: router.traffic_only_route(o, d, t, view))
     assert 1 <= len(routes) <= 3 and routes[0] is best
     assert len({tuple(r.segment_ids) for r in routes}) == len(routes)
     for r in routes[1:]:
@@ -689,3 +690,14 @@ def test_a_slow_server_gets_no_third_try(router, trained):
     path = door.build(segs, o, d)
     assert path.status == "unavailable" and len(fake.urls) == 2 and "out of time" in path.tried[-1]
     assert door.cached(segs, o, d) is None  # a slow moment isn't remembered
+
+
+def _cut_off(url, timeout):
+    raise http.client.IncompleteRead(b"")  # the connection dropped mid-answer
+
+
+@pytest.mark.parametrize("answer", [_cut_off, lambda url, t: (200, {"code": "Ok", "routes": [{"legs": []}]})])
+def test_odd_answers_fall_back_instead_of_failing(client, services, answer):
+    services.directions = DoorDirections(client_with(answer))
+    r = client.post("/route?directions=true", json={"origin": "downtown", "destination": GALLERIA_DOOR})
+    assert r.status_code == 200 and r.json()["best"]["directions"]["status"] == "unavailable"
