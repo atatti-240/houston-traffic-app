@@ -15,13 +15,18 @@ stays a pin (listed, never routed around).
 
 A report lasts 45 min (crash, police, stalled car) or 2 h (hazard, pothole, flooding). Each
 "still there" pushes that out to a full life from the vote (never past 4 lives in all); two
-more "not there" than "still there" votes take it down early. One vote per client (IP address)
-per report, so one client can't vote a report away; the reporter's own "not there" withdraws
-it. All times are the simulated clock, so the demo's clock jumps age and expire reports too.
+more "not there" than "still there" votes take it down early. One vote per client (IP address,
+kept only as a keyed hash) per report, so one client can't vote a report away; the reporter's
+own "not there" withdraws it. A day after a report ends it's deleted, votes and all. All times
+are the simulated clock, so the demo's clock jumps age and expire reports too.
 """
 
 import hashlib
+import hmac
+import logging
 import math
+import os
+import secrets
 import threading
 import time
 from collections import OrderedDict, deque
@@ -29,14 +34,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, delete, select
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, delete, or_, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from app.conditions.live import Incident, IncidentKind
+from app.config import BACKEND_DIR
 from app.db import Base
 from app.graph import Network, SegmentInfo
+
+log = logging.getLogger("houston")
 
 ReportKindId = Literal["crash", "police", "hazard", "pothole", "stalled", "flooding"]
 
@@ -85,6 +94,10 @@ M_PER_DEG = 111_320
 RATE_WINDOW_S = 600
 REPORTS_PER_WINDOW = 6
 VOTES_PER_WINDOW = 30
+# This install's secret for client keys: made on first run, gitignored, never committed.
+SECRET_FILE = BACKEND_DIR / "data" / "reports.key"
+
+KEEP_ENDED = timedelta(days=1)  # a report that ended (expired, voted away, withdrawn) is deleted this long after
 
 Mine = Literal["reported", "still_there", "not_there"]
 
@@ -136,9 +149,11 @@ class ReportIncident(Incident):
 # --- labels ---------------------------------------------------------------------------------------
 
 
-def client_key(host: str | None) -> str:
-    """What a client is known by: a hash of its address (the address itself isn't stored)."""
-    return hashlib.sha256(f"blindspot-reports:{host or 'unknown'}".encode()).hexdigest()[:16]
+def client_key(secret: bytes, host: str | None) -> str:
+    """What a client is known by: a hash of its address keyed with this install's secret. The
+    address itself isn't stored, and without the secret a leaked database doesn't give it back
+    (a plain hash of an IPv4 address is quick to reverse by trying them all)."""
+    return hmac.new(secret, (host or "unknown").encode(), hashlib.sha256).hexdigest()[:16]
 
 
 def ago(then: datetime, now: datetime) -> str:
@@ -349,6 +364,49 @@ class RateLimiter:
             self._hits.clear()
 
 
+def load_secret(path: Path) -> bytes:
+    """This install's secret for client keys: made on first run and kept in `path`, so votes and
+    "mine" still match after a restart. If it can't be kept there, a secret for this run only (the
+    app works the same; votes just don't match across a restart)."""
+    for _ in range(3):
+        damaged = False
+        try:
+            secret = bytes.fromhex(path.read_text().strip())
+            if len(secret) >= 16:
+                return secret
+            damaged = True
+        except FileNotFoundError:
+            pass
+        except ValueError:  # not hex, or not text
+            damaged = True
+        except OSError as e:
+            log.warning("Can't read %s (%s): client keys change on restart", path, e)
+            break
+        try:
+            return _save_secret(path, replace=damaged)
+        except FileExistsError:
+            continue  # another process made it just now: use theirs
+        except OSError as e:
+            log.warning("Can't save %s (%s): client keys change on restart", path, e)
+            break
+    return secrets.token_bytes(32)
+
+
+def _save_secret(path: Path, replace: bool) -> bytes:
+    secret = secrets.token_bytes(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(secret.hex() + "\n")
+        # All of it or none, and never over one another process just made (a damaged one is replaced).
+        (os.replace if replace else os.link)(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return secret
+
+
 # --- store ----------------------------------------------------------------------------------------
 
 
@@ -357,15 +415,21 @@ def _active(r: DriverReport, now: datetime) -> bool:
 
 
 class ReportStore:
-    """Reports in SQLite, plus the per-client limits. `network` returns the current road network."""
+    """Reports in SQLite, plus the per-client limits. `network` returns the current road network.
+    `secret` keys the client hashes (default: this install's, from SECRET_FILE)."""
 
-    def __init__(self, session_factory: sessionmaker[Session], network: Callable[[], Network]) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], network: Callable[[], Network], secret: bytes | None = None
+    ) -> None:
         self.session_factory = session_factory
         self._network = network
         bind = session_factory.kw.get("bind")
         if bind is not None:
             # A database from before reports existed gets its tables here, whatever was imported first.
             Base.metadata.create_all(bind, tables=[DriverReport.__table__, DriverReportVote.__table__])
+        # Nothing outlives a database in memory (the tests), so a secret for this run does there.
+        in_memory = bind is None or bind.url.database in (None, "", ":memory:")
+        self._secret = secret or (secrets.token_bytes(32) if in_memory else load_secret(SECRET_FILE))
         self.report_limit = RateLimiter(REPORTS_PER_WINDOW, RATE_WINDOW_S)
         self.vote_limit = RateLimiter(VOTES_PER_WINDOW, RATE_WINDOW_S)
         self._lock = threading.Lock()  # one write at a time: votes read-modify-write the counts
@@ -376,6 +440,10 @@ class ReportStore:
 
     def snap(self, lat: float, lng: float, segment_id: str | None = None) -> Snap:
         return snap_point(self.network, lat, lng, segment_id)
+
+    def client(self, host: str | None) -> str:
+        """The key a client's reports, votes and limits go by."""
+        return client_key(self._secret, host)
 
     # --- reading ----------------------------------------------------------------------------
 
@@ -467,6 +535,7 @@ class ReportStore:
         right there by someone else."""
         snap = snap or self.snap(lat, lng)
         with self._lock, self.session_factory() as s:
+            self._prune(s, now)
             same = s.scalars(
                 select(DriverReport).where(
                     DriverReport.kind == kind,
@@ -508,8 +577,17 @@ class ReportStore:
             if r is None or not _active(r, now):
                 return None
             self._vote(s, r, client, still_there, now)
+            self._prune(s, now)
             s.commit()
             return r
+
+    def _prune(self, s: Session, now: datetime) -> None:
+        """Delete the reports that ended more than KEEP_ENDED ago, and their votes, so the tables
+        only ever hold about a day of reports. Part of each write, and quick for that reason."""
+        cutoff = now - KEEP_ENDED
+        ended = or_(DriverReport.expires_at < cutoff, DriverReport.removed_at < cutoff)
+        s.execute(delete(DriverReportVote).where(DriverReportVote.report_id.in_(select(DriverReport.id).where(ended))))
+        s.execute(delete(DriverReport).where(ended))
 
     def _vote(self, s: Session, r: DriverReport, voter: str, still: bool, now: datetime) -> None:
         if voter == r.reporter:
