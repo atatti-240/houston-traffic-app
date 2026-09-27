@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 import { useApp, type MapPoint, type MapScene } from "@/components/app/AppContext";
+import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
@@ -463,7 +464,8 @@ export default function Trip() {
       route: best.geometry,
       alternative: shownAlt,
       points: pts,
-      fit: [...best.geometry, ...(shownAlt ?? [])],
+      // With the start and end too: a real place can sit off our road map (or the route be tiny).
+      fit: [...best.geometry, ...(shownAlt ?? []), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
       fitPadding: sheetPadding(isDesktop),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -765,6 +767,9 @@ export default function Trip() {
   const busy = !result && !error && !hidden;
   // The result on screen is for other inputs (a new one is on its way): don't act on it.
   const outdated = result !== null && result.key !== inputs;
+  // For the destination's card ("closed when you get there") and "Gas on the way".
+  const arriveAt = result?.kind === "rec" ? result.rec.eta : result?.kind === "route" ? result.best.arrive_at : result?.plan.legs.at(-1)?.arrive_at;
+  const routeLine = result?.kind === "rec" ? result.rec.route.geometry : result?.kind === "route" ? result.best.geometry : result?.plan.legs.flatMap((l) => l.geometry);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-3 pb-8 md:pt-6">
@@ -803,6 +808,8 @@ export default function Trip() {
           )}
         </p>
       )}
+
+      {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
 
       {/* When, and how */}
       <div className="flex flex-col gap-4">
@@ -875,6 +882,7 @@ export default function Trip() {
       </div>
 
       {!hidden && body && <div className={`flex flex-col gap-3 transition-opacity ${stale ? "opacity-60" : ""}`}>{body}</div>}
+      {!hidden && !outdated && <GasOnTheWay route={routeLine} toName={toName} />}
 
       {!hidden && result && (
         <div className="flex flex-col gap-2">

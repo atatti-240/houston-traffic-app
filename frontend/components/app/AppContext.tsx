@@ -5,11 +5,13 @@
  * and notifications. Screens read everything through `useApp()`.
  *
  * Screens:  where (start) -> trip       map -> cameras       causes -> why       alerts
- * Tabs (bottom nav): map | causes | alerts.  "where" and "trip" are full-screen flows (no nav).
+ *           map / trip -> nearby (gas, EV chargers, parking)
+ * Tabs (bottom nav): map | causes | alerts.  "where", "trip" and "nearby" are full-screen flows (no nav).
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import type { PoiKind } from "@/components/places/store";
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
 import { levelForScore, type Level } from "@/lib/theme";
@@ -41,8 +43,12 @@ export type Screen =
       arriveBy?: string;
       /** Faster (0) .. Safer (1) */
       safety?: number;
+      /** A real place (search result, map dot, saved place): shows its card (hours, phone...) */
+      toPlace?: { osm?: string | null; address?: string | null; kind?: string | null };
     }
   | { name: "map" }
+  /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
+  | { name: "nearby"; kind: PoiKind; route?: LatLngTuple[]; routeTo?: string }
   | { name: "cameras"; area?: string; camId?: string }
   | { name: "causes" }
   | { name: "why"; id: string }
@@ -63,6 +69,8 @@ function parentOf(s: Screen): Screen {
   return { name: "map" };
 }
 
+const POI_KINDS: PoiKind[] = ["fuel", "ev", "parking"];
+
 /** Deep link for a screen: the params `parseScreen` reads. */
 function screenUrl(s: Screen): string {
   const q = new URLSearchParams({ screen: s.name });
@@ -77,6 +85,7 @@ function screenUrl(s: Screen): string {
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
   }
+  if (s.name === "nearby") q.set("kind", s.kind);
   return `${window.location.pathname}?${q}`;
 }
 
@@ -88,6 +97,10 @@ function parseScreen(search: string): Screen | null {
   if (name === "map" || name === "causes" || name === "alerts" || name === "where") return { name };
   if (name === "cameras") return { name, area: q.get("area") ?? undefined, camId: q.get("cam") ?? undefined };
   if (name === "why" && id) return { name, id };
+  if (name === "nearby") {
+    const kind = q.get("kind") as PoiKind;
+    return { name, kind: POI_KINDS.includes(kind) ? kind : "fuel" };
+  }
   if (name === "trip" && q.get("to"))
     return {
       name,
@@ -169,6 +182,9 @@ export interface Recent {
   address?: string | null;
   to: Location;
   at: number;
+  /** A real place's OpenStreetMap id (its card shows on the trip) */
+  osm?: string | null;
+  kind?: string | null;
 }
 
 // ---- context -------------------------------------------------------------------------------------

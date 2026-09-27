@@ -12,9 +12,11 @@ import "@maplibre/maplibre-gl-leaflet";
 import L from "leaflet";
 import { setWorkerUrl, type ExpressionSpecification, type Map as LibreMap } from "maplibre-gl";
 import { useEffect, useState } from "react";
-import { Popup, TileLayer, useMap } from "react-leaflet";
-import { useApp } from "@/components/app/AppContext";
-import { C } from "@/lib/theme";
+import { TileLayer, useMap } from "react-leaflet";
+import { HIGHLIGHT_LAYERS, installPoiLayers, usePoiHighlights } from "@/components/places/poiLayers";
+import { POI, osmRef } from "@/components/places/pois";
+import { pickPlace, type PoiKind } from "@/components/places/store";
+import type { PlaceRef } from "@/lib/types";
 
 const STYLE = "https://tiles.openfreemap.org/styles/dark";
 // Copied here from node_modules on install (scripts/copy-maplibre-worker.mjs): the bundler doesn't.
@@ -98,20 +100,23 @@ function addPlaces(m: LibreMap) {
   }
 }
 
-type Place = { lat: number; lng: number; name: string; kind: string; color: string };
-
-function placeAt(m: LibreMap, lat: number, lng: number): Place | null {
+function placeAt(m: LibreMap, lat: number, lng: number): PlaceRef | null {
   const p = m.project([lng, lat]);
   const hits = m.queryRenderedFeatures(
     [
       [p.x - 10, p.y - 10],
       [p.x + 10, p.y + 10],
     ],
-    { layers: POI_LAYERS.filter((id) => m.getLayer(id)) },
+    { layers: [...HIGHLIGHT_LAYERS, ...POI_LAYERS].filter((id) => m.getLayer(id)) },
   );
   const f = hits[0];
   if (!f || f.geometry.type !== "Point") return null;
   const [plng, plat] = f.geometry.coordinates;
+  // Our gas / EV / parking highlights carry their own props (see poiLayers.ts).
+  if (HIGHLIGHT_LAYERS.includes(f.layer.id)) {
+    const h = f.properties as { name: string; sub: string; osm: string; kind: PoiKind };
+    return { lat: plat, lng: plng, name: h.name, kind: h.sub, osm: h.osm || null, color: POI[h.kind]?.color };
+  }
   const props = f.properties as { name?: string; name_en?: string; class?: string; subclass?: string };
   const kind = kindOf(props.class ?? "");
   const sub = (props.subclass || props.class || "place").replace(/_/g, " ");
@@ -121,6 +126,7 @@ function placeAt(m: LibreMap, lat: number, lng: number): Place | null {
     name: props.name_en || props.name || "Place",
     kind: sub.charAt(0).toUpperCase() + sub.slice(1),
     color: kind?.color ?? OTHER,
+    osm: osmRef(typeof f.id === "number" ? f.id : Number(f.id)),
   };
 }
 
@@ -158,12 +164,13 @@ function restyle(m: LibreMap) {
   }
 }
 
-/** `places`: show shops and places (tap one for directions). Off for small static previews. */
+/** `places`: show shops and places (tap one for its card: hours, phone, directions) and the nearby
+ * gas / EV / parking highlights. Off for small static previews. */
 export default function VectorBasemap({ places = false }: { places?: boolean }) {
   const map = useMap();
-  const { go } = useApp();
   const [webgl] = useState(hasWebGL);
-  const [picked, setPicked] = useState<Place | null>(null);
+  const [gl, setGl] = useState<LibreMap | null>(null);
+  usePoiHighlights(map, places ? gl : null);
   useEffect(() => {
     if (!webgl) return;
     setWorkerUrl(new URL(WORKER, window.location.origin).href);
@@ -173,7 +180,11 @@ export default function VectorBasemap({ places = false }: { places?: boolean }) 
     const gl = layer.getMaplibreMap();
     const onStyle = () => {
       restyle(gl);
-      if (places) addPlaces(gl);
+      if (places) {
+        addPlaces(gl);
+        installPoiLayers(gl);
+        setGl(gl);
+      }
     };
     gl.on("style.load", onStyle);
     if (!places) {
@@ -187,8 +198,8 @@ export default function VectorBasemap({ places = false }: { places?: boolean }) 
     const ours = (e: L.LeafletMouseEvent) => (e.originalEvent.target as Element | null)?.closest?.(".leaflet-interactive, .leaflet-marker-icon");
     const onClick = (e: L.LeafletMouseEvent) => {
       if (ours(e)) return;
-      const p = placeAt(gl, e.latlng.lat, e.latlng.lng);
-      if (p) setPicked(p);
+      // A tap on nothing closes the open card.
+      pickPlace(placeAt(gl, e.latlng.lat, e.latlng.lng));
     };
     let frame = 0;
     const onMove = (e: L.LeafletMouseEvent) => {
@@ -204,50 +215,12 @@ export default function VectorBasemap({ places = false }: { places?: boolean }) 
       map.off("click", onClick);
       map.off("mousemove", onMove);
       gl.off("style.load", onStyle);
+      setGl(null);
       layer.remove();
     };
   }, [map, webgl, places]);
-  if (webgl) {
-    if (!picked) return null;
-    return (
-      <Popup
-        position={[picked.lat, picked.lng]}
-        closeButton={false}
-        offset={[0, -4]}
-        className="cause-popup"
-        eventHandlers={{ remove: () => setPicked(null) }}
-      >
-        <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 4, fontFamily: "var(--font-grotesk), system-ui, sans-serif" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 5, background: picked.color }} />
-            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: C.muted }}>{picked.kind}</span>
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25, color: C.ink }}>{picked.name}</div>
-          <button
-            type="button"
-            onClick={() => {
-              setPicked(null);
-              go({ name: "trip", to: { lat: picked.lat, lng: picked.lng }, toName: picked.name });
-            }}
-            style={{
-              marginTop: 6,
-              height: 36,
-              borderRadius: 18,
-              border: 0,
-              background: C.accent,
-              color: C.onAccent,
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Directions →
-          </button>
-        </div>
-      </Popup>
-    );
-  }
+  // The picked place's card is drawn by PlacesLayer (one card for every kind of place).
+  if (webgl) return null;
   return (
     <TileLayer
       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
