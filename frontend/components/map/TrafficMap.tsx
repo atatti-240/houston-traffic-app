@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import { useDrive } from "@/components/drive/store";
+import LiveLocation from "@/components/map/LiveLocation";
 import RouteOptions from "@/components/map/RouteOptions";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import { camName } from "@/lib/format";
@@ -271,6 +273,8 @@ export default function TrafficMap({
   const app = useApp();
   const { segments, levels, places, here, layers, live, go } = app;
   const scene = interactive ? app.scene : null;
+  // Driving: the live GPS dot (LiveLocation) takes the place of the static one
+  const liveDot = useDrive((s) => s.active && !!s.fix);
   return (
     <MapContainer
       center={center ?? HOUSTON_CENTER}
@@ -389,7 +393,7 @@ export default function TrafficMap({
       ))}
 
       {/* You are here */}
-      {here && (
+      {here && !(interactive && liveDot) && (
         <>
           <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#3B6FD1", weight: 0, fillColor: "#3B6FD1", fillOpacity: 0.25 }} />
           <CircleMarker center={[here.lat, here.lng]} radius={6} interactive={false} pathOptions={{ color: "#FFFFFF", weight: 2, fillColor: "#6E9BFF", fillOpacity: 1 }} />
@@ -420,6 +424,7 @@ export default function TrafficMap({
       </Pane>
 
       {interactive && <CauseMarkers />}
+      {interactive && <LiveLocation />}
     </MapContainer>
   );
 }
