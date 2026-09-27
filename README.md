@@ -120,6 +120,8 @@ The CV app on another computer: start it with `--host 0.0.0.0` and use `CV_URL=h
 
 Endpoints: `GET /cv/status` (connected, mapping, what it's processing, incident check on or off, confirmed incidents), `GET /cv/cameras/{camera_id}` (status, counts, flow and rough mph, incident check, recent vehicle boxes with their frame times; `?since=` epoch ms for only newer ones), `GET /cv/cameras/{camera_id}/video` (MJPEG, for a plain `<img>`), `GET /cv/cameras/{camera_id}/frame.jpg` (one frame, `?at=` epoch ms). `GET /cameras` and `GET /live` give each camera a `live_feed` summary (`null` when it has none).
 
+On a trip, **Share ETA** makes a read-only link (`/share/<id>`, good until 6 hours after you leave) with the route and an ETA that re-checks traffic along it every minute. See [ARCHITECTURE.md](ARCHITECTURE.md#share-eta).
+
 ## How it works
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:

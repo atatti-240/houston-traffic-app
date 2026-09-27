@@ -154,6 +154,14 @@ The CV app (blindspot-cv, [its README](https://github.com/qian-json/blindspot-cv
 - **Incidents** (`IncidentWatch`, `cv/incidents.py`): a confirmed check starts an episode and gives it its description (kept for the episode: the model words each check afresh, and a new wording every few seconds would re-plan trips and could flip crash to stall); possible checks keep it going; it ends once the camera has seen a clear road for `CV_CLEAR_AFTER_S` (120 s), or 10 min after its last check (the camera was switched off or the CV app went away). While it's on, `CameraAiIncidents.active(now)` returns it as an `Incident` on the camera's segment, source `camera_ai` ("camera AI"), title by kind ("Crash spotted by camera AI"; crash, stall, hazard or other, from the model's words), the model's description in `detail` with the stand-in note. It happened in real time, so its times are "that long ago" on the simulated clock too. `ConditionsProvider.collect` adds these to the incident feed's, so routing, causes, alerts and `/live` treat them like any incident; if they fail, they're skipped and no feed is marked down.
 - **Endpoints** (`api/cv.py`): `/cv/status`, `/cv/cameras/{id}`, `/cv/cameras/{id}/video` (MJPEG, 503 when not live or when 16 videos are already open, ends when the feed stops or after 30 min; open streams end when the server is told to stop so uvicorn doesn't wait on them), `/cv/cameras/{id}/frame.jpg`. `/cameras` and `/live` carry a `live_feed` summary per camera (`null` without one); the contract fields (`vehicles`, ...) stay Houston-only.
 - **Fake CV server** (`scripts/fake_cv.py`, `make cv-fake`): the same `/`, `/live` and `/view`, replaying 57 recorded Baton Rouge frames with their real boxes (`scripts/fake_cv_frames/`), boxes sent 0.3 s after their frame like a real detector, and a scripted incident on `POST /incident`. Its page says it's a test server, and the card says the video is a recording and the incident scripted.
+## Share ETA
+
+**Share ETA** on the Trip screen makes a read-only link, `/share/<id>`, for the route on screen. `POST /shares` takes the route's segment ids, the leave time and the two place names. It checks that the segments exist and join up, builds the geometry from our road map (never from the client), works out the ETA and the main road (the one with the most miles) itself, and stores a `Share` under an unguessable id (`secrets.token_urlsafe`). `GET /shares/{id}` is all a link ever sees: the names, main road, route, leave time, the ETA when it was shared and the ETA now. Nothing about who shared it.
+
+- **The ETA now** re-scores, with `Router.evaluate` under the conditions known now, the part of the route still ahead of where the driver should be: the segment the latest ETA puts them on (the first one until they leave) and everything after it. What's behind them keeps its times, so a crash or train further on pushes the ETA back and one on a road they've already driven doesn't. We don't know where the driver is, and the page says so: it assumes they left on time. A leave time already past when the link is made counts as now. Once the ETA has passed it stops changing ("Should be there by now").
+- **Two clocks.** Leave time and ETAs are simulated time like everything else. Expiry is real time: 6 h after the trip starts (6 h after the link was made, plus the wait until the planned leave time), so demo clock jumps neither kill links nor bring expired ones back, and a link shared in the morning for the evening still works that evening.
+- **Limits.** 30 new links per client address per hour (in memory), at most 300 segments, names cut to 80 characters, a leave time at most 24 h ahead, and at most 1000 links: making one deletes the expired ones, then the oldest. Unknown, malformed and expired ids all get the same 404, "This link expired".
+- **The page** (`frontend/app/share/[id]`) stands alone: no app state or screen history, the route on its own map, refreshed every minute. Phones get the share sheet (`navigator.share`), computers copy the link, and when both fail the link is shown to copy by hand.
 
 ## Request flow
 
@@ -182,6 +190,7 @@ The CV app (blindspot-cv, [its README](https://github.com/qian-json/blindspot-cv
 - `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
 - `Notification`: id, trip_id or plan_id, created_at (sim time), title, body, kind (`plan`, `leave_now`, `leave_earlier`, `leave_later`, `reroute`, `order_changed`, `cleared`, `info`)
 - `GeoCache`: key (`search|<query>|<area>`, `place|W123`, `find|<name>|<point>`), value (Nominatim's raw rows), fetched_at (real UTC time)
+- `Share` (in `app/shares.py`): id (the link), origin_name, destination_name, main_road, segment_ids, geometry, end_point, miles, depart_at, shared_eta, eta (latest), created_at (sim time), created_wall and expires_at (real time, UTC), extra (JSON: `enter_at`, when the latest ETA has them reach each segment; room for fields added later)
 
 ## Folder layout
 
@@ -206,6 +215,7 @@ backend/
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
     geo/               place search and details (Nominatim client, cache, rate limit), opening hours
     cv/                live AI camera feeds: bridge to the CV app, camera-confirmed incidents
+    shares.py          Share ETA links: snapshot, re-checked ETA, expiry, limits
     notifications/     service + scheduler
     api/               routers
     seed/              Houston network + synthetic generator
