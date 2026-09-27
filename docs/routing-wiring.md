@@ -20,7 +20,7 @@ comes from one snapshot of the data and says where that data came from.
 |---|---|---|---|
 | Travel time on a road at the moment you reach it | Predicted congestion per segment × 15 min | `SpeedSource.observations(day)` (history, replayed into the EMA model) | Free-flow speed with no history. Confidence `low` |
 | Correct that prediction with what's happening now | Live congestion per segment (0 = free, 1 = stopped) | `LiveTrafficSource.current(now)` → `LiveTraffic` | Prediction only. Confidence `low` for the next 30 min while the feed is down |
-| Slow down or remove a road | Incidents matched to a segment | `IncidentSource.active(now)` → `Incident` | No slowdown. An incident with `segment_id=None` shows on `/live` but doesn't affect routing |
+| Slow down or remove a road | Incidents matched to a segment | `IncidentSource.active(now)` → `Incident`, plus driver reports (`app/reports.py`, source `drivers`) | No slowdown. An incident with `segment_id=None` shows on `/live` but doesn't affect routing. Driver reports still count while the incidents feed is down |
 | Wait at a crossing, or go around it | Live crossing status + sensor health | `TrainSource.crossing_status(now)` → `CrossingStatus` | Predicted `p_block`. Confidence `low` for the next 30 min |
 | Predicted train delay at a crossing | Blockage history per crossing × 15 min | `TrainSource.crossing_events(day)` | No train delay |
 | Crash-risk penalty (safety slider) | Crash history per segment × hour | `CrashSource.crashes(day)` | Small prior risk everywhere |
@@ -45,7 +45,7 @@ comes from one snapshot of the data and says where that data came from.
 **Incidents:**
 
 - A closure shuts the road until it clears. The router treats it like a blocked crossing: it either waits for the road to reopen or goes around, whichever is cheaper. A closure never makes a trip impossible.
-- Other kinds slow it down until they clear: crash ×1.6, lane closure ×1.5, weather ×1.35, roadwork or event ×1.3, stall, hazard or other ×1.2, plus 0.25 for every extra blocked lane, up to ×3.
+- Other kinds slow it down until they clear: crash ×1.6, lane closure ×1.5, weather ×1.35, roadwork or event ×1.3, stall, hazard or other ×1.2, flooding ×2, plus 0.25 for every extra blocked lane, up to ×3. Police and pothole are heads-up only (no slowdown).
 - With no clear time we assume 45 min from the start, and at least 15 more minutes from now.
 
 **Feeds:** a live method that raises is marked down. Everything falls back to predictions, the route's `feeds_down` lists the feed, and the "why" bullets say so. Inputs in the next 30 min are marked low confidence: crossings when the train feed is down, and every road when the traffic or incident feed is down, since a crash or closure could be missing.
@@ -59,7 +59,7 @@ The records are defined in `app/conditions/live.py`:
 ```python
 LiveTraffic(segment_id, congestion, source, observed_at, confidence="high", detail="")
 Incident(id, title, kind, segment_id, started_at, source, updated_at, clears_at=None, lanes_blocked=1, detail="")
-# kind: crash | stall | roadwork | lane_closure | closure | event | weather | hazard | other
+# kind: crash | stall | roadwork | lane_closure | closure | event | weather | hazard | other | flooding | police | pothole
 CrossingStatus(crossing_id, blocked, sensor_up, updated_at, source, clears_at=None, blocked_since=None)
 ```
 
