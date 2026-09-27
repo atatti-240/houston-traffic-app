@@ -179,7 +179,7 @@ class NoRouteError(ValueError):
 
 
 def _fmt(t: datetime) -> str:
-    return t.strftime("%-I:%M %p")
+    return t.strftime("%I:%M %p").lstrip("0")
 
 
 def _label(source: str) -> str:

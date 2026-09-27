@@ -61,7 +61,7 @@ def test_late_leave_now_uses_real_eta_from_now(services):
     assert leave.kind == "leave_now"
     assert "running late" in leave.title
     real = services.router.best_route("eastend", "medcenter", MON(7, 52))
-    assert real.arrive_at.strftime("%-I:%M %p") in leave.body
+    assert real.arrive_at.strftime("%I:%M %p").lstrip("0") in leave.body
     assert "7:38 AM" not in leave.body  # no stale reasons about a train we already missed
 
 
