@@ -42,35 +42,33 @@ export function Icon({
   );
 }
 
-/** The BlindSpot mark: a ring with a yellow "spot". */
+/** The BlindSpot mark: a ring with a yellow "spot" (flat colors). */
 export function LogoMark({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke={C.ink} strokeWidth="2" />
-      <circle cx="15.5" cy="9.5" r="3.5" fill={C.moderate} />
+      <circle cx="12" cy="12" r="9" stroke={C.ink} strokeWidth="2.2" />
+      <circle cx="15.5" cy="9.5" r="3.5" fill="#fbbc04" />
     </svg>
   );
 }
 
+/** The "BlindSpot" wordmark (Figtree 800). `pill`: on a floating white / grey pill over the map. */
 export function Logo({ size = 18, pill = false }: { size?: number; pill?: boolean }) {
   const inner = (
     <>
       <LogoMark size={size + 6} />
-      <span style={{ fontSize: size, fontWeight: 700, letterSpacing: "-0.02em" }}>BlindSpot</span>
+      <span style={{ fontSize: size, fontWeight: 800, letterSpacing: "-0.02em" }}>BlindSpot</span>
     </>
   );
   if (!pill) return <div className="flex items-center gap-2 text-ink">{inner}</div>;
   return (
-    <div
-      className="flex h-9 items-center gap-2 rounded-[18px] border border-edge pr-3.5 pl-2 text-ink"
-      style={{ background: "rgba(17,19,24,0.92)" }}
-    >
+    <div className="flex h-9 items-center gap-2 rounded-[18px] bg-float pr-3.5 pl-2 text-ink shadow-e1">
       {inner}
     </div>
   );
 }
 
-/** White circle with a dark cause icon (map markers, chips). */
+/** A disc with the cause's icon in its color: white on the light theme, grey on the dark one (chips, rows). */
 export function CauseDot({ kind, size = 24, ring }: { kind: CauseKind; size?: number; ring?: string }) {
   return (
     <span
@@ -79,15 +77,15 @@ export function CauseDot({ kind, size = 24, ring }: { kind: CauseKind; size?: nu
         width: size,
         height: size,
         background: C.marker,
-        boxShadow: ring ? `0 0 0 3px ${ring}` : undefined,
+        boxShadow: ring ? `0 0 0 3px ${ring}` : `inset 0 0 0 1px ${C.line}`,
       }}
     >
-      <Icon d={CAUSE[kind].icon} size={Math.round(size * 0.54)} color={C.onAccent} width={2.4} />
+      <Icon d={CAUSE[kind].icon} size={Math.round(size * 0.54)} color={CAUSE[kind].color} width={2.4} />
     </span>
   );
 }
 
-/** Rounded dark chip with a cause dot: "(o) Rush hour" */
+/** Rounded outlined chip with a cause dot: "(o) Rush hour" (light blue when active) */
 export function CauseChip({ kind, label, count, onClick, active }: { kind: CauseKind; label?: string; count?: number; onClick?: () => void; active?: boolean }) {
   const Tag = onClick ? "button" : "span";
   return (
@@ -95,8 +93,12 @@ export function CauseChip({ kind, label, count, onClick, active }: { kind: Cause
       type={onClick ? "button" : undefined}
       onClick={onClick}
       aria-pressed={onClick ? !!active : undefined}
-      className={`flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap text-ink ${onClick ? "cursor-pointer" : ""}`}
-      style={{ background: active ? C.cardHi : C.card, border: `1px solid ${active ? C.accent : "transparent"}` }}
+      className={`flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap ${onClick ? "cursor-pointer" : ""}`}
+      style={
+        active
+          ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` }
+          : { background: "transparent", color: C.ink, border: `1px solid ${C.edge}` }
+      }
     >
       <CauseDot kind={kind} />
       {label ?? CAUSE[kind].label}
@@ -105,7 +107,14 @@ export function CauseChip({ kind, label, count, onClick, active }: { kind: Cause
   );
 }
 
-/** Filter pill: white when selected, outlined otherwise (Alerts, Live cams). */
+/** Style of a selectable chip: light blue when selected (like Google's filter chips), outlined otherwise. */
+export function chipStyle(selected: boolean): CSSProperties {
+  return selected
+    ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` }
+    : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` };
+}
+
+/** Filter pill (Alerts, Live cams). */
 export function FilterChip({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
   return (
     <button
@@ -113,11 +122,7 @@ export function FilterChip({ label, selected, onClick }: { label: string; select
       onClick={onClick}
       aria-pressed={selected}
       className="h-9 shrink-0 cursor-pointer rounded-[18px] px-3.5 text-[14px] font-medium whitespace-nowrap"
-      style={
-        selected
-          ? { background: C.ink, color: "#11141A", border: `1px solid ${C.ink}` }
-          : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` }
-      }
+      style={chipStyle(selected)}
     >
       {label}
     </button>
@@ -128,7 +133,7 @@ export function FilterChip({ label, selected, onClick }: { label: string; select
 export function LevelPill({ level, text }: { level: Level; text?: string }) {
   const lv = LEVEL[level];
   return (
-    <span className="rounded-[10px] px-2.5 py-[3px] text-[12px] font-semibold whitespace-nowrap" style={{ background: lv.color, color: lv.fg }}>
+    <span className="rounded-[10px] px-2.5 py-[3px] text-[12px] font-semibold whitespace-nowrap" style={{ background: lv.bg, color: lv.fg }}>
       {text ?? `${lv.label} traffic`}
     </span>
   );
@@ -149,7 +154,7 @@ export function PillButton({
     variant === "primary"
       ? { background: C.accent, color: C.onAccent, border: 0 }
       : variant === "outline"
-        ? { background: "transparent", color: C.ink, border: `1.5px solid ${C.ink}` }
+        ? { background: "transparent", color: C.accent, border: `1px solid ${C.edgeStrong}` }
         : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` };
   return (
     <button
@@ -181,10 +186,10 @@ export function BackHeader({ onBack, label, right }: { onBack: () => void; label
   );
 }
 
-/** Dark card section: 16px padding, 18px radius. */
+/** Card section (outlined, like Google's cards): 16px padding, 16px radius. */
 export function Card({ children, className = "", style }: { children: ReactNode; className?: string; style?: CSSProperties }) {
   return (
-    <section className={`flex flex-col gap-2.5 rounded-[18px] bg-card p-4 ${className}`} style={style}>
+    <section className={`flex flex-col gap-2.5 rounded-[16px] border border-line bg-bg p-4 ${className}`} style={style}>
       {children}
     </section>
   );
@@ -198,8 +203,8 @@ export function RoundButton({ children, label, onClick, active }: { children: Re
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
-      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full border border-edge text-ink"
-      style={{ background: active ? C.cardHi : C.card, boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
+      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink shadow-e1"
+      style={{ background: active ? C.sel : C.float, color: active ? C.onSel : C.ink }}
     >
       {children}
     </button>
@@ -208,7 +213,7 @@ export function RoundButton({ children, label, onClick, active }: { children: Re
 
 /** Screen title (28px bold) */
 export function Title({ children }: { children: ReactNode }) {
-  return <h1 className="m-0 text-[28px] leading-[1.1] font-bold tracking-[-0.02em]">{children}</h1>;
+  return <h1 className="m-0 text-[28px] leading-[1.1] font-extrabold tracking-[-0.02em]">{children}</h1>;
 }
 
 /** Relative "N min ago" in simulated time. */

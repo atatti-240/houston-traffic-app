@@ -96,7 +96,7 @@ function cleanPlace(v: unknown): SavedPlace | null {
     placeId: str(p.placeId),
     kind: str(p.kind),
     address: str(p.address),
-    color: str(p.color) && /^#[0-9a-f]{3,8}$/i.test(p.color as string) ? (p.color as string) : undefined,
+    color: str(p.color) && /^(#[0-9a-f]{3,8}|var\(--c-[a-z-]+\))$/i.test(p.color as string) ? (p.color as string) : undefined,
   };
   return { ...place, key: placeKey(place) };
 }

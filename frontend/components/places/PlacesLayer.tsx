@@ -11,7 +11,7 @@ import { Marker, Popup } from "react-leaflet";
 
 import { useApp } from "@/components/app/AppContext";
 import { Icon } from "@/components/ui";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, SHADOW } from "@/lib/theme";
 import type { PlaceRef } from "@/lib/types";
 
 import { PLACE_ICON, STAR } from "./icons";
@@ -38,7 +38,7 @@ function glyphIcon(key: string, d: string, color: string, fill: boolean, size: n
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.6)",
+          boxShadow: SHADOW[1],
         }}
       >
         <svg width={inner} height={inner} viewBox="0 0 24 24" fill={fill ? color : "none"} stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -95,15 +95,14 @@ function PlaceSheet({ place }: { place: PlaceRef }) {
     <>
       <Marker
         position={[place.lat, place.lng]}
-        icon={glyphIcon("picked", PLACE_ICON.pin, C.onAccent, false, 30, C.accent, C.onAccent)}
+        icon={glyphIcon("picked", PLACE_ICON.pin, "#ffffff", false, 30, "#ea4335", "#ffffff")}
         zIndexOffset={1500}
         interactive={false}
       />
       {createPortal(
         <section
           aria-label={place.name}
-          className="fade-in fixed inset-x-0 bottom-0 z-[1300] max-h-[70dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg px-5 pt-3 pb-6"
-          style={{ boxShadow: "0 -6px 28px rgba(0,0,0,0.6)" }}
+          className="fade-in fixed inset-x-0 bottom-0 z-[1300] max-h-[70dvh] overflow-y-auto rounded-t-3xl bg-bg px-5 pt-3 pb-6 shadow-up"
         >
           <div className="mb-1 flex justify-end">
             <button
@@ -139,7 +138,7 @@ function NearbyMarkers({ items, selected }: { items: NearbyMarker[]; selected: s
           <Marker
             key={`nb-${m.key}-${sel}`}
             position={[m.lat, m.lng]}
-            icon={glyphIcon(`nb-${m.poi}-${sel}`, k.icon, C.onAccent, false, sel ? 36 : 28, k.color, sel ? C.ink : C.onAccent)}
+            icon={glyphIcon(`nb-${m.poi}-${sel}`, k.icon, "#ffffff", false, sel ? 36 : 28, k.color, sel ? C.ink : "#ffffff")}
             zIndexOffset={sel ? 1200 : 900}
             title={m.name}
             eventHandlers={{ click: () => setNearbyMarkers({ items, selected: m.key }) }}
@@ -179,7 +178,7 @@ export default function PlacesLayer() {
         <Marker
           key={key}
           position={[p.lat, p.lng]}
-          icon={glyphIcon(`mine-${d === PLACE_ICON.star ? "star" : key}`, d, color, fill, 24, C.card, color)}
+          icon={glyphIcon(`mine-${d === PLACE_ICON.star ? "star" : key}`, d, color, fill, 24, C.marker, color)}
           zIndexOffset={400}
           title={key === "home" ? `Home: ${p.name}` : key === "work" ? `Work: ${p.name}` : p.name}
           eventHandlers={{ click: () => pickPlace(p) }}

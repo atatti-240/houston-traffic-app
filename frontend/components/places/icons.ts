@@ -12,5 +12,5 @@ export const PLACE_ICON = {
   pin: "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 7a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z",
 } as const;
 
-/** Gold for favorites (the star), a touch softer than the traffic yellow. */
-export const STAR = "#F2C94C";
+/** Gold for favorites (the star); a CSS color that follows the theme. */
+export const STAR = "var(--c-star)";

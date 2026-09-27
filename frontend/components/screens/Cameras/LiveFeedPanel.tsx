@@ -4,7 +4,7 @@
  * the incident check, and where the video really comes from (a Baton Rouge camera standing in). */
 
 import { Icon, InfoToggle } from "@/components/ui";
-import { C, FLOW, ICON, VEHICLE } from "@/lib/theme";
+import { C, FLOW, ICON, VEHICLE, tint } from "@/lib/theme";
 import type { LiveFeed, LiveFeedDetail } from "@/lib/types";
 
 function Stat({ label, value, sub, color }: { label: string; value: string; sub: string; color?: string }) {
@@ -28,9 +28,9 @@ function incidentStat(feed: LiveFeed): { value: string; sub: string; color?: str
     case "confirmed":
       return { value: "Incident", sub: inc.clearing ? "looks clear now" : "confirmed", color: C.heavyText };
     case "possible":
-      return { value: "Possible", sub: `${pct(inc.p)} chance`, color: C.moderate };
+      return { value: "Possible", sub: `${pct(inc.p)} chance`, color: C.moderateText };
     case "clear":
-      return { value: "Clear", sub: inc.p != null && inc.p >= 0.005 ? `${pct(inc.p)} chance` : "nothing seen", color: C.light };
+      return { value: "Clear", sub: inc.p != null && inc.p >= 0.005 ? `${pct(inc.p)} chance` : "nothing seen", color: C.lightText };
     case "off":
       return { value: "Off", sub: "needs a Mac" };
     case "error":
@@ -51,11 +51,11 @@ function IncidentLine({ feed, clearAfter }: { feed: LiveFeed; clearAfter: number
     <div
       role="status"
       className="flex gap-2.5 rounded-xl px-3 py-2.5"
-      style={{ background: confirmed ? "rgba(255,77,77,0.12)" : "rgba(245,197,24,0.1)", border: `1px solid ${color}` }}
+      style={{ background: confirmed ? tint(C.heavy, 12) : tint(C.moderate, 14), border: `1px solid ${color}` }}
     >
-      <Icon d={ICON.info} size={18} color={confirmed ? C.heavyText : C.moderate} className="mt-px shrink-0" />
+      <Icon d={ICON.info} size={18} color={confirmed ? C.heavyText : C.moderateText} className="mt-px shrink-0" />
       <div className="flex min-w-0 flex-col gap-0.5 text-[13px] leading-snug">
-        <span className="font-semibold" style={{ color: confirmed ? C.heavyText : C.moderate }}>
+        <span className="font-semibold" style={{ color: confirmed ? C.heavyText : C.moderateText }}>
           {confirmed ? "Incident confirmed by the camera AI" : `Possible incident (${pct(inc.p)})`}
         </span>
         {inc.text && <span className="text-ink [overflow-wrap:anywhere]">{quote(inc.text)}</span>}
@@ -93,7 +93,7 @@ export default function LiveFeedPanel({ feed, detail }: { feed: LiveFeed; detail
         <Stat
           label="Rough speed"
           value={flow?.label ?? "–"}
-          color={flow?.color}
+          color={flow?.text}
           sub={
             live && feed.mph != null
               ? `~${feed.mph} mph`
