@@ -19,6 +19,7 @@ import { Toasts } from "@/components/Notifications";
 import Alerts from "@/components/screens/Alerts";
 import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
+import Drive from "@/components/screens/Drive";
 import LiveMap from "@/components/screens/LiveMap";
 import Trip from "@/components/screens/Trip";
 import WhereTo from "@/components/screens/WhereTo";
@@ -36,6 +37,8 @@ function ScreenView({ screen }: { screen: Screen }) {
       return <WhereTo />;
     case "trip":
       return <Trip key={JSON.stringify(screen.to)} />;
+    case "drive":
+      return <Drive />;
     case "map":
       return <LiveMap />;
     case "cameras":
@@ -152,8 +155,9 @@ function Shell() {
   const tabScreen = tabOf(screen) !== null;
   const isMap = screen.name === "map";
   const isTrip = screen.name === "trip";
+  const isDrive = screen.name === "drive";
   // Phone screens that cover the whole map: take the map out of the tab order and the a11y tree.
-  const mapHidden = !isDesktop && !isMap && !isTrip;
+  const mapHidden = !isDesktop && !isMap && !isTrip && !isDrive;
 
   let panel: ReactNode;
   if (isDesktop) {
@@ -170,6 +174,12 @@ function Shell() {
       <div className="pointer-events-none absolute inset-0 z-[1000] flex flex-col justify-end">
         <ScreenView screen={screen} />
         <BottomNav />
+      </div>
+    );
+  } else if (isDrive) {
+    panel = (
+      <div className="pointer-events-none absolute inset-0 z-[1000]">
+        <ScreenView screen={screen} />
       </div>
     );
   } else if (isTrip) {
@@ -227,8 +237,9 @@ function Shell() {
       {!isDesktop && down}
       <Toasts
         toasts={toasts}
-        // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable.
-        top={demo && !isDesktop ? 64 : undefined}
+        // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable; driving: under the
+        // next-turn banner.
+        top={demo && !isDesktop ? 64 : isDrive && !isDesktop ? 280 : undefined}
         dismiss={(id) => {
           clearTimeout(timers.current.get(id));
           timers.current.delete(id);
