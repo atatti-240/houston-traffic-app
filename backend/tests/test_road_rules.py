@@ -242,6 +242,32 @@ def test_saved_trips_remember_the_options_and_alerts_follow_them(client):
     assert "Tollway" not in by_trip[tollfree.json()["id"]]["body"]
 
 
+def test_alerts_lead_with_the_live_reroute_not_the_avoid_note(client):
+    # No highway-free way to the Galleria, and Houston Ave (the usual way out of the Heights) is closed.
+    client.post("/demo/incident", json={"segment_id": "HOUAV:heights>downtown", "kind": "closure", "minutes": 180})
+    rerouted = "Rerouted around Houston Ave: closed"
+
+    # The route card lists both: what live data changed first, then the note.
+    reasons = client.post("/route", json={"origin": "heights", "destination": "galleria", "avoid_highways": True}).json()["best"]["reasons"]
+    assert reasons[0].startswith(rerouted)
+    assert any(r.startswith("No highway-free route: this one uses ") for r in reasons)
+
+    # The saved trip's and the watched plan's alerts quote the first reason: the reroute.
+    trip = client.post(
+        "/trips", json={"origin": "heights", "destination": "galleria", "arrive_by": "09:00", "avoid_highways": True}
+    ).json()
+    [trip_note] = [n for n in client.post("/demo/tick").json()["notifications"] if n["trip_id"] == trip["id"]]
+    plan = client.post(
+        "/plan",
+        json={"start": {"place": "heights"}, "stops": [{"place": "galleria"}], "avoid_highways": True, "watch": True},
+    ).json()
+    assert plan["legs"][0]["why"][0].startswith(rerouted)
+    assert any(r.startswith("No highway-free route") for r in plan["legs"][0]["why"])
+    [plan_note] = plan["notifications"]
+    for n in (trip_note, plan_note):
+        assert rerouted in n["body"] and "No highway-free" not in n["body"], n
+
+
 # --- the lookup script (never touches the network in tests) ---------------------------------
 
 
