@@ -138,7 +138,8 @@ export default function ShareMap({
           <CircleMarker center={end} radius={9} pathOptions={{ color: "#FFFFFF", weight: 3, fillColor: C.heavy, fillOpacity: 1 }}>
             {endLabel && (
               <Tooltip permanent direction="top" offset={[0, -10]} className="dark-tip">
-                {endLabel}
+                {/* Cut short: a long name over a pin near the edge would run off the map */}
+                <span className="block max-w-[150px] truncate">{endLabel}</span>
               </Tooltip>
             )}
           </CircleMarker>

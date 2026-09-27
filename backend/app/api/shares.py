@@ -47,7 +47,8 @@ def _limiter(request: Request) -> shares.RateLimiter:
 @router.post("/shares", status_code=201)
 def create_share(req: ShareRequest, request: Request, svc: Services = Depends(get_services)):
     """Make a Share ETA link for a route. The route is rebuilt from its segment ids (geometry
-    from our road map) and its ETA worked out here. The link works for 6 hours."""
+    from our road map) and its ETA worked out here. The link works until 6 hours after the trip
+    starts (6 h from now for a trip leaving now)."""
     if not _limiter(request).allow(request.client.host if request.client else "unknown"):
         raise HTTPException(429, "Too many share links from here. Try again in a while.", headers={"Retry-After": "600"})
     net = svc.network
@@ -68,7 +69,7 @@ def create_share(req: ShareRequest, request: Request, svc: Services = Depends(ge
         pin = [req.destination.lat, req.destination.lng]
         if haversine_km(end[0], end[1], pin[0], pin[1]) <= MAX_PIN_KM:
             end = pin
-    eta = shares.route_eta(svc.router, ids, depart_at)
+    eta, enter_at = shares.route_eta(svc.router, ids, depart_at)
     wall = shares.wall_now()
     share = Share(
         id=shares.new_id(),
@@ -84,8 +85,9 @@ def create_share(req: ShareRequest, request: Request, svc: Services = Depends(ge
         eta=eta,
         created_at=now,
         created_wall=wall,
-        expires_at=wall + shares.SHARE_TTL,
+        expires_at=shares.expires_at(wall, now, depart_at),
     )
+    shares.set_schedule(share, enter_at)
     with svc.session_factory() as s:
         shares.make_room(s, wall)
         s.add(share)
@@ -95,7 +97,7 @@ def create_share(req: ShareRequest, request: Request, svc: Services = Depends(ge
         "depart_at": share.depart_at,
         "eta": share.eta,
         "main_road": share.main_road,
-        "expires_in_min": round(shares.SHARE_TTL.total_seconds() / 60),
+        "expires_in_min": round((share.expires_at - wall).total_seconds() / 60),
     }
 
 
@@ -125,7 +127,7 @@ def get_share(share_id: str, svc: Services = Depends(get_services)):
             "shared_eta": share.shared_eta,
             "eta": share.eta,
             "status": shares.status(share, now),  # not_left | on_the_way | arrived
-            "checked": checked,  # false: this is the last ETA we had (trip over, or road map changed)
+            "checked": checked,  # false: this is the last ETA we had (trip should be over, or road map changed)
             "now": now,
             "shared_at": share.created_at,
             "expires_in_min": max(0, int((share.expires_at - wall).total_seconds() // 60)),

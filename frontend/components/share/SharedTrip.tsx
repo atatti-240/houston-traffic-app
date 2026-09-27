@@ -164,7 +164,9 @@ function Details({ trip, at, error, now, onRefresh, busy }: { trip: Trip; at: nu
             ? "Their trip should be over, so this ETA won't change any more."
             : !t.checked
               ? "We couldn't re-check this route, so this is the last ETA we had."
-              : `We re-check traffic, trains and crashes along this ${t.miles} mi route every minute, assuming they ${t.status === "not_left" ? "leave" : "left"} at ${timeOn(t.depart_at, t.now)} as planned. BlindSpot doesn't track where they are.`}
+              : t.status === "not_left"
+                ? `We re-check traffic, trains and crashes along this ${t.miles} mi route every minute, assuming they leave at ${timeOn(t.depart_at, t.now)} as planned. BlindSpot doesn't track where they are.`
+                : `We re-check traffic, trains and crashes on the rest of this ${t.miles} mi route every minute, assuming they left at ${timeOn(t.depart_at, t.now)} as planned. BlindSpot doesn't track where they are.`}
         </p>
       </section>
 
@@ -227,7 +229,10 @@ export default function SharedTrip({ id }: { id: string }) {
   }, [id]);
 
   // Every minute, again when the page comes back into view, and a clock for "Updated N min ago".
+  // Not once the link is gone: it won't come back.
+  const gone = state.kind === "gone";
   useEffect(() => {
+    if (gone) return;
     load();
     const poll = setInterval(load, POLL_MS);
     const tick = setInterval(() => setNow(Date.now()), 15_000);
@@ -238,7 +243,7 @@ export default function SharedTrip({ id }: { id: string }) {
       clearInterval(tick);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [load]);
+  }, [load, gone]);
 
   // Phone: the sheet covers the bottom of the map; fit the route into the part above it.
   useEffect(() => {
@@ -266,7 +271,7 @@ export default function SharedTrip({ id }: { id: string }) {
           </a>
         }
       >
-        Live ETA links work for 6 hours after they&apos;re shared. Ask whoever sent it for a new one.
+        Live ETA links stop working 6 hours after the trip starts. Ask whoever sent it for a new one.
       </Notice>
     );
   if (state.kind === "down")

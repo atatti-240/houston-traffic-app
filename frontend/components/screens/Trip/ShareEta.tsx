@@ -40,8 +40,8 @@ export default function ShareEta({
   const [link, setLink] = useState<Link | null>(null);
   const [making, setMaking] = useState(false);
   const [manual, setManual] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ key: string; message: string } | null>(null);
+  const [toast, setToast] = useState<{ message: string; note: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -49,6 +49,8 @@ export default function ShareEta({
   const key = route ? JSON.stringify([route.segments.map((s) => s.id), route.depart_at, fromName, toName]) : null;
   const current = link && link.key === key ? link : null;
   const showManual = manual && current !== null;
+  // An error goes with the route it was for.
+  const error = failed && failed.key === key ? failed.message : null;
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -57,21 +59,21 @@ export default function ShareEta({
     if (showManual) field.current?.select();
   }, [showManual]);
 
-  const flash = (msg: string) => {
-    setToast(msg);
+  const flash = (message: string, made: ShareMade) => {
+    setToast({ message, note: `works for ${Math.max(1, Math.round(made.expires_in_min / 60))} h` });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
   };
 
   async function send(l: Link) {
     const res = await sendLink(l.url, shareText(l.made, toName, clock?.now), prefersShareSheet());
-    if (res === "copied") flash("Link copied");
+    if (res === "copied") flash("Link copied", l.made);
     setManual(res === "manual");
   }
 
   async function share() {
     if (!route || !key || making) return;
-    setError(null);
+    setFailed(null);
     if (current) return send(current);
     setMaking(true);
     try {
@@ -86,7 +88,7 @@ export default function ShareEta({
       setLink(l);
       await send(l);
     } catch (e) {
-      setError(`Couldn't make a link: ${describeShareError(e)}`);
+      setFailed({ key, message: `Couldn't make a link: ${describeShareError(e)}` });
     } finally {
       setMaking(false);
     }
@@ -96,7 +98,7 @@ export default function ShareEta({
     if (!current) return;
     try {
       await navigator.clipboard.writeText(current.url);
-      flash("Link copied");
+      flash("Link copied", current.made);
       setManual(false);
     } catch {
       field.current?.select();
@@ -108,7 +110,7 @@ export default function ShareEta({
     ? hasStops
       ? "Share ETA works for trips without extra stops."
       : "Share ETA works once a route is on screen."
-    : "Anyone with the link sees this route and a live ETA for 6 hours.";
+    : "Anyone with the link sees this route and a live ETA, until 6 hours after you leave.";
 
   return (
     <div className="flex flex-col gap-2">
@@ -172,8 +174,8 @@ export default function ShareEta({
             <span className="flex h-6 w-6 items-center justify-center rounded-full" style={{ background: C.light }}>
               <Icon d={ICON.check} size={14} color={C.onAccent} width={2.6} />
             </span>
-            {toast}
-            <span className="text-[13px] font-normal text-muted">· works for 6 h</span>
+            {toast.message}
+            <span className="text-[13px] font-normal text-muted">· {toast.note}</span>
           </div>
         )}
       </div>
