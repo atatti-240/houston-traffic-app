@@ -8,6 +8,7 @@ from app.adapters import DataSources, build_sources
 from app.conditions.provider import ConditionsProvider
 from app.clock import SimClock
 from app.config import settings
+from app.directions.door import DoorDirections
 from app.graph import Network, load_network
 from app.notifications.scheduler import TripScheduler
 from app.notifications.service import NotificationService, build_notifier
@@ -28,6 +29,7 @@ class Services:
         self.clock = clock or SimClock(settings.sim_start, settings.clock_speed)
         self.sources = sources or build_sources(settings.data_source, session_factory, settings.synthetic_seed)
         self.notifier = notifier or build_notifier(settings.notification_channel)
+        self.directions = DoorDirections()  # door-to-door directions (OSRM) and their cache
         # One tick at a time: the background loop and request handlers both tick, and two
         # at once would both send the same alert. Lives here, not on the scheduler, because
         # _install() swaps schedulers.
