@@ -16,11 +16,13 @@ import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
+import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
 import { CAUSE, C, ICON } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import TripReports from "./Trip/Reports";
+import { AvoidToggles, RouteRules, TollLine, useAvoid } from "./Trip/RoadRules";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
 import ShareEta from "./Trip/ShareEta";
 
@@ -65,6 +67,7 @@ interface Inputs {
   mode: Mode;
   by: string | null;
   safety: number;
+  avoid: Avoid;
   stops: string[];
 }
 
@@ -134,7 +137,7 @@ function findSaved(saved: Saved, k: Inputs): Omit<Watch, "key"> | null {
   const { origin: o, to: d } = k;
   if (o === undefined || d === undefined) return null;
   if (k.stops.length) {
-    const p = saved.plans.find((p) => isSamePlan(p, o, k.stops, d, k.by, k.safety));
+    const p = saved.plans.find((p) => isSamePlan(p, o, k.stops, d, k.by, k.safety) && sameAvoid(p, k.avoid));
     return p ? { planId: p.plan_id } : null;
   }
   if (k.mode !== "by") return null;
@@ -144,7 +147,8 @@ function findSaved(saved: Saved, k: Inputs): Omit<Watch, "key"> | null {
       t.destination === d &&
       t.arrive_by.slice(0, 5) === k.by &&
       [...t.days].sort().join() === WEEKDAYS.join() &&
-      Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6,
+      Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6 &&
+      sameAvoid(t, k.avoid),
   );
   return t ? { tripId: t.id } : null;
 }
@@ -349,6 +353,7 @@ export default function Trip() {
   const [mode, setMode] = useState<Mode>(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
   const [by, setBy] = useState(kept?.by ?? params?.arriveBy ?? "");
   const [safety, setSafety] = useState(kept?.safety ?? initialSafety(params?.safety));
+  const [avoid, setAvoid] = useAvoid(params?.avoid, paramsKey);
   const [stops, setStops] = useState<string[]>(kept?.stops ?? []);
   const [picking, setPicking] = useState(false);
   const [showAlt, setShowAlt] = useState(kept?.showAlt ?? false);
@@ -385,8 +390,8 @@ export default function Trip() {
 
   // Everything a result depends on. Debounced so typing a time or dragging the slider asks once.
   const inputs = useMemo(
-    () => JSON.stringify({ origin, to, mode, by: mode === "by" ? by : null, safety, stops } satisfies Inputs),
-    [origin, to, mode, by, safety, stops],
+    () => JSON.stringify({ origin, to, mode, by: mode === "by" ? by : null, safety, avoid, stops } satisfies Inputs),
+    [origin, to, mode, by, safety, avoid, stops],
   );
   const key = useDebounced(inputs, 300);
   const generation = dataGeneration(slowdowns);
@@ -404,6 +409,7 @@ export default function Trip() {
       ],
       safety_weight: k.safety,
       safe_path: k.safety >= 1,
+      ...avoidBody(k.avoid),
       watch: watching,
     };
   };
@@ -422,10 +428,17 @@ export default function Trip() {
       ? planTrip(body).then((timed) => ({ kind: "plan", key, ...timed }))
       : k.mode === "by"
         ? api
-            .recommend({ origin: o, destination: d, arrive_by: k.by as string, safety_weight: k.safety, safe_path: k.safety >= 1 })
+            .recommend({
+              origin: o,
+              destination: d,
+              arrive_by: k.by as string,
+              safety_weight: k.safety,
+              safe_path: k.safety >= 1,
+              ...avoidBody(k.avoid),
+            })
             .then((rec) => ({ kind: "rec", key, rec }))
         : api
-            .route({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1 })
+            .route({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1, ...avoidBody(k.avoid) })
             .then((r) => ({ kind: "route", key, best: r.best, alt: r.alternative }));
     p.then(
       (r) => {
@@ -547,6 +560,7 @@ export default function Trip() {
           days: WEEKDAYS,
           safe_path: safety >= 1,
           safety_weight: safety,
+          ...avoidBody(avoid),
         });
         setWatch({ key: inputs, tripId: trip.id });
         setSaved((s) => s && { ...s, trips: [...s.trips.filter((t) => t.id !== trip.id), trip] });
@@ -645,6 +659,7 @@ export default function Trip() {
             </div>
             <h2 className="m-0 text-[16px] leading-snug font-semibold">{best.summary || "Local streets"}</h2>
           </div>
+          <RouteRules route={best} />
           <div className="h-px bg-line" />
           <h3 className="m-0 text-[13px] font-semibold tracking-[0.08em] text-muted uppercase">Why this way</h3>
           <Reasons reasons={best.reasons} />
@@ -749,6 +764,7 @@ export default function Trip() {
                       <span className="font-num">{when(l.arrive_at, first.leave_at)}</span>
                       {l.wait_min > 0 ? ` · wait ${l.wait_min} min` : ""}
                     </span>
+                    {l.uses_toll && <TollLine roads={l.toll_roads} small />}
                     {(l.late_min > 0 || l.tight) && (
                       <span className="text-[12px] font-medium" style={{ color: l.late_min > 0 ? C.heavyText : C.moderate }}>
                         {l.late_min > 0 ? `${l.late_min} min late` : "Tight: little room for delays"}
@@ -838,6 +854,7 @@ export default function Trip() {
           )}
         </div>
         <SafetySlider value={safety} onChange={setSafety} />
+        <AvoidToggles value={avoid} onChange={setAvoid} />
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {stops.map((id) => (

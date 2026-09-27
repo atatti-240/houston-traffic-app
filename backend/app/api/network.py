@@ -35,6 +35,8 @@ def segments(svc: Services = Depends(get_services)):
             "to_node": s.to_node,
             "miles": round(s.length_miles, 2),
             "free_flow_mph": s.free_flow_mph,
+            "speed_limit_mph": s.speed_limit_mph,
+            "toll": s.toll,
             "geometry": [list(p) for p in s.geometry],
         }
         for s in svc.network.segments.values()

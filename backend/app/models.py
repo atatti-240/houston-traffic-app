@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.routing.avoid import Avoid
 
 
 class Node(Base):
@@ -34,6 +35,9 @@ class RoadSegment(Base):
     length_m: Mapped[float] = mapped_column(Float)
     free_flow_mph: Mapped[float] = mapped_column(Float)
     geometry: Mapped[list] = mapped_column(JSON)  # [[lat, lng], ...]
+    # From OpenStreetMap (app/seed/road_limits.json). None = the limit isn't known.
+    speed_limit_mph: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    toll: Mapped[bool | None] = mapped_column(Boolean, default=False)
 
     @property
     def length_miles(self) -> float:
@@ -102,6 +106,9 @@ class Trip(Base):
     # 0 = fastest ... 1 = safest. None = derive from safe_path (older rows).
     safety_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Avoid tolls / highways (app.routing.avoid). None = off (older rows).
+    avoid_tolls: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    avoid_highways: Mapped[bool | None] = mapped_column(Boolean, default=False)
 
     @property
     def weight(self) -> float:
@@ -112,6 +119,10 @@ class Trip(Base):
     @property
     def day_list(self) -> list[int]:
         return [int(d) for d in self.days.split(",") if d.strip()]
+
+    @property
+    def avoid(self) -> Avoid:
+        return Avoid(bool(self.avoid_tolls), bool(self.avoid_highways))
 
 
 class TripState(Base):

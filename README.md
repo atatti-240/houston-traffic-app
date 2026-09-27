@@ -45,6 +45,7 @@ API docs: http://localhost:8000/docs
 | `make backend` / `make frontend` | run one side |
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
+| `make limits` | look up speed limits and toll roads in OpenStreetMap (writes `backend/app/seed/road_limits.json`) |
 | `make test` | backend pytest + frontend typecheck |
 | `make cv-fake` | a stand-in for the CV app on :8500 (recorded Baton Rouge frames, scripted incident); see [Live AI camera feeds](#live-ai-camera-feeds) |
 | `make dev-cv` | `make dev` plus the fake CV app, with `CV_URL` set: live AI cameras without the CV app |
