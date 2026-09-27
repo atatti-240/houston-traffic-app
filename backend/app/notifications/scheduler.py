@@ -34,7 +34,7 @@ log = logging.getLogger("houston.scheduler")
 
 
 def _fmt(t: datetime) -> str:
-    return t.strftime("%-I:%M %p")
+    return t.strftime("%I:%M %p").lstrip("0")
 
 
 def _arrival_text(rec: Recommendation, arrive_by: datetime) -> str:

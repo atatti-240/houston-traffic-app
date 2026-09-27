@@ -70,11 +70,11 @@ BOUND = {"N": "northbound", "NE": "northbound", "NW": "northbound", "S": "southb
 
 
 def fmt(t: datetime) -> str:
-    return t.strftime("%-I:%M %p")
+    return t.strftime("%I:%M %p").lstrip("0")
 
 
 def _hour_label(t: datetime) -> str:
-    return t.strftime("%-I %p") if t.minute < 30 else (t + timedelta(hours=1)).strftime("%-I %p")
+    return (t if t.minute < 30 else t + timedelta(hours=1)).strftime("%I %p").lstrip("0")
 
 
 @dataclass

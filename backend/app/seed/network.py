@@ -6,6 +6,7 @@ Northside carry the at-grade rail crossings, so trains actually change route cho
 
 Each link below becomes two directed RoadSegments. Profile multipliers feed the synthetic
 generator only (they are the "ground truth" the models should rediscover from history).
+Street crash multipliers come from the city's real Vision Zero crash data (seed/visionzero.py).
 """
 
 import json
@@ -18,6 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Camera, Node, RailCrossing, RoadSegment, ScoreEntry
+from app.seed.visionzero import crash_factor
 
 DOWNTOWN = (29.7604, -95.3698)
 
@@ -73,6 +75,7 @@ class LinkDef:
     b: str
     road_class: str = "freeway"
     # Synthetic ground truth: how congested / crash-prone this link is vs. a typical one.
+    # For streets, crash_mult is scaled by the Vision Zero factor in segment_profiles().
     congestion_mult: float = 1.0
     crash_mult: float = 1.0
     crossings: tuple[CrossingDef, ...] = field(default_factory=tuple)
@@ -254,6 +257,10 @@ def segment_profiles() -> list[SegmentProfile]:
     for link, frm, to in iter_directed():
         a, b = node_latlng(frm), node_latlng(to)
         detour = 1.1 if link.road_class == "freeway" else 1.25
+        crash_mult = link.crash_mult
+        if link.road_class == "arterial":
+            shape = segment_geometry(segment_id(link, link.a, link.b), link.a, link.b)
+            crash_mult *= crash_factor(link.name, tuple(map(tuple, shape)))
         profiles.append(
             SegmentProfile(
                 segment_id=segment_id(link, frm, to),
@@ -262,7 +269,7 @@ def segment_profiles() -> list[SegmentProfile]:
                 free_flow_mph=FREEWAY_MPH if link.road_class == "freeway" else ARTERIAL_MPH,
                 inbound=haversine_m(b, DOWNTOWN) < haversine_m(a, DOWNTOWN),
                 congestion_mult=link.congestion_mult,
-                crash_mult=link.crash_mult,
+                crash_mult=crash_mult,
             )
         )
     return profiles

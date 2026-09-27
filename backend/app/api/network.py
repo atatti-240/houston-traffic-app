@@ -236,7 +236,7 @@ def live(svc: Services = Depends(get_services)):
         "cameras": cameras,
         "incidents": incidents,
         "travel_times": travel_times,
-        "high_injury_segments_url": None,  # Vision Zero layer: not wired yet
+        "high_injury_segments_url": "/hazards/high-injury",  # Vision Zero HIN 2025, see api/hazards.py
         "feeds": {
             f.name: {"ok": f.ok, "records": f.records, "error": f.error} for f in view.live.feeds.values()
         },
