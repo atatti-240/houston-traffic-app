@@ -139,7 +139,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:
 
 ```
 backend/   FastAPI + SQLite: adapters (mock data), scoring models, router, recommender, planner, causes, scheduler, API
-frontend/  Next.js PWA + Leaflet over a MapLibre street map, dark UI: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams, scripted demo
+frontend/  Next.js PWA + Leaflet over a MapLibre street map, light and dark themes: Where to, Trip, Live map, Causes, Why it's slow, Alerts, Live cams, scripted demo
 ```
 
 ## How real data plugs in
@@ -168,8 +168,8 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ Models, routing, recommender, multi-stop planner, causes, scheduler, API, UI, demo: all working, 170 backend tests
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
-- ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
-- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for its card and directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ✅ UI: phone-first (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA. Looks like Google Maps: flat colors, Google's light and dark palettes and traffic colors, the Figtree font. **Theme**: System (follows the device, the default), Light or Dark, in the map's layers menu; kept in the browser and applied before the page paints
+- ✅ Map: free vector street map ([OpenFreeMap](https://openfreemap.org), no key) in Google-Maps-like light and dark colors (switches with the theme without reloading), roads traced along the real streets, and shops and places as dots colored by kind with names (tap one for its card and directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - ✅ Places: search any Houston address or business, place cards with hours / phone / website, Home / Work / favorites, gas / EV / parking near you or along your route (all OpenStreetMap, free, no keys)
 - ✅ Live AI cameras: real video from the team's CV app with vehicle boxes, counts, rough speeds and its incident check; confirmed incidents drive causes, alerts and routing. Baton Rouge video stands in for Houston cameras; a fake CV server with recorded frames covers tests and Mac-less demos
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), Houston live camera video, full OSM road graph, real web push, the marketing website
