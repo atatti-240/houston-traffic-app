@@ -44,6 +44,7 @@ API docs: http://localhost:8000/docs
 | `make backend` / `make frontend` | run one side |
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
+| `make transit` | download METRO's bus and rail timetable (GTFS, about 13 MB) and build `backend/data/transit.db` for the Transit tab |
 | `make test` | backend pytest + frontend typecheck |
 
 Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
@@ -63,7 +64,7 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 9. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
 10. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
-You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`.
+You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`. On a trip, the **Walk**, **Bike** and **Transit** tabs give walking and cycling directions and METRO bus and rail trips (`trip&to=galleria&from=downtown&travel=transit`; run `make transit` once to load the timetable).
 
 ## How it works
 
@@ -107,4 +108,5 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
 - ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ✅ Walk / Bike / Transit tabs: walking and cycling directions from OpenStreetMap ([FOSSGIS routing](https://routing.openstreetmap.de)), and METRO\* trips with at most one change on the scheduled [GTFS](https://www.ridemetro.org/about/business-to-business/developer-portal) timetable (no live bus tracking). Route and arrival data provided by permission of METRO\*. (\* METRO is the registered trademark of the Metropolitan Transit Authority of Harris County, Texas. All rights reserved.)
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, full OSM road graph, real web push, the marketing website
