@@ -23,12 +23,13 @@ def route(req: RouteRequest, directions: bool = False, svc: Services = Depends(g
     `?directions=true` adds door-to-door directions (app/directions)."""
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     view = svc.router.view()
+    # Avoid tolls / highways: this router stays off them in every search, the extra routes' too.
     router = avoiding(svc.router, req.avoid)
     try:
         best, alt = router.route(
             o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight, view=view
         )
-        return route_response(svc, req.origin, req.destination, best, alt, view, directions)
+        return route_response(svc, req.origin, req.destination, best, alt, view, directions, router=router)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
 
@@ -53,7 +54,9 @@ def recommend(req: RecommendRequest, directions: bool = False, svc: Services = D
         )
 
     try:
-        return recommend_response(svc, req.origin, req.destination, recommend_by, arrive_by, view, directions)
+        return recommend_response(
+            svc, req.origin, req.destination, recommend_by, arrive_by, view, directions, router=router
+        )
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
 
