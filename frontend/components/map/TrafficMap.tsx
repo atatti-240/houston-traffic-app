@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import Reports from "@/components/map/Reports";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import { camName } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
@@ -418,6 +419,7 @@ export default function TrafficMap({
       </Pane>
 
       {interactive && <CauseMarkers />}
+      {interactive && <Reports />}
     </MapContainer>
   );
 }
