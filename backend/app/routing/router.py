@@ -44,6 +44,7 @@ SOURCE_LABELS = {
     "trainwatch": "Train Watch",
     "transtar_rss": "TranStar",
     "camera": "traffic camera",
+    "camera_ai": "camera AI",
     "demo": "demo feed",
     "history": "history",
 }

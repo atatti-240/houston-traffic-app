@@ -8,6 +8,7 @@ Waze and Google Maps react to congestion after it has formed. This app predicts 
 - **Crash-prone stretches of freeway.** Learned per road segment and hour, with a 🛡️ **Faster ↔ Safer** slider that steers around them.
 - **Tomorrow's congestion.** A congestion score per road × 15-minute slot, nudged every day by a moving average.
 - **Why it's slow.** Other maps paint a road red. BlindSpot splits the delay into its causes (rush hour, a crash, a concert, a freight train, lane closures, rain, construction, heavier than usual traffic) and puts an icon for each on the map.
+- **Live AI cameras.** Real traffic-camera video with the team's computer-vision app ([blindspot-cv](https://github.com/qian-json/blindspot-cv)) drawing a box around every vehicle, counting them, reading rough speeds and checking for incidents. An incident the camera confirms goes on the map, into Alerts and "Why it's slow", and routes go around it. Baton Rouge live video stands in for Houston cameras until we have Houston live video. See [Live AI camera feeds](#live-ai-camera-feeds).
 
 Then it tells you **when to leave** (the latest departure that still gets you there on time) and pushes a plan, "leave earlier" / "new route" updates, a **"Leave now"** alert, and **"it's cleared"** when a road you're watching is back to normal. Live train, traffic and incident reports override the predictions for the next half hour, and every answer says how sure it is and where the data came from. Errands with up to 3 stops get the best stop order and departure times.
 
@@ -45,8 +46,10 @@ API docs: http://localhost:8000/docs
 | `make seed` | wipe and rebuild `backend/data/app.db` (network + history replay) |
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
 | `make test` | backend pytest + frontend typecheck |
+| `make cv-fake` | a stand-in for the CV app on :8500 (recorded Baton Rouge frames, scripted incident); see [Live AI camera feeds](#live-ai-camera-feeds) |
+| `make dev-cv` | `make dev` plus the fake CV app, with `CV_URL` set: live AI cameras without the CV app |
 
-Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`), `NOMINATIM_URL` (address and business search, default the free public server `https://nominatim.openstreetmap.org`; point it at your own Nominatim for heavier use).
+Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`), `NOMINATIM_URL` (address and business search, default the free public server `https://nominatim.openstreetmap.org`; point it at your own Nominatim for heavier use). Live AI cameras: `CV_URL`, `CV_CAMERAS`, `CV_VIEW`, `CV_VIDEO_DELAY_S`, `CV_CLEAR_AFTER_S` (see [Live AI camera feeds](#live-ai-camera-feeds)).
 
 ## The demo (≈3 minutes)
 
@@ -73,6 +76,49 @@ You can also use the app yourself: search a place and set **Leave now / Arrive b
 - **Gas, EV chargers, parking.** Turn them on in the map's layers menu (from zoom 13), or open **Gas near me** there, or **Gas on the way** from a trip: the closest few with distance, each with its card.
 
 The public Nominatim server allows one request per second for the whole app and discourages search-as-you-type, so the backend rate-limits, caches every answer (memory + SQLite, and serves an older answer, marked as such, when the geocoder is down), and the app waits for a pause in typing, needs 3 letters and keeps one request in flight. For anything bigger than a demo, set `NOMINATIM_URL` to your own Nominatim. When search is down, our own places still work and the app says so.
+
+## Live AI camera feeds
+
+The team's computer-vision app, [blindspot-cv](https://github.com/qian-json/blindspot-cv), runs as its own process. It plays live traffic-camera video, finds every vehicle (car, truck, bus, motorcycle), estimates rough speeds and, on an Apple-silicon Mac, runs an incident check (a small vision-language model looks for crashes, stalled cars, people on foot, wrong-way drivers and debris). BlindSpot talks to it over HTTP only, through `CV_URL`, so it can run on this machine, on a teammate's Mac, or anywhere on the network.
+
+What you get on **Live cams**:
+
+- Cameras with a live AI feed come first, marked **LIVE AI** (and red on the map's camera layer). Their card plays the real video with a box around each vehicle (tap the box button to hide them), a **LIVE** badge, pause and full screen.
+- Under it: vehicles in view (by kind), traffic as **flowing / slow / stopped** with a rough mph (the CV app's speeds are ±30% or worse, so we only trust those three words), and the incident check: clear, **possible** (one check flagged it: shown on the card only) or **confirmed** (2 of its last 3 checks) with the model's one-line description.
+- A **confirmed** incident becomes a live incident on the camera's Houston road, like one from TranStar: it slows the road, shows on the map and in "Why it's slow" and Alerts as "Crash spotted by camera AI" with the model's description, and routes go around it ("Rerouted around I-45 Gulf Fwy: crash reported (camera AI, just now)"). Watched trips re-plan right away. It clears once the camera has seen a clear road for `CV_CLEAR_AFTER_S` (2 min), or 10 min after the camera stops reporting. Possible incidents never touch routing.
+- Without a feed (no `CV_URL`, the CV app down or not running that camera) the card keeps the drawn view and says the live AI feed is offline. Nothing else changes.
+
+**Stand-ins, honestly labeled.** We don't have Houston live video yet, so the CV app's Baton Rouge cameras (Louisiana DOTD live streams) stand in for Houston cameras on similar freeways: by default Baton Rouge I-10 @ College Dr (`007`) for our I-45 Gulf Fwy @ Telephone Rd camera, and I-10 at Perkins (`009`) for I-10 Katy Fwy @ 610 West. The card says so under the video, and incidents say "Baton Rouge live video standing in". Vehicle counts and speeds stay on the card: they're Baton Rouge traffic, so they don't change Houston congestion. Only confirmed incidents feed the rest of the app, to show the whole chain working.
+
+### Run it
+
+```bash
+# 1. The CV app (see its README; Python 3.12+). On an Apple-silicon Mac, with the incident check:
+git clone https://github.com/qian-json/blindspot-cv.git && cd blindspot-cv
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python transtar_feed.py --la-cameras 007 009 --no-demo          # serves :8500
+#    Anywhere else (no incident check, lighter detector, CPU friendly):
+.venv/bin/python transtar_feed.py --incidents off --detector yolo11s-hd --la-cameras 007 009 --live-fps 1 --no-demo
+
+# 2. BlindSpot, pointed at it
+CV_URL=http://localhost:8500 make dev
+```
+
+The CV app on another computer: start it with `--host 0.0.0.0` and use `CV_URL=http://<its address>:8500`. The incident check needs an Apple-silicon Mac (M1-M4); elsewhere the CV app runs without it and the card says "Incident check off".
+
+**No CV app, or no Mac?** `make dev-cv` runs everything with a fake CV server (`backend/scripts/fake_cv.py`, standard library only) that serves the same stream from 57 real frames recorded from the Baton Rouge I-10 @ College Dr camera, each with the boxes the CV app's detector found. Its incident is scripted and labeled as a test: `curl -X POST localhost:8500/incident` starts one (possible, confirmed 4 s later, the camera sees a clear road again after 90 s, and BlindSpot clears it 2 min after that), `curl -X POST 'localhost:8500/incident?clear=1'` ends it early, or start it with `make cv-fake CV_FAKE_ARGS="--incident-after 20"`. A good trip to try while it's on: Midtown → Hobby Airport (`/?screen=trip&from=midtown&to=hobby`) goes around the Gulf Freeway.
+
+| Env var | Default | What |
+|---|---|---|
+| `CV_URL` | empty (off) | The CV app's address, e.g. `http://localhost:8500` |
+| `CV_CAMERAS` | `007=cam_I45S_downtown_gulf_ee,009=cam_I10W_downtown_i10_610w` | Which CV camera stands in for which of our cameras (`GET /cameras` lists ours). Test-clip cameras (`replay1`, ...) can be mapped too |
+| `CV_VIEW` | `follow` | Which camera the CV app processes, see below |
+| `CV_VIDEO_DELAY_S` | `2.5` | The video plays this far behind so the boxes, which arrive a moment after their frame, land on the right cars |
+| `CV_CLEAR_AFTER_S` | `120` | A confirmed incident clears once the camera has seen a clear road this long |
+
+**`CV_VIEW`: which camera runs.** The CV app processes one camera at a time by default (running them all is heavy). `follow` switches it to the camera someone is watching in BlindSpot, and back to the first mapped camera when nobody is, so that one keeps being checked for incidents; the trade-off is that the other cameras aren't checked while they're off screen, and two people watching different cameras take turns (30 s each, the other card says the camera AI is busy meanwhile). `all` runs every camera all the time (every camera is checked, but it's heavy, and it also wakes the CV app's TranStar snapshot cameras, which it then polls at its own rate). `off` never changes what the CV app is doing (use its own page at :8500 to pick).
+
+Endpoints: `GET /cv/status` (connected, mapping, what it's processing, incident check on or off, confirmed incidents), `GET /cv/cameras/{camera_id}` (status, counts, flow and rough mph, incident check, recent vehicle boxes with their frame times; `?since=` epoch ms for only newer ones), `GET /cv/cameras/{camera_id}/video` (MJPEG, for a plain `<img>`), `GET /cv/cameras/{camera_id}/frame.jpg` (one frame, `?at=` epoch ms). `GET /cameras` and `GET /live` give each camera a `live_feed` summary (`null` when it has none).
 
 ## How it works
 
@@ -102,6 +148,7 @@ Every source is an interface in `backend/app/adapters/base.py`. Today each one h
 | `LiveTrafficSource.current(now)` | live congestion per segment (0-1) with source and confidence | TranStar RSS live travel times, camera vehicle counts vs each camera's baseline |
 | `IncidentSource.active(now)` | incidents and closures matched to segments | TranStar RSS incidents and lane closures |
 | `CameraSource.cameras()` | camera catalog | TranStar CCTV list + train crossing cameras |
+| Camera AI (`app/cv/`, not an adapter) | live video, vehicle boxes, counts, rough speeds, confirmed incidents | The team's blindspot-cv app over `CV_URL` (Baton Rouge live video standing in today); Houston live video plugs into the same app |
 
 Live methods are called once per request, so cache the upstream for about a minute, and raise when it's down. The app marks the feed down and falls back to predictions.
 
@@ -117,4 +164,5 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
 - ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for its card and directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - ✅ Places: search any Houston address or business, place cards with hours / phone / website, Home / Work / favorites, gas / EV / parking near you or along your route (all OpenStreetMap, free, no keys)
-- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, full OSM road graph, real web push, the marketing website
+- ✅ Live AI cameras: real video from the team's CV app with vehicle boxes, counts, rough speeds and its incident check; confirmed incidents drive causes, alerts and routing. Baton Rouge video stands in for Houston cameras; a fake CV server with recorded frames covers tests and Mac-less demos
+- ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), Houston live camera video, full OSM road graph, real web push, the marketing website

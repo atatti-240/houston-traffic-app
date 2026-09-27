@@ -362,6 +362,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [refresh]);
 
+  // The camera AI confirms (or clears) incidents in real time, even while the demo clock stands still:
+  // fetch slowdowns / alerts / live again when its set of incidents changes.
+  const cvKey = useRef<string | null>(null);
+  useEffect(() => {
+    const poll = () =>
+      api
+        .cvStatus()
+        .then((s) => {
+          if (cvKey.current !== null && s.incidents_key !== cvKey.current) refresh();
+          cvKey.current = s.incidents_key;
+        })
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
   // Responses that arrive after a newer request started are dropped (`current`).
   const clockMinute = clock?.now.slice(0, 16);
   useEffect(() => {
