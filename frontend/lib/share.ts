@@ -1,7 +1,7 @@
 /** Share ETA: make a read-only link for a route (POST /shares), read what a link shows (GET /shares/{id}),
  * and hand a link to the phone's share sheet or the clipboard. */
 
-import { call } from "./api";
+import { API_URL, call } from "./api";
 import { fmtDayTime, fmtTime } from "./format";
 import type { LatLngTuple } from "./types";
 
@@ -45,10 +45,42 @@ export interface SharedTrip {
 }
 
 const TIMEOUT_MS = 15000;
+const MAX_NAME = 200; // the API's cap on a place name (it keeps the first 80 characters)
+
+/** A request the API turned down, with its status (call() in api.ts keeps only the message). */
+class ShareRefused extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** A place name the API takes: one line, at most MAX_NAME characters, counted like the API counts
+ * them (by code point, so an emoji isn't cut in half). */
+function fitName(name: string | undefined): string | undefined {
+  return name === undefined ? undefined : Array.from(name.replace(/\s+/g, " ").trim()).slice(0, MAX_NAME).join("");
+}
+
+/** POST /shares with the names cut to fit. A refusal keeps its status, for describeCreateError. */
+async function create(body: ShareRequest): Promise<ShareMade> {
+  const res = await fetch(`${API_URL}/shares`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...body, origin_name: fitName(body.origin_name), destination_name: fitName(body.destination_name) }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    // The message is for debugging only: a validation error's detail is a list of field errors.
+    const detail = await res.json().then((j) => j?.detail, () => null);
+    throw new ShareRefused(res.status, typeof detail === "string" ? detail : res.statusText);
+  }
+  return res.json();
+}
 
 export const shareApi = {
-  create: (body: ShareRequest) =>
-    call<ShareMade>("/shares", { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) }),
+  create,
   get: (id: string) => call<SharedTrip>(`/shares/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(TIMEOUT_MS) }),
 };
 
@@ -66,6 +98,14 @@ export function describeShareError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (/failed to fetch|networkerror|load failed|timed? ?out|aborted/i.test(msg)) return "Can't reach BlindSpot right now.";
   return msg;
+}
+
+/** What the Share button says when a link couldn't be made: our words, whatever the API said. */
+export function describeCreateError(e: unknown): string {
+  if (!(e instanceof ShareRefused)) return `Couldn't make a link: ${describeShareError(e)}`;
+  if (e.status === 429) return "Couldn't make a link: Too many share links from here. Try again in a while.";
+  if (e.status < 500) return "Couldn't make a link for this trip. Try planning it again.";
+  return "Couldn't make a link right now. Try again in a bit.";
 }
 
 /** A time, with the weekday when it isn't on `ref`'s day. */
