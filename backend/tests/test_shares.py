@@ -94,6 +94,7 @@ def test_bad_routes_and_times_are_rejected(client, wall):
     assert post(depart_at="2026-09-29T09:00:00").status_code == 422  # more than a day ahead
     assert post(depart_at="not a time").status_code == 422
     assert post(origin_name="x" * 201).status_code == 422
+    assert post(origin_name="x" * 200, destination_name="🚗" * 200).status_code == 201  # the most the app sends
     assert post().status_code == 201
 
 

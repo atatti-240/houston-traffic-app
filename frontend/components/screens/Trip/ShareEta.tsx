@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import { Icon, PillButton } from "@/components/ui";
-import { describeShareError, prefersShareSheet, sendLink, shareApi, shareText, shareUrl, type ShareMade } from "@/lib/share";
+import { describeCreateError, prefersShareSheet, sendLink, shareApi, shareText, shareUrl, type ShareMade } from "@/lib/share";
 import { C, ICON } from "@/lib/theme";
 import type { Route } from "@/lib/types";
 
@@ -88,7 +88,7 @@ export default function ShareEta({
       setLink(l);
       await send(l);
     } catch (e) {
-      setFailed({ key, message: `Couldn't make a link: ${describeShareError(e)}` });
+      setFailed({ key, message: describeCreateError(e) });
     } finally {
       setMaking(false);
     }
