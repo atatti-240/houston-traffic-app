@@ -18,6 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Camera, Node, RailCrossing, RoadSegment, ScoreEntry
+from app.seed.road_rules import road_rules
 
 DOWNTOWN = (29.7604, -95.3698)
 
@@ -296,6 +297,7 @@ def seed_network(session: Session) -> dict[str, int]:
                 length_m=round(profiles[sid].length_m, 1),
                 free_flow_mph=profiles[sid].free_flow_mph,
                 geometry=segment_geometry(sid, frm, to),
+                **road_rules(sid),
             )
         )
     session.flush()

@@ -9,6 +9,7 @@ from app.api.deps import get_services, is_clock_time, resolve_location, resolve_
 from app.api.schemas import RecommendRequest, RouteRequest, TripIn, recommendation_json, route_json
 from app.models import Notification, Trip, TripState
 from app.recommender import recommend_departure
+from app.routing.avoid import avoiding
 from app.routing.router import NoRouteError
 from app.services import Services
 
@@ -19,7 +20,7 @@ router = APIRouter(tags=["planning"])
 def route(req: RouteRequest, svc: Services = Depends(get_services)):
     o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     try:
-        best, alt = svc.router.route(
+        best, alt = avoiding(svc.router, req.avoid).route(
             o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight
         )
     except NoRouteError as e:
@@ -38,7 +39,8 @@ def recommend(req: RecommendRequest, svc: Services = Depends(get_services)):
         # earliest=now: never suggest leaving in the past. A deadline that already passed
         # comes back as "leave now" with on_time=False.
         rec = recommend_departure(
-            svc.router, o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now, safety_weight=req.safety_weight
+            avoiding(svc.router, req.avoid), o, d, arrive_by, req.safe_path, req.buffer_min, earliest=now,
+            safety_weight=req.safety_weight,
         )
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
@@ -56,6 +58,7 @@ def _trip_json(t: Trip) -> dict:
         "safe_path": t.safe_path,
         "safety_weight": t.weight,
         "device_id": t.device_id,
+        **t.avoid.to_json(),
     }
 
 
@@ -75,6 +78,7 @@ def create_trip(body: TripIn, response: Response, svc: Services = Depends(get_se
             safe_path=body.safe_path,
             safety_weight=body.safety_weight,
             device_id=body.device_id,
+            **body.avoid.to_json(),
         )
         same = s.scalars(
             select(Trip).where(
@@ -85,7 +89,7 @@ def create_trip(body: TripIn, response: Response, svc: Services = Depends(get_se
                 Trip.days == trip.days,
             )
         )
-        existing = next((t for t in same if t.weight == trip.weight), None)
+        existing = next((t for t in same if t.weight == trip.weight and t.avoid == trip.avoid), None)
         if existing is not None:
             response.status_code = 200
             return _trip_json(existing)

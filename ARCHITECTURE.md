@@ -96,6 +96,10 @@ It returns the best route, one alternative (found by penalizing edges of the bes
 - when live data is in play, the route it *would* have picked on predictions alone. Roads it skips because of live data become "Rerouted around X: crash reported (demo feed, just now)" or "heavier traffic than usual right now (traffic camera, 2 min ago)".
 - when a feed is down, a first bullet saying the route is running on predictions.
 
+**Avoid tolls / avoid highways** (`avoid_tolls`, `avoid_highways` on `/route`, `/recommend`, `/plan` and saved trips; `app/routing/avoid.py`): every search for that request (best, alternative, traffic-only) skips toll segments (the Sam Houston Tollway) or freeways. With no route without them, it searches again with them 10x as costly, so the route uses as little of them as it can, and the first reason says so ("No toll-free route: this one uses BW-8 Sam Houston Tollway (6.5 mi)"). Watched plans and saved trips keep their options when re-planned.
+
+**Speed limits and toll roads** come from OpenStreetMap: `scripts/fetch_road_limits.py` (`make limits`) samples points along each traced road, asks Nominatim which road is there, keeps only answers on the segment's own main lanes (not ramps, frontage roads, cross streets or tolled managed / HOV lanes), and writes `app/seed/road_limits.json` with the votes behind each value. A segment without a `maxspeed` tag has an unknown limit (`null`); nothing is guessed. Routes carry `speed_limit_mph` / `toll` per segment, `speed_limits` (stretches of one road at one limit, with the mile they start at), `uses_toll` and `toll_roads`.
+
 ## Why it's slow
 
 Maps paint a road red. `CausesEngine` (`app/causes.py`) says why. It reads the same `ConditionsView` as the router, so it always agrees with the routes. For each road segment at time T, the delay against free flow is split into parts:
@@ -136,11 +140,11 @@ A watch on a road with something unusual (a non-routine cause of at least a minu
 ## Data model (SQLite via SQLAlchemy)
 
 - `Node`: id, name, lat, lng, is_place
-- `RoadSegment`: id, name, highway, road_class (`freeway`/`arterial`), direction, from_node, to_node, length_m, free_flow_mph, geometry (JSON list of `[lat, lng]`: the real road, traced from OpenStreetMap by `scripts/fetch_road_shapes.py` into `app/seed/road_shapes.json`; existing databases pick up new shapes on startup)
+- `RoadSegment`: id, name, highway, road_class (`freeway`/`arterial`), direction, from_node, to_node, length_m, free_flow_mph, geometry (JSON list of `[lat, lng]`: the real road, traced from OpenStreetMap by `scripts/fetch_road_shapes.py` into `app/seed/road_shapes.json`; existing databases pick up new shapes on startup), speed_limit_mph (null = not known) and toll (from `app/seed/road_limits.json`, refreshed on startup)
 - `RailCrossing`: id, name, lat, lng, rail_line, segment_id
 - `Camera`: id, kind (`highway`/`train`), name, lat, lng, url, segment_id, crossing_id
 - `ScoreEntry`: model, entity_id, bucket, value, aux, n_obs (aux = avg blocked minutes for trains)
-- `Trip`: id, name, origin, destination, arrive_by (HH:MM), days (e.g. `0,1,2,3,4`), safe_path, safety_weight, device_id
+- `Trip`: id, name, origin, destination, arrive_by (HH:MM), days (e.g. `0,1,2,3,4`), safe_path, safety_weight, device_id, avoid_tolls, avoid_highways
 - `TripState`: trip_id, day, last_departure, last_route, leave_now_sent
 - `SavedPlan`: id, name, device_id, request_json, result_json (the `plan_result.json` shape), watch, announced, leave_now_sent (leg indexes), held ("Hold on" sent), done, created_at, last_planned_at
 - `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
