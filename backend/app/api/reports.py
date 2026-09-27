@@ -3,8 +3,9 @@ ones that are up; say whether they're still there. See app/reports.py for the ru
 
 import math
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_services
@@ -19,6 +20,7 @@ from app.reports import (
     ReportKindId,
     Snap,
     client_key,
+    flooded_other_way,
     in_houston,
     nearest_place,
     provenance,
@@ -35,7 +37,7 @@ class ReportIn(BaseModel):
     lng: float
     note: str = Field("", max_length=NOTE_MAX, description="Optional detail, one line")
     segment_id: str | None = Field(
-        None, description="The road direction it's on (GET /reports/snap offers both); default: the nearest"
+        None, max_length=100, description="The road direction it's on (GET /reports/snap offers both); default: the nearest"
     )
 
 
@@ -106,6 +108,8 @@ def report_json(
         "lat": r.pin_lat,
         "lng": r.pin_lng,
         "segment_id": on_road,
+        # Flooding: the other direction, flooded too where it runs right there
+        "also_on": flooded_other_way(svc.network, r),
         "road": road,
         "place": place or f"Near {nearest_place(svc.network, r.lat, r.lng)}",
         "note": r.note,
@@ -184,7 +188,13 @@ def create_report(
 
 
 @router.post("/reports/{report_id}/vote")
-def vote(report_id: int, body: VoteIn, request: Request, background: BackgroundTasks, svc: Services = Depends(get_services)):
+def vote(
+    report_id: Annotated[int, Path(ge=1, le=2**63 - 1)],  # SQLite's integer range
+    body: VoteIn,
+    request: Request,
+    background: BackgroundTasks,
+    svc: Services = Depends(get_services),
+):
     """Still there (keeps it up longer) or not there (two more of those than "still there" take
     it down; the reporter's own "not there" withdraws it). One vote per client per report:
     voting again changes your vote."""

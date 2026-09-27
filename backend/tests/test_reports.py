@@ -141,6 +141,19 @@ def test_rate_limit_per_client(app, services):
     assert b.post("/reports", json={"kind": "crash", **on_line(services, spots[-1])}).status_code == 201
 
 
+def test_demo_reset_clears_the_rate_limits(app, services):
+    # A rehearsal's reports mustn't leave the presenter locked out for the live demo.
+    a = client_at(app, "10.0.0.9")
+    spots = list(services.network.segments)[: REPORTS_PER_WINDOW + 1]
+    for sid in spots[:REPORTS_PER_WINDOW]:
+        assert a.post("/reports", json={"kind": "crash", **on_line(services, sid)}).status_code == 201
+    assert a.post("/reports", json={"kind": "crash", **on_line(services, spots[-1])}).status_code == 429
+    a.post("/demo/scenario/evening")  # swaps the demo's own reports only: still limited
+    assert a.post("/reports", json={"kind": "crash", **on_line(services, spots[-1])}).status_code == 429
+    a.post("/demo/reset")
+    assert a.post("/reports", json={"kind": "crash", **on_line(services, spots[-1])}).status_code == 201
+
+
 def test_rate_limiter_windows_and_stays_bounded():
     rl = RateLimiter(2, 60, max_keys=3)
     assert rl.hit("a", 0) is None and rl.hit("a", 10) is None
@@ -222,6 +235,17 @@ def test_vote_on_a_missing_report_is_404(c):
     assert c.post("/reports/999/vote", json={"still_there": True}).status_code == 404
 
 
+@pytest.mark.parametrize("rid", ["0", "-1", str(2**63), "99999999999999999999999"])
+def test_vote_on_an_impossible_id_is_refused_not_a_crash(c, rid):
+    # Past SQLite's integer range the lookup itself used to fail with a 500.
+    assert c.post(f"/reports/{rid}/vote", json={"still_there": True}).status_code == 422
+
+
+def test_a_huge_segment_id_is_refused(c):
+    r = c.post("/reports", json={"kind": "crash", "lat": 29.76, "lng": -95.37, "segment_id": "x" * 5000})
+    assert r.status_code == 422 and r.json()["detail"][0]["type"] == "string_too_long"
+
+
 def test_vote_rate_limit(app, c, services):
     rep = report(c, services, "crash", I69_OUT)
     other = client_at(app, "10.0.0.4")
@@ -274,6 +298,29 @@ def test_flooding_warns_trips_that_cross_it(c, services):
     assert {"type": "incident", "kind": "flooding"}.items() <= next(h for h in best["hazards"] if h["type"] == "incident").items()
     alert = next(a for a in c.get("/traffic-alerts").json()["items"] if a["id"] == f"incident:report-{rep['id']}")
     assert alert["group"] == "weather" and alert["kind"] == "weather"
+
+
+def test_flooding_floods_both_directions_where_they_run_together(c, services):
+    rev = services.network.segments[I69_OUT].reverse_id
+    back = c.post("/route", json={"origin": "galleria", "destination": "downtown"}).json()["best"]
+    assert rev in [s["id"] for s in back["segments"]]
+    rep = report(c, services, "flooding", I69_OUT)
+    assert rep["segment_id"] == I69_OUT and rep["also_on"] == rev
+    # The way back drives through the same water: it's slowed, named and warned about too.
+    d = c.get(f"/slowdowns/{rev}").json()
+    assert any(x["kind"] == "weather" and x["label"] == "Flooding" for x in d["causes"])
+    back = c.post("/route", json={"origin": "galleria", "destination": "downtown"}).json()["best"]
+    assert rev not in [s["id"] for s in back["segments"]]
+    assert "Rerouted around I-69 Southwest Fwy: flooding reported (drivers, just now)" in back["reasons"]
+    ids = [a["id"] for a in c.get("/traffic-alerts").json()["items"]]
+    assert f"incident:report-{rep['id']}" in ids and f"incident:report-{rep['id']}-other" in ids
+    # Someone reporting the other direction too: one flood there, not two.
+    report(c, services, "flooding", rev)
+    assert [i.segment_id for i in services.reports.incidents(services.clock.now())].count(rev) == 1
+    # A crash stays on its own side, and Westheimer's one-way pair is a block apart.
+    crash = report(c, services, "crash", POLICE_ROAD)
+    assert crash["also_on"] is None
+    assert report(c, services, "flooding", FLOOD_ROAD)["also_on"] is None
 
 
 def test_police_and_potholes_are_heads_up_only(c, services):

@@ -10,7 +10,8 @@ slow, Causes, Alerts and "notify me when it clears" all see it:
     hazard (object on the road)    small slowdown (x1.2)
     police, pothole                heads-up only: listed and pinned, no effect on routes
 
-Far from any road we know, it stays a pin (listed, never routed around).
+Flooding covers both directions where they run together. Far from any road we know, a report
+stays a pin (listed, never routed around).
 
 A report lasts 45 min (crash, police, stalled car) or 2 h (hazard, pothole, flooding). Each
 "still there" pushes that out to a full life from the vote (never past 4 lives in all); two
@@ -25,7 +26,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Literal
@@ -75,6 +76,9 @@ LNG_RANGE = (-95.9, -94.9)
 OFFSET_M = 55  # the map draws each direction this far to the right of travel
 SNAP_M = 150  # farther than this from a road's centerline: a pin only
 AMBIGUOUS_M = 20  # both directions' lines about as close as this: we can't really tell which
+# Water covers the whole road: flooding also floods the other direction where the two run this
+# close (a divided freeway's two sides are 20-60 m apart; one-way pairs a block apart aren't).
+BOTH_WAYS_M = 70
 M_PER_DEG = 111_320
 
 # Abuse limits per client, in real seconds (the simulated clock can stand still or jump).
@@ -275,6 +279,17 @@ def snap_point(network: Network, lat: float, lng: float, segment_id: str | None 
     return Snap(seg.id, plat, plng, center, rev, ambiguous)
 
 
+def flooded_other_way(network: Network, r: "DriverReport") -> str | None:
+    """The other direction of a flooding report's road, when it runs right where the water is
+    (one-way pairs a block apart don't count)."""
+    seg = network.segments.get(r.segment_id) if r.kind == "flooding" and r.segment_id else None
+    rev = _reverse(network, seg) if seg else None
+    if rev is None:
+        return None
+    _, lat, lng = _nearest_on(seg.geometry, r.lat, r.lng)  # where on the road it is
+    return rev if _nearest_on(network.segments[rev].geometry, lat, lng)[0] <= BOTH_WAYS_M else None
+
+
 def nearest_place(network: Network, lat: float, lng: float) -> str:
     cos = math.cos(math.radians(lat))
     places = network.places() or list(network.nodes.values())
@@ -328,6 +343,10 @@ class RateLimiter:
             while len(self._hits) > self.max_keys:
                 self._hits.popitem(last=False)
             return None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._hits.clear()
 
 
 # --- store ----------------------------------------------------------------------------------------
@@ -395,9 +414,17 @@ class ReportStore:
             return out
 
     def incidents(self, now: datetime) -> list[Incident]:
-        """Active reports as incidents for the road-conditions layer."""
+        """Active reports as incidents for the road-conditions layer. Flooding counts for both
+        directions where they run together, unless the other one has a flooding report of its own."""
         network = self.network
-        return [self.incident(r, now, network) for r in self.active(now)]
+        rows = self.active(now)
+        out = [self.incident(r, now, network) for r in rows]
+        floods = [r for r in rows if r.kind == "flooding"]
+        for r, inc in zip(rows, out[:]):
+            other = flooded_other_way(network, r)
+            if other and not any(f.segment_id == other and _meters((f.lat, f.lng), (r.lat, r.lng)) <= MERGE_M for f in floods):
+                out.append(replace(inc, id=f"{inc.id}-other", segment_id=other))
+        return out
 
     def incident(self, r: DriverReport, now: datetime, network: Network) -> ReportIncident:
         kind = KINDS[r.kind]
@@ -554,3 +581,7 @@ class ReportStore:
                 s.execute(delete(DriverReportVote))
                 s.execute(delete(DriverReport))
             s.commit()
+        if not demo_only:
+            # A fresh start: a rehearsal's reports and votes don't count against the live demo.
+            self.report_limit.clear()
+            self.vote_limit.clear()
