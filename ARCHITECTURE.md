@@ -110,17 +110,18 @@ Maps paint a road red. `CausesEngine` (`app/causes.py`) says why. It reads the s
 
 - **Status** comes from effective speed vs. free flow: heavy under 50%, moderate under 75%, otherwise light. A road is a slowdown if it's moderate or heavy, closed, or at least 3 min slower than free flow.
 - **Shares** of the delay are rounded to whole percents that add up to 100.
-- **The main cause** is the first non-routine cause (anything but rush hour) with at least 25% of the delay, otherwise the biggest one. So a crash at 5 PM still shows as a crash, not as rush hour.
-- **On the map** every slowdown with a non-routine main cause gets an icon, plus the 3 worst rush-hour-only roads. The icon sits 55 m to the right of travel, on the line for that direction.
-- **History** for the "Why it's slow" chart: speed every 10 min over the last 2 h, the usual speed and free flow, and a marker where each cause started.
+- **Routine causes** are rush hour / usual traffic, and a train predicted from history at under 50% ("Chance of a train at the crossing"; 50% or more is "Train likely at the crossing"). They stay in the breakdown, but they never make a road unusual. A live train is never routine.
+- **The main cause** is the first non-routine cause with at least 25% of the delay, otherwise the biggest one (a routine train chance only when it's the only cause). So a crash at 5 PM still shows as a crash, not as rush hour, and a 13% chance of a train doesn't.
+- **On the map** every slowdown with a non-routine main cause gets an icon, plus the 3 worst routine roads. The icon sits 55 m to the right of travel, on the line for that direction.
+- **History** for the "Why it's slow" chart: speed every 10 min over the last 2 h, the usual speed and free flow, and a marker where each cause started. Each point only counts incidents that had started and live readings taken by then (like live trains), so the speed never drops before its marker.
 
-Endpoints: `GET /slowdowns` (every slowdown, worst first), `GET /slowdowns/{segment_id}` (causes, history, whether you're watching it), `POST`/`DELETE /slowdowns/{segment_id}/watch` ("notify me when it clears"), `GET /traffic-alerts` (incidents, roadwork, events, weather, trains and busier-than-usual roads, each with its impact) and camera status in `GET /live` (area, direction, level, delay, weather).
+Endpoints: `GET /slowdowns` (every slowdown, worst first), `GET /slowdowns/{segment_id}` (causes, history, whether you're watching it), `POST`/`DELETE /slowdowns/{segment_id}/watch` ("notify me when it clears"), `GET /traffic-alerts` (incidents, roadwork, events, weather, trains and busier-than-usual roads, each with its impact) and camera status in `GET /live` (area, direction, level, delay, weather). A train alert's delay is the train cause on the crossing's worse road (the one it opens), not the wait at the gate right now. A crossing camera reports the worse of the crossing's two directions, plus `crossing_blocked` (a live train blocking it now, same test as `/live` crossings; `null` for highway cameras). A highway camera's area is the place nearest the interchange it is named after.
 
-A watch on a road with a crash (or a train, rain...) clears when nothing unusual is left, even if it's still rush hour. A watch on a road that was only slow because of rush hour clears when it's back to light traffic. Watches expire after 12 h.
+A watch on a road with something unusual (a non-routine cause of at least a minute: a crash, a live train, rain...) clears when nothing unusual is left, even if it's still rush hour. A watch on any other road clears when it's back to light traffic. One rule (`causes.unusual`) decides both. While the incidents, traffic or trains feed is down, watches stay open and aren't checked, since a missing crash would look like "cleared". Watches expire after 12 h.
 
 ## Request flow
 
-1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight.
+1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight. Saving the same trip again (same device, places, time, days and safety) returns the one already saved instead of a copy that would alert twice.
 2. `recommend_departure` tries departures from `arrive_by - 2h` to `arrive_by` in 5-minute steps, routes each one, and picks the latest one where `eta + buffer <= arrive_by`.
 3. The scheduler runs on every clock tick (a background loop every 30 s, plus every `/demo/advance-clock`), starting 3 h before a trip's arrive-by time. It sends:
    - `plan` on the first check of the day ("leave at 7:35 AM via ...")
@@ -128,7 +129,7 @@ A watch on a road with a crash (or a train, rain...) clears when nothing unusual
    - `leave_later` if it moved ≥10 minutes later
    - `reroute` if the departure time held but the route changed (e.g. a live train)
    - `leave_now` once, when `now >= departure`. If a closed road means the best departure comes after the arrive-by time (leaving later arrives just as soon), the trip stays watched past arrive-by (for up to a day) until that "leave now" goes out. When the trip can't be on time, the plan alert gives the ETA and how late it will be.
-4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. A plan is marked done after the last arrival. A plan you never started whose windows have all closed, and whose planned departure has passed, gets one `info` "Missed" alert instead. Re-plans keep the current stop order unless another is clearly better (on lateness, or by 3+ min), so the order doesn't flip-flop.
+4. Watched multi-stop plans (`POST /plan` with `watch: true`) are re-planned every 5 min until the first leg starts, immediately when a demo endpoint changes live data, and on the tick the departure comes due. Alerts: `plan`, `order_changed`, `leave_earlier`, `leave_later` (including a one-time "Hold on" when the departure is pushed back just as it comes due), then `leave_now` for each leg. Re-plans start at `depart_after` (or now); if that comes out late while `depart_after` is still ahead, they try starting about as much earlier as it's late (up to 3 times, never before now) and keep the least late, so you get `leave_earlier` instead of a plan that quietly goes late. A plan is marked done after the last arrival. A plan you never started whose windows have all closed, and whose planned departure has passed, gets one `info` "Missed" alert instead. Re-plans keep the current stop order unless another is clearly better (on lateness, or by 3+ min), so the order doesn't flip-flop.
 5. Watched roads (`POST /slowdowns/{id}/watch`) are checked on every tick and send one `cleared` alert ("I-45 Gulf Fwy has cleared") when their cause is gone. See [Why it's slow](#why-its-slow).
 6. The frontend polls `/notifications`, shows toasts, and uses web push when available.
 
@@ -142,7 +143,7 @@ A watch on a road with a crash (or a train, rain...) clears when nothing unusual
 - `Trip`: id, name, origin, destination, arrive_by (HH:MM), days (e.g. `0,1,2,3,4`), safe_path, safety_weight, device_id
 - `TripState`: trip_id, day, last_departure, last_route, leave_now_sent
 - `SavedPlan`: id, name, device_id, request_json, result_json (the `plan_result.json` shape), watch, announced, leave_now_sent (leg indexes), held ("Hold on" sent), done, created_at, last_planned_at
-- `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (only rush hour when watched), done
+- `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
 - `Notification`: id, trip_id or plan_id, created_at (sim time), title, body, kind (`plan`, `leave_now`, `leave_earlier`, `leave_later`, `reroute`, `order_changed`, `cleared`, `info`)
 
 ## Folder layout

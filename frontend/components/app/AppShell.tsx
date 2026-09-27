@@ -227,6 +227,8 @@ function Shell() {
       {!isDesktop && down}
       <Toasts
         toasts={toasts}
+        // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable.
+        top={demo && !isDesktop ? 64 : undefined}
         dismiss={(id) => {
           clearTimeout(timers.current.get(id));
           timers.current.delete(id);

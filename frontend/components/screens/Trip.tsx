@@ -16,9 +16,9 @@ import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { CAUSE, C, ICON } from "@/lib/theme";
-import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, TripPlanRequest } from "@/lib/types";
+import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
-import { planTrip, withDeadline, type TimedPlan } from "./Trip/plan";
+import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
@@ -41,7 +41,14 @@ type Result =
   | { kind: "rec"; key: string; rec: Recommendation }
   | ({ kind: "plan"; key: string } & TimedPlan);
 
-type Watch = { key: string; tripId?: number; planId?: string };
+/** `existing`: saved before (found on the server, not made on this screen), so an edit doesn't replace it. */
+type Watch = { key: string; tripId?: number; planId?: string; existing?: boolean };
+
+/** Alerts already saved on the server: weekday trips and the watched plans still running. */
+interface Saved {
+  trips: SavedTrip[];
+  plans: SavedPlan[];
+}
 
 /** What a result is computed from (JSON of it is the request key). */
 interface Inputs {
@@ -112,6 +119,31 @@ function describeError(e: unknown): string {
   if (/^unknown place/i.test(msg)) return "We don't know that place yet. Pick one from Where to.";
   if (/no open route|unknown node/i.test(msg)) return "No open route there on our road map right now.";
   return `Couldn't plan this trip: ${msg}`;
+}
+
+/** The alert already saved for these inputs, if any: a weekday trip, or a watched plan with the same stops. */
+function findSaved(saved: Saved, k: Inputs): Omit<Watch, "key"> | null {
+  const { origin: o, to: d } = k;
+  if (o === undefined || d === undefined) return null;
+  if (k.stops.length) {
+    const p = saved.plans.find((p) => isSamePlan(p, o, k.stops, d, k.by, k.safety));
+    return p ? { planId: p.plan_id } : null;
+  }
+  if (k.mode !== "by") return null;
+  const t = saved.trips.find(
+    (t) =>
+      t.origin === o &&
+      t.destination === d &&
+      t.arrive_by.slice(0, 5) === k.by &&
+      [...t.days].sort().join() === WEEKDAYS.join() &&
+      Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6,
+  );
+  return t ? { tripId: t.id } : null;
+}
+
+/** Deleting an alert that's already gone (e.g. after a demo reset) is fine: there's nothing left to stop. */
+function ignoreGone(e: unknown): void {
+  if (!/not found/i.test(e instanceof Error ? e.message : String(e))) throw e;
 }
 
 /** Key handling for a two-option radio group: arrows move the choice. */
@@ -315,6 +347,7 @@ export default function Trip() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watch, setWatch] = useState<Watch | null>(null);
+  const [saved, setSaved] = useState<Saved | null>(null);
   const [saving, setSaving] = useState(false);
   const [retry, setRetry] = useState(0);
 
@@ -437,6 +470,25 @@ export default function Trip() {
   }, [result, showAlt, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
 
   // ---- alerts ---------------------------------------------------------------------------------
+  // Alerts saved before (this trip opened from its own alert, or watched on an earlier visit).
+  useEffect(() => {
+    let live = true;
+    Promise.all([api.trips(), watchedPlans()]).then(
+      ([trips, plans]) => {
+        if (live) setSaved({ trips, plans });
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [paramsKey]);
+  // What's on screen is already saved: that's the watch this screen holds (so it shows as watched,
+  // and "stop watching" deletes it instead of the button saving a second copy).
+  if (saved && watch?.key !== inputs) {
+    const found = findSaved(saved, JSON.parse(inputs) as Inputs);
+    if (found) setWatch({ key: inputs, ...found, existing: true });
+  }
   const watching = watch?.key === inputs;
   const canWatchTrip = !stops.length && mode === "by" && byOk && typeof origin === "string" && typeof to === "string";
   const canWatch = stops.length ? true : canWatchTrip;
@@ -446,8 +498,9 @@ export default function Trip() {
     setSaving(true);
     setError(null);
     const stop = async (w: Watch) => {
-      if (w.tripId !== undefined) await api.deleteTrip(w.tripId);
-      if (w.planId) await api.deletePlan(w.planId);
+      if (w.tripId !== undefined) await api.deleteTrip(w.tripId).catch(ignoreGone);
+      if (w.planId) await api.deletePlan(w.planId).catch(ignoreGone);
+      setSaved((s) => s && { trips: s.trips.filter((t) => t.id !== w.tripId), plans: s.plans.filter((p) => p.plan_id !== w.planId) });
     };
     try {
       if (watching && watch) {
@@ -455,8 +508,9 @@ export default function Trip() {
         setWatch(null);
         return;
       }
-      // Watching an earlier version of this trip (the inputs changed since): replace it.
-      if (watch) {
+      // Watching an earlier version of this trip (the inputs changed since): replace it. One that was
+      // already saved (e.g. another saved trip passed on the way here) stays; it can be stopped from its own inputs.
+      if (watch && !watch.existing) {
         await stop(watch).catch(() => {});
         setWatch(null);
       }
@@ -470,6 +524,7 @@ export default function Trip() {
         pushOut(plan.notifications ?? []);
         setResult({ kind: "plan", key: inputs, plan, departAfter: shown?.departAfter, deadline: shown?.deadline });
         setWatch({ key: inputs, planId: plan.plan_id });
+        setSaved((s) => s && { ...s, plans: [...s.plans, plan] });
       } else if (canWatchTrip) {
         const trip = await api.createTrip({
           name: `${fromName} → ${toName}`,
@@ -481,6 +536,7 @@ export default function Trip() {
           safety_weight: safety,
         });
         setWatch({ key: inputs, tripId: trip.id });
+        setSaved((s) => s && { ...s, trips: [...s.trips.filter((t) => t.id !== trip.id), trip] });
       }
     } catch (e) {
       const why = describeError(e);
@@ -513,7 +569,10 @@ export default function Trip() {
     const alt = result.kind === "rec" ? result.rec.alternative : result.alt;
     const conf: Confidence = rec ? rec.confidence_label : best.confidence;
     const minutes = Math.max(1, Math.round(best.total_min));
-    const late = rec && !rec.on_time ? Math.max(1, minutesBetween(rec.arrive_by, rec.eta)) : 0;
+    // Not on time: late when the ETA is past the deadline, else just inside the buffer (tight).
+    const pastDeadline = rec ? parseSim(rec.eta).getTime() > parseSim(rec.arrive_by).getTime() : false;
+    const late = rec && !rec.on_time && pastDeadline ? Math.max(1, minutesBetween(rec.arrive_by, rec.eta)) : 0;
+    const tight = rec !== null && !rec.on_time && !pastDeadline;
     const leaveNow = !rec || !rec.on_time || (now ? minutesBetween(now, rec.depart_at) <= 0 : false);
     const b = best.breakdown;
     // Whole minutes that add up to the trip's total (train + closure waits on top of driving).
@@ -538,6 +597,11 @@ export default function Trip() {
             {rec && late > 0 && (
               <span className="text-[14px] font-medium text-heavy-text">
                 You&apos;ll be about {late} min late for {fmtTime(rec.arrive_by)}
+              </span>
+            )}
+            {rec && tight && (
+              <span className="text-[14px] font-medium" style={{ color: C.moderate }}>
+                Tight: less than {rec.buffer_min} min to spare for {fmtTime(rec.arrive_by)}
               </span>
             )}
             {rec && rec.on_time && rec.leave_at_safe !== rec.depart_at && (

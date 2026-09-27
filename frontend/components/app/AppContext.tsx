@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { api } from "@/lib/api";
+import { addMinutesSim, parseSim } from "@/lib/format";
 import { levelForScore, type Level } from "@/lib/theme";
 import type {
   AppNotification,
@@ -61,6 +62,56 @@ function parentOf(s: Screen): Screen {
   if (s.name === "trip") return { name: "where" };
   return { name: "map" };
 }
+
+/** Deep link for a screen: the params `parseScreen` reads. */
+function screenUrl(s: Screen): string {
+  const q = new URLSearchParams({ screen: s.name });
+  if (s.name === "why") q.set("id", s.id);
+  if (s.name === "cameras") {
+    if (s.area) q.set("area", s.area);
+    if (s.camId) q.set("cam", s.camId);
+  }
+  if (s.name === "trip") {
+    if (typeof s.to === "string") q.set("to", s.to);
+    if (typeof s.from === "string") q.set("from", s.from);
+    if (s.arriveBy) q.set("by", s.arriveBy);
+    if (s.safety !== undefined) q.set("safety", String(s.safety));
+  }
+  return `${window.location.pathname}?${q}`;
+}
+
+// Deep links for testing / sharing: ?screen=map|causes|alerts|cameras|why&id=...&area=...
+function parseScreen(search: string): Screen | null {
+  const q = new URLSearchParams(search);
+  const name = q.get("screen");
+  const id = q.get("id");
+  if (name === "map" || name === "causes" || name === "alerts" || name === "where") return { name };
+  if (name === "cameras") return { name, area: q.get("area") ?? undefined, camId: q.get("cam") ?? undefined };
+  if (name === "why" && id) return { name, id };
+  if (name === "trip" && q.get("to"))
+    return {
+      name,
+      to: q.get("to") as string,
+      from: q.get("from") ?? undefined,
+      arriveBy: q.get("by") ?? undefined,
+      safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+    };
+  return null;
+}
+
+/** The screen stack, mirrored in browser history: stack[i] is the history entry at depth base + i. */
+interface Nav {
+  stack: Screen[];
+  base: number;
+}
+
+/** What each of our history entries carries. */
+interface NavEntry {
+  bsDepth: number;
+  bsScreen: Screen;
+}
+
+const MAX_STACK = 30;
 
 // ---- map scene ---------------------------------------------------------------------------------
 
@@ -141,6 +192,8 @@ export interface AppValue {
   refresh: () => void;
   /** Show toasts for notifications returned by an action (e.g. /demo/advance-clock) */
   pushOut: (fresh: AppNotification[]) => void;
+  /** Replace my notifications with what the API has now (after /demo/reset deleted them) */
+  resetNotes: () => Promise<void>;
   applyClock: (c: ClockState) => void;
 
   // navigation
@@ -157,7 +210,7 @@ export interface AppValue {
   focus: (target: { lat: number; lng: number; zoom?: number } | LatLngTuple[]) => void;
   registerMap: (m: MapHandle | null) => void;
   zoom: (delta: number) => void;
-  /** Show predicted traffic at this time instead of now (null = live) */
+  /** Show predicted traffic at this time instead of now (null = live). Map screen only; it keeps its lead as the clock moves. */
   mapTime: string | null;
   setMapTime: (t: string | null) => void;
   /** Traffic level per segment id at mapTime (or now) */
@@ -229,31 +282,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [recents, setRecents] = useState<Recent[]>([]);
   const [device, setDevice] = useState<{ lat: number; lng: number } | null>(null);
 
-  const [stack, setStack] = useState<Screen[]>([{ name: "where" }]);
-  // Deep links for testing / sharing: ?screen=map|causes|alerts|cameras|why&id=...&area=...
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search);
-    const name = q.get("screen");
-    const id = q.get("id");
-    let s: Screen | null = null;
-    if (name === "map" || name === "causes" || name === "alerts" || name === "where") s = { name };
-    else if (name === "cameras") s = { name, area: q.get("area") ?? undefined, camId: q.get("cam") ?? undefined };
-    else if (name === "why" && id) s = { name, id };
-    else if (name === "trip" && q.get("to"))
-      s = {
-        name,
-        to: q.get("to") as string,
-        from: q.get("from") ?? undefined,
-        arriveBy: q.get("by") ?? undefined,
-        safety: q.get("safety") ? Number(q.get("safety")) : undefined,
-      };
-    if (s) setStack([s]);
+  const [nav, setNavState] = useState<Nav>({ stack: [{ name: "where" }], base: 0 });
+  // Kept in step with `nav` so go/back can push history entries outside a state updater.
+  const navRef = useRef(nav);
+  const setNav = useCallback((n: Nav) => {
+    navRef.current = n;
+    setNavState(n);
   }, []);
-  const screen = stack[stack.length - 1];
+  // Start on the deep-linked screen, or after a reload on the screen (and depth) of this history entry.
+  useEffect(() => {
+    const st = window.history.state as Partial<NavEntry> | null;
+    const s = st?.bsScreen ?? parseScreen(window.location.search) ?? { name: "where" };
+    const depth = typeof st?.bsDepth === "number" ? st.bsDepth : 0;
+    setNav({ stack: [s], base: depth });
+    // Keep Next's own history state: it drives its popstate handling.
+    window.history.replaceState({ ...st, bsDepth: depth, bsScreen: s }, "");
+  }, [setNav]);
+  const screen = nav.stack[nav.stack.length - 1];
   const [isDesktop, setIsDesktop] = useState(false);
 
   const [scene, setScene] = useState<MapScene | null>(null);
-  const [mapTime, setMapTime] = useState<string | null>(null);
+  // Predicted traffic is a Map-screen view: keep how far ahead of the clock it looks (so it moves with the clock)
+  // and drop it on every other screen.
+  const [mapAhead, setMapAhead] = useState<number | null>(null);
   const [predicted, setPredicted] = useState<Record<string, Level>>({});
   const [layers, setLayers] = useState<MapLayers>({ causes: true, cameras: false, crossings: false });
   const [causeFilter, setCauseFilter] = useState<string | null>(null);
@@ -262,10 +313,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ---- bootstrap + polling ---------------------------------------------------------------
   const applyClock = useCallback((c: ClockState) => setClock(c), []);
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
+  // Loaded once, and again whenever the clock poll finds the API up before they have loaded (it was still starting).
+  const booted = useRef(false);
   useEffect(() => {
     Promise.all([api.places(), api.segments(), api.cameras(), api.clock()])
       .then(([p, s, c, clk]) => {
+        booted.current = true;
         setPlaces(p);
         setSegments(s);
         setCameras(c);
@@ -283,34 +338,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .then((c) => {
             setClock(c);
             setBackendDown(false);
+            if (!booted.current) refresh();
           })
           .catch(() => setBackendDown(true)),
       5000,
     );
     return () => clearInterval(id);
-  }, []);
+  }, [refresh]);
 
+  // Responses that arrive after a newer request started are dropped (`current`).
   const clockMinute = clock?.now.slice(0, 16);
   useEffect(() => {
     if (!clockMinute) return;
+    let current = true;
     Promise.all([api.slowdowns(), api.trafficAlerts(), api.live()])
       .then(([s, a, l]) => {
+        if (!current) return;
         setSlowdowns(s);
         setAlerts(a.items);
         setLive(l);
       })
       .catch(() => {});
+    return () => {
+      current = false;
+    };
   }, [clockMinute, refreshKey]);
 
+  const mapTime = screen.name === "map" && mapAhead !== null && clock ? addMinutesSim(clock.now, mapAhead) : null;
+  const mapMinute = mapTime?.slice(0, 16);
   useEffect(() => {
-    if (!mapTime) return;
+    if (!mapMinute) return;
+    let current = true;
     api
-      .congestion(mapTime)
-      .then((c) => setPredicted(Object.fromEntries(Object.entries(c.scores).map(([k, v]) => [k, levelForScore(v)]))))
+      .congestion(`${mapMinute}:00`)
+      .then((c) => {
+        if (current) setPredicted(Object.fromEntries(Object.entries(c.scores).map(([k, v]) => [k, levelForScore(v)])));
+      })
       .catch(() => {});
-  }, [mapTime, refreshKey]);
-
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+    return () => {
+      current = false;
+    };
+  }, [mapMinute, refreshKey]);
+  useEffect(() => {
+    if (screen.name !== "map") setMapAhead(null);
+  }, [screen.name]);
+  const setMapTime = useCallback(
+    (t: string | null) =>
+      setMapAhead(t && clockMinute ? Math.round((parseSim(t).getTime() - parseSim(`${clockMinute}:00`).getTime()) / 60000) : null),
+    [clockMinute],
+  );
 
   // ---- notifications (quiet first load, then toasts via the shell) ----------------------
   const lastNoteId = useRef(0);
@@ -328,12 +404,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (brandNew.length) toastListeners.current.forEach((fn) => fn(brandNew));
   }, []);
 
+  // Bumped by resetNotes: polls started before it are dropped (they may hold deleted notifications).
+  const noteGen = useRef(0);
   useEffect(() => {
     const poll = () => {
+      const gen = noteGen.current;
       if (!initialized.current) {
         api
           .notifications(0)
           .then((existing) => {
+            if (gen !== noteGen.current) return;
             initialized.current = true;
             setNotes(existing);
             lastNoteId.current = Math.max(0, ...existing.map((n) => n.id));
@@ -341,12 +421,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .catch(() => {});
         return;
       }
-      api.notifications(lastNoteId.current).then(pushOut).catch(() => {});
+      api
+        .notifications(lastNoteId.current)
+        .then((fresh) => {
+          if (gen === noteGen.current) pushOut(fresh);
+        })
+        .catch(() => {});
     };
     poll();
     const id = setInterval(poll, 3000);
     return () => clearInterval(id);
   }, [pushOut]);
+
+  // The demo reset deletes every notification on the server: start over from what it has now (quietly).
+  const resetNotes = useCallback(async () => {
+    const gen = ++noteGen.current;
+    setNotes([]);
+    const existing = await api.notifications(0);
+    if (gen !== noteGen.current) return;
+    initialized.current = true;
+    setNotes(existing);
+    // Ids are never reused, so anything newer than the old last id is still new.
+    lastNoteId.current = Math.max(lastNoteId.current, ...existing.map((n) => n.id));
+  }, []);
 
   // ---- where am I -------------------------------------------------------------------------
   useEffect(() => {
@@ -363,13 +460,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const levels = useMemo<Record<string, Level>>(() => {
-    if (mapTime) return predicted;
+  const liveLevels = useMemo<Record<string, Level>>(() => {
     const out: Record<string, Level> = {};
     for (const s of slowdowns?.items ?? []) out[s.id] = s.level;
     return out;
-  }, [mapTime, predicted, slowdowns]);
+  }, [slowdowns]);
+  const levels = mapTime ? predicted : liveLevels;
 
+  // Where you are right now: always live traffic, never a prediction.
   const here = useMemo<Here | null>(() => {
     if (!places.length) return null;
     const base = device ? nearestPlace(places, device.lat, device.lng) : places.find((p) => p.id === DEFAULT_HERE) ?? places[0];
@@ -377,7 +475,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let level: Level = "light";
     for (const s of segments) {
       if (s.from_node !== base.id && s.to_node !== base.id) continue;
-      const lv = levels[s.id] ?? "light";
+      const lv = liveLevels[s.id] ?? "light";
       if (LEVEL_RANK[lv] > LEVEL_RANK[level]) level = lv;
     }
     return {
@@ -389,7 +487,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       level,
       fromDevice: !!device,
     };
-  }, [places, segments, levels, device]);
+  }, [places, segments, liveLevels, device]);
 
   const addRecent = useCallback((r: Omit<Recent, "at">) => {
     setRecents((prev) => {
@@ -410,13 +508,82 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener("change", on);
   }, []);
 
-  const go = useCallback((s: Screen) => {
-    setStack((st) => [...st, s].slice(-30));
-    setSelected(null);
+  // Every screen is a browser history entry (?screen=...), so the system back button / gesture goes back a
+  // screen instead of leaving the app. Back and forward land in the popstate handler below.
+  // Next rewrites an entry without our fields when history goes back past a reload, so the entry being left
+  // gets them again first.
+  const markEntry = useCallback(() => {
+    const { stack, base } = navRef.current;
+    const depth = base + stack.length - 1;
+    if (window.history.state?.bsDepth !== depth)
+      window.history.replaceState({ bsDepth: depth, bsScreen: stack[stack.length - 1] } satisfies NavEntry, "");
   }, []);
-  // With nothing to go back to (opened from a link), go to the screen's natural parent.
-  const back = useCallback(() => setStack((st) => (st.length > 1 ? st.slice(0, -1) : [parentOf(st[0])])), []);
-  const tab = useCallback((t: Tab) => setStack((st) => [...st, { name: t } as Screen].slice(-30)), []);
+  // Screens gone back from, nearest first: Forward brings back the same objects (and so what Cameras remembers).
+  const ahead = useRef<Screen[]>([]);
+  const push = useCallback(
+    (s: Screen) => {
+      markEntry();
+      ahead.current = [];
+      const { stack, base } = navRef.current;
+      const depth = base + stack.length;
+      setNav(stack.length < MAX_STACK ? { stack: [...stack, s], base } : { stack: [...stack.slice(1), s], base: base + 1 });
+      window.history.pushState({ bsDepth: depth, bsScreen: s } satisfies NavEntry, "", screenUrl(s));
+    },
+    [markEntry, setNav],
+  );
+  const go = useCallback(
+    (s: Screen) => {
+      push(s);
+      setSelected(null);
+    },
+    [push],
+  );
+  // Tapping the tab you're already on adds no entry (the system back would seem to do nothing).
+  const tab = useCallback(
+    (t: Tab) => {
+      const { stack } = navRef.current;
+      if (stack[stack.length - 1].name !== t) push({ name: t });
+    },
+    [push],
+  );
+  const back = useCallback(() => {
+    const { stack, base } = navRef.current;
+    if (base + stack.length > 1) {
+      markEntry();
+      return window.history.back();
+    }
+    // With nothing to go back to (opened from a link), go to the screen's natural parent.
+    const p = parentOf(stack[0]);
+    setNav({ stack: [p], base: 0 });
+    window.history.replaceState({ bsDepth: 0, bsScreen: p } satisfies NavEntry, "", screenUrl(p));
+  }, [markEntry, setNav]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const st = e.state as Partial<NavEntry> | null;
+      const { stack, base } = navRef.current;
+      // An entry without our fields (see markEntry): its URL still names the screen, but not how deep it is.
+      if (typeof st?.bsDepth !== "number" || !st.bsScreen) {
+        ahead.current = [];
+        return setNav({ stack: [parseScreen(window.location.search) ?? { name: "where" }], base: 0 });
+      }
+      const i = st.bsDepth - base;
+      const same = (a: Screen | undefined, b: Screen) => a !== undefined && JSON.stringify(a) === JSON.stringify(b);
+      // Back: keep the screens we have (Cameras remembers what each entry showed, keyed by the object).
+      if (i >= 0 && i < stack.length && same(stack[i], st.bsScreen)) {
+        ahead.current = [...stack.slice(i + 1), ...ahead.current];
+        setNav({ stack: stack.slice(0, i + 1), base });
+      } else if (i === stack.length) {
+        const next = same(ahead.current[0], st.bsScreen) ? (ahead.current.shift() as Screen) : st.bsScreen;
+        if (next === st.bsScreen) ahead.current = [];
+        setNav({ stack: [...stack, next], base });
+      } else {
+        ahead.current = [];
+        setNav({ stack: [st.bsScreen], base: st.bsDepth });
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [setNav]);
 
   // Screens own their scene: clear it when the screen changes.
   const screenKey = JSON.stringify(screen);
@@ -456,6 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     backendDown,
     refresh,
     pushOut,
+    resetNotes,
     applyClock,
     screen,
     go,

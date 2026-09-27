@@ -12,16 +12,21 @@ export function Legend() {
   const { mapTime } = useApp();
   return (
     <div
-      className="flex items-center gap-1.5 rounded-xl border border-edge px-3 py-2 text-[12px] font-medium text-soft"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-edge px-3 py-2 text-[12px] font-medium text-soft"
       style={{ background: "rgba(30,34,43,0.95)", boxShadow: "0 1px 8px rgba(0,0,0,0.4)" }}
     >
-      <span className="h-[5px] w-[18px] rounded-[3px]" style={{ background: C.light }} />
-      <span>Light</span>
-      <span className="ml-1.5 h-[5px] w-[18px] rounded-[3px]" style={{ background: C.moderate }} />
-      <span>Moderate</span>
-      <span className="ml-1.5 h-[5px] w-[18px] rounded-[3px]" style={{ background: C.heavy }} />
-      <span>Heavy</span>
-      {mapTime && <span className="ml-1.5 text-accent">· predicted</span>}
+      {/* Each swatch stays with its label when a narrow legend wraps */}
+      {[
+        [C.light, "Light"],
+        [C.moderate, "Moderate"],
+        [C.heavy, "Heavy"],
+      ].map(([color, label]) => (
+        <span key={label} className="flex items-center gap-1.5">
+          <span className="h-[5px] w-[18px] rounded-[3px]" style={{ background: color }} />
+          <span>{label}</span>
+        </span>
+      ))}
+      {mapTime && <span className="text-accent">· predicted</span>}
     </div>
   );
 }

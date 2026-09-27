@@ -17,7 +17,8 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "BlindSpot",
   description: "Maps show you traffic. BlindSpot shows you why, and when to leave.",
-  appleWebApp: { capable: true, title: "BlindSpot", statusBarStyle: "black-translucent" },
+  // "black", not "black-translucent": the page must not run under the iOS status bar (no safe-area offsets).
+  appleWebApp: { capable: true, title: "BlindSpot", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = {
@@ -25,7 +26,6 @@ export const viewport: Viewport = {
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
-  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

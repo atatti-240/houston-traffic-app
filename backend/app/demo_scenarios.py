@@ -39,8 +39,9 @@ def evening(sources, day: datetime) -> datetime:
         detail="Lane shifts and narrow shoulders from the long-term I-45 rebuild.",
     )
     sources.trains.inject("x_navigation", at(16, 56), 18)
+    # A reading from the I-10 Katy camera (the one Live cams shows), so the camera sees it too.
     sources.live_traffic.inject(
-        LiveTraffic("I10W:i10_610w>i10_bw8w", 0.85, "camera", now - timedelta(minutes=2), "high", "31 vehicles vs 19 usual")
+        LiveTraffic("I10W:downtown>i10_610w", 0.85, "camera", now - timedelta(minutes=2), "high", "31 vehicles vs 19 usual")
     )
     return now
 

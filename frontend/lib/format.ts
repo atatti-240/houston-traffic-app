@@ -13,6 +13,12 @@ export function toSimIso(date: Date): string {
   )}:00`;
 }
 
+/** `iso` moved by `minutes`, in the same format (keeps the seconds). */
+export function addMinutesSim(iso: string, minutes: number): string {
+  const d = new Date(parseSim(iso).getTime() + minutes * 60000);
+  return `${toSimIso(d).slice(0, 17)}${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
 export function fmtTime(iso: string): string {
   return parseSim(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }

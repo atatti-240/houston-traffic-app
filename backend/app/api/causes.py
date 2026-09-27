@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.deps import get_services
-from app.causes import CausesEngine, Slowdown, fmt
+from app.causes import INCIDENT_CAUSE, CausesEngine, Slowdown, fmt, unusual
 from app.conditions.provider import ConditionsView
 from app.graph import Network
 from app.models import SlowdownWatch
@@ -29,6 +29,7 @@ ALERT_GROUP = {
 }
 LOOKING = {"N": "north", "NE": "northeast", "E": "east", "SE": "southeast", "S": "south", "SW": "southwest",
            "W": "west", "NW": "northwest"}
+LEVEL_RANK = {"light": 0, "moderate": 1, "heavy": 2}
 
 
 def cause_json(c) -> dict:
@@ -61,6 +62,7 @@ def slowdown_json(s: Slowdown) -> dict:
         "lat": s.lat,
         "lng": s.lng,
         "highlight": s.highlight,
+        "routine": s.routine if main else True,  # normal for the time of day (rush hour, a train chance)
         "kind": main.kind if main else None,
         "label": main.label if main else None,
         "title": main.title if main else "Flowing normally",
@@ -135,7 +137,8 @@ def watch(segment_id: str, device_id: str | None = None, svc: Services = Depends
     if existing:
         return {"id": existing.id, "segment_id": segment_id, "watching": True}
     now_state = CausesEngine(svc.router).analyze(_segment(svc, segment_id))
-    routine_only = not any(c.kind != "rush" for c in now_state.causes)
+    # Same rule the scheduler clears it by: nothing unusual now -> wait for it to stop being slow.
+    routine_only = not unusual(now_state.causes)
     with svc.session_factory() as s:
         w = SlowdownWatch(
             segment_id=segment_id, device_id=device_id, created_at=svc.clock.now(), routine_only=routine_only
@@ -153,7 +156,7 @@ def unwatch(segment_id: str, svc: Services = Depends(get_services)):
         s.commit()
 
 
-def _impact(kind: str, inc, end, delay_min: int | None) -> str:
+def _impact(kind: str, inc, end, delay_min: int | None, masked: bool = False) -> str:
     lanes = f"{inc.lanes_blocked} lane{'s' if inc.lanes_blocked != 1 else ''} blocked"
     first = {
         "crash": lanes,
@@ -165,7 +168,10 @@ def _impact(kind: str, inc, end, delay_min: int | None) -> str:
         "event": f"Crowds until about {fmt(end)}",
         "weather": f"Until about {fmt(end)}",
     }.get(inc.kind, "Reported")
-    return f"{first} · +{delay_min} min" if delay_min else f"{first} · no delay yet"
+    if delay_min:
+        return f"{first} · +{delay_min} min"
+    # Another incident on the same road is counted as its delay: don't say this one costs nothing.
+    return first if masked else f"{first} · no delay yet"
 
 
 def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView) -> list[dict]:
@@ -175,14 +181,15 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
         s = engine.analyze(seg) if seg else None
         cause = next((c for c in s.causes if c.incident_id == inc.id), None) if s else None
         delay = round(cause.seconds / 60) if cause else None
+        masked = cause is None and s is not None and any(c.incident_id for c in s.causes)
         items.append(
             {
                 "id": f"incident:{inc.id}",
                 "group": ALERT_GROUP.get(inc.kind, "incident"),
-                "kind": cause.kind if cause else "crash",
+                "kind": cause.kind if cause else INCIDENT_CAUSE.get(inc.kind, INCIDENT_CAUSE["other"])[0],
                 "title": inc.title,
                 "place": f"{s.road} · {s.place}" if s else (inc.detail or "Houston"),
-                "impact": _impact(inc.kind, inc, view.incident_end(inc), delay),
+                "impact": _impact(inc.kind, inc, view.incident_end(inc), delay, masked),
                 "detail": cause.detail if cause else inc.detail,
                 "time": iso(inc.started_at),
                 "delay_min": delay,
@@ -197,7 +204,12 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
         cc = view.crossing(c, view.now)
         if not (cc.live and cc.block_probability >= 1.0):
             continue
-        delay = round(cc.expected_delay_s / 60)
+        # The delay a driver on the crossing's road meets (as on the "Why it's slow" it opens),
+        # not the wait at the gate right now: the train cause of the worst direction that has one.
+        roads = _crossing_roads(engine, network, c)
+        road = _worst([s for s in roads if any(x.crossing_id == cid for x in s.causes)]) or _worst(roads)
+        cause = next((x for x in road.causes if x.crossing_id == cid), None) if road else None
+        delay = round(cause.seconds / 60) if cause else None
         clears = f"Clears about {fmt(cc.clears_at)}" if cc.clears_at else "Blocked now"
         items.append(
             {
@@ -212,7 +224,7 @@ def traffic_alerts(engine: CausesEngine, network: Network, view: ConditionsView)
                 "delay_min": delay,
                 "lat": c.lat,
                 "lng": c.lng,
-                "slowdown_id": c.segment_ids[0] if c.segment_ids else None,
+                "slowdown_id": road.id if road else None,
                 "source": st.source,
             }
         )
@@ -255,25 +267,55 @@ def _nearest_place(network: Network, lat: float, lng: float) -> str:
     return min(network.places(), key=dist).name
 
 
+def _crossing_roads(engine: CausesEngine, network: Network, c) -> list[Slowdown]:
+    return [engine.analyze(network.segments[sid]) for sid in c.segment_ids if sid in network.segments]
+
+
+def _worst(roads: list[Slowdown]) -> Slowdown | None:
+    return max(roads, key=lambda s: (LEVEL_RANK[s.level], s.delay_s), default=None)
+
+
 def camera_status(engine: CausesEngine, network: Network, cam: dict) -> dict:
-    """Area, direction and what the camera's road looks like right now."""
-    seg_id = cam.get("segment_id")
-    looking = None
-    if not seg_id and cam.get("crossing_id") in network.crossings:
-        seg_id = network.crossings[cam["crossing_id"]].segment_ids[0]
+    """Area, direction and what the camera's road looks like right now. A crossing camera sees
+    both directions: it reports the worse one, and whether a train is blocking it now."""
+    seg = network.segments.get(cam["segment_id"]) if cam.get("segment_id") else None
+    crossing = network.crossings.get(cam.get("crossing_id")) if not seg else None
+    area_at = (cam["lat"], cam["lng"])
+    blocked = None
+    train_road = None
+    if crossing is not None:
+        roads = _crossing_roads(engine, network, crossing)
+        s = _worst(roads)
         looking = "Looking at the crossing"
-    seg = network.segments.get(seg_id) if seg_id else None
-    s = engine.analyze(seg) if seg else None
-    if seg and not looking:
-        looking = f"Looking {LOOKING.get(seg.direction, seg.direction.lower())}"
+        cc = engine.view.crossing(crossing, engine.now)
+        blocked = cc.live and cc.block_probability >= 1.0  # same test as /live's crossing status
+        if blocked:
+            # The direction that meets the train (as the train alert picks it), for the note and link.
+            train_road = _worst([r for r in roads if any(x.crossing_id == crossing.id for x in r.causes)])
+    else:
+        s = engine.analyze(seg) if seg else None
+        looking = f"Looking {LOOKING.get(seg.direction, seg.direction.lower())}" if seg else None
+        if seg:
+            # Named after the node it looks toward ("SH-288 South Fwy @ Medical Center").
+            node = network.nodes[seg.to_node]
+            area_at = (node.lat, node.lng)
     busy = s is not None and s.is_slowdown and s.causes
     note = (f"{s.main.title} · +{s.delay_min} min" if s.delay_min else s.main.title) if busy else "Flowing normally"
+    if blocked:
+        # The picture shows the train, so the note does too, even once neither direction's delay
+        # counts it any more (it clears before you'd get there).
+        note = "Freight train blocking crossing" + (
+            f" · +{train_road.delay_min} min" if train_road and train_road.delay_min
+            else f" · clears about {fmt(cc.clears_at)}" if cc.clears_at else ""
+        )
+    link = train_road or s
     return {
-        "area": _nearest_place(network, cam["lat"], cam["lng"]),
+        "area": _nearest_place(network, *area_at),
         "looking": looking,
         "level": s.level if s else "light",
         "delay_min": s.delay_min if s else 0,
         "note": note,
         "weather": bool(s and any(c.kind == "weather" for c in s.causes)),
-        "slowdown_id": s.id if s else None,
+        "slowdown_id": link.id if link else None,
+        "crossing_blocked": blocked,  # None for highway cameras
     }

@@ -19,7 +19,7 @@ const USUAL_PREVIEW = 8;
 const kindOf = (s: Slowdown): CauseKind => (s.kind ?? "rush") as CauseKind;
 /** "I-45 Gulf Fwy southbound" -> "I-45 Gulf Fwy SB" for compact rows (the design's lists do this). */
 const shortRoad = (road: string) => road.replace(/\b(north|south|east|west)bound\b/i, (_, d: string) => `${d[0].toUpperCase()}B`);
-const isUnusual = (s: Slowdown) => !!s.kind && s.kind !== "rush";
+const isUnusual = (s: Slowdown) => !!s.kind && !s.routine;
 const causeLabel = (c: SlowdownCause) => (c.kind === "volume" ? CAUSE.volume.label : c.label || CAUSE[c.kind]?.label || c.kind);
 
 // ---- pieces -------------------------------------------------------------------------------------

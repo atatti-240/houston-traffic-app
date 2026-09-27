@@ -16,8 +16,9 @@ interface Step {
   run: (a: AppValue) => Promise<void>;
 }
 
-async function clockTo(a: AppValue, hhmm: string) {
-  const day = (a.clock?.now ?? "2026-09-28T07:15:00").slice(0, 10);
+/** Set the clock to hh:mm on the day of `now` (by default the clock when the step started). */
+async function clockTo(a: AppValue, hhmm: string, now = a.clock?.now) {
+  const day = (now ?? "2026-09-28T07:15:00").slice(0, 10);
   const r = await api.advanceClock({ to: `${day}T${hhmm}:00` });
   a.applyClock(r);
   a.pushOut(r.notifications ?? []);
@@ -31,7 +32,9 @@ const STEPS: Step[] = [
     run: async (a) => {
       const c = await api.reset();
       a.applyClock(c);
-      await clockTo(a, "07:05");
+      // The reset deleted every notification (and `a` still has the clock from before it).
+      await a.resetNotes();
+      await clockTo(a, "07:05", c.now);
       a.setMapTime(null);
       a.setCauseFilter(null);
       a.go({ name: "where" });

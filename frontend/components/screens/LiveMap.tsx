@@ -3,7 +3,7 @@
 /** Live map: "Houston right now". Phone: overlays + bottom sheet on the full-screen map (design
  * "Live map"). Desktop: the same content as a side panel; the controls sit on the map. */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import { Legend, LayersButton, LiveCamsButton, ZoomButtons } from "@/components/app/MapChrome";
@@ -19,12 +19,12 @@ const LATER = [
   { label: "+2 h", min: 120 },
 ];
 
-function SearchBar({ onOpen }: { onOpen: () => void }) {
+function SearchBar({ onOpen, className = "" }: { onOpen: () => void; className?: string }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="flex h-12 min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-3xl border border-edge bg-card px-4 text-left text-[15px] text-muted"
+      className={`flex h-12 min-w-0 cursor-pointer items-center gap-2.5 rounded-3xl border border-edge bg-card px-4 text-left text-[15px] text-muted ${className}`}
       style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
     >
       <Icon d={ICON.search} size={18} color={C.muted} />
@@ -34,13 +34,14 @@ function SearchBar({ onOpen }: { onOpen: () => void }) {
 }
 
 function useSheetData() {
-  const { slowdowns, causeFilter, setCauseFilter, clock, mapTime, setMapTime } = useApp();
+  const { slowdowns, causeFilter, setCauseFilter, clock, mapTime, setMapTime, backendDown } = useApp();
   const highlighted = useMemo(() => (slowdowns?.items ?? []).filter((s) => s.highlight), [slowdowns]);
+  // The active filter keeps its chip after its last slowdown clears, so it can still be seen and turned off.
   const kinds = useMemo(() => {
     const present = new Set(highlighted.map((s) => s.kind));
-    const ordered = CAUSE_ORDER.filter((k) => present.has(k));
+    const ordered = CAUSE_ORDER.filter((k) => present.has(k) || k === causeFilter);
     return ordered.length ? ordered : (CAUSE_ORDER.slice(0, 7) as CauseKind[]);
-  }, [highlighted]);
+  }, [highlighted, causeFilter]);
   const later = (min: number) => {
     if (!clock || min === 0) return setMapTime(null);
     const t = parseSim(clock.now);
@@ -48,7 +49,7 @@ function useSheetData() {
     setMapTime(toSimIso(t));
   };
   const laterSel = mapTime && clock ? Math.round((parseSim(mapTime).getTime() - parseSim(clock.now).getTime()) / 60000) : 0;
-  return { slowdowns, highlighted, kinds, causeFilter, setCauseFilter, clock, mapTime, later, laterSel };
+  return { slowdowns, highlighted, kinds, causeFilter, setCauseFilter, clock, mapTime, later, laterSel, backendDown };
 }
 
 function TimeChips({ later, laterSel }: { later: (m: number) => void; laterSel: number }) {
@@ -100,20 +101,24 @@ function SlowdownRow({ s }: { s: Slowdown }) {
 }
 
 function Summary({ compact }: { compact?: boolean }) {
-  const { slowdowns, highlighted, kinds, causeFilter, setCauseFilter, clock, mapTime, later, laterSel } = useSheetData();
+  const { slowdowns, highlighted, kinds, causeFilter, setCauseFilter, clock, mapTime, later, laterSel, backendDown } = useSheetData();
   const count = slowdowns?.count ?? 0;
   return (
     <>
       <div className="flex items-baseline justify-between">
         <h1 className="m-0 text-[21px] font-bold tracking-[-0.01em] text-ink">{mapTime ? `Houston at ${fmtTime(mapTime)}` : "Houston right now"}</h1>
         <span className="font-num text-[12px] text-muted">
-          {mapTime ? "Predicted" : `Updated ${ago(slowdowns?.generated_at, clock?.now) || "just now"}`}
+          {mapTime ? "Predicted" : slowdowns ? `Updated ${ago(slowdowns.generated_at, clock?.now) || "just now"}` : ""}
         </span>
       </div>
       <span className="text-[13px] text-muted">
         {mapTime
           ? "Predicted traffic from 8 weeks of history. Live causes show for now only."
-          : `${count} slowdown${count === 1 ? "" : "s"}, ${highlighted.length} worth knowing about. Hover or tap an icon to see the cause.`}
+          : !slowdowns
+            ? backendDown
+              ? "Can't reach live traffic right now. We'll keep trying."
+              : "Checking Houston's roads…"
+            : `${count} slowdown${count === 1 ? "" : "s"}, ${highlighted.length} worth knowing about. Hover or tap an icon to see the cause.`}
       </span>
       <div className={`no-scrollbar flex gap-2 pb-0.5 ${compact ? "overflow-x-auto" : "flex-wrap"}`}>
         {kinds.map((k) => (
@@ -151,6 +156,16 @@ export default function LiveMap() {
   const { isDesktop, go } = useApp();
   const [expanded, setExpanded] = useState(false);
   const sheet = useSheetData();
+  // The sheet's height (it grows when expanded, up to 70dvh): the floating buttons sit just above it.
+  const sheetRef = useRef<HTMLElement>(null);
+  const [sheetH, setSheetH] = useState(156);
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSheetH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isDesktop]);
 
   if (isDesktop) {
     return (
@@ -173,22 +188,30 @@ export default function LiveMap() {
         <Logo size={18} pill />
       </div>
       <div className="pointer-events-auto absolute top-14 right-4 left-4 z-[900] flex items-center gap-2.5">
-        <SearchBar onOpen={() => go({ name: "where" })} />
+        <SearchBar onOpen={() => go({ name: "where" })} className="flex-1" />
         <LayersButton />
       </div>
-      <div className="pointer-events-auto absolute top-[116px] left-4 z-[900]">
+      <div className="pointer-events-auto absolute top-[116px] left-4 z-[900] max-w-[calc(100%-86px)]">
         <Legend />
       </div>
       <div className="pointer-events-auto absolute top-[116px] right-4 z-[900]">
         <ZoomButtons />
       </div>
-      <div className="pointer-events-auto absolute right-4 z-[900]" style={{ bottom: expanded ? "calc(70dvh + 12px)" : 84 + 156 + 16 }}>
+      {/* Expanded, the sheet leaves little map above it (the zoom buttons are there), so it rides the sheet's top edge. The
+          expanded sheet's top stays 189px down (273px = that + the 84px nav): below Zoom in (ends at 161px) plus this button's top half. */}
+      <div className={`pointer-events-auto absolute right-4 ${expanded ? "z-[960]" : "z-[900]"}`} style={{ bottom: 84 + sheetH + (expanded ? -24 : 16) }}>
         <LiveCamsButton />
       </div>
       <section
+        ref={sheetRef}
         aria-label="Houston right now"
         className="pointer-events-auto absolute right-0 left-0 z-[950] flex flex-col gap-2 rounded-t-3xl border-t border-line bg-bg px-5 pt-2.5 pb-3.5"
-        style={{ bottom: 84, boxShadow: "0 -4px 24px rgba(0,0,0,0.5)", maxHeight: expanded ? "70dvh" : 156, transition: "max-height 200ms ease" }}
+        style={{
+          bottom: 84,
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+          maxHeight: expanded ? "min(70dvh, calc(100dvh - 273px))" : 156,
+          transition: "max-height 200ms ease",
+        }}
       >
         <button
           type="button"
@@ -202,13 +225,12 @@ export default function LiveMap() {
         <Summary compact={!expanded} />
         {expanded && (
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-            <TimeChips later={sheet.later} laterSel={sheet.laterSel} />
             <SlowdownList />
           </div>
         )}
       </section>
       {!expanded && sheet.mapTime && (
-        <div className="pointer-events-auto absolute right-4 z-[900]" style={{ bottom: 84 + 156 + 72 }}>
+        <div className="pointer-events-auto absolute right-4 z-[900]" style={{ bottom: 84 + sheetH + 72 }}>
           <RoundButton label="Back to now" onClick={() => sheet.later(0)}>
             <Icon d={ICON.clock} size={20} />
           </RoundButton>

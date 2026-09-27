@@ -242,6 +242,8 @@ export interface LiveConditions {
     /** Rain/weather on this camera's road */
     weather: boolean;
     slowdown_id: string | null;
+    /** A train is blocking this crossing right now (live status, never a prediction); null for highway cameras */
+    crossing_blocked: boolean | null;
     snapshot_url: string | null;
     vehicles: number | null;
     baseline_vehicles: number | null;
@@ -377,6 +379,8 @@ export interface Slowdown {
   lng: number;
   /** Worth an icon on the map (anything unusual + the worst few rush-hour spots) */
   highlight: boolean;
+  /** Normal for the time of day: led by rush hour / usual traffic or a mere chance of a train */
+  routine: boolean;
   /** The cause to lead with (null when the road is flowing) */
   kind: CauseKind | null;
   label: string | null;
