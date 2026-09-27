@@ -73,11 +73,19 @@ function screenUrl(s: Screen): string {
   }
   if (s.name === "trip") {
     if (typeof s.to === "string") q.set("to", s.to);
+    else q.set("to", `${s.to.lat},${s.to.lng}`); // a point: to=29.739,-95.463 (+ toName)
+    if (typeof s.to !== "string" && s.toName) q.set("toName", s.toName);
     if (typeof s.from === "string") q.set("from", s.from);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
   }
   return `${window.location.pathname}?${q}`;
+}
+
+/** A place id, or "lat,lng" for a point. */
+function toLocation(v: string): Location {
+  const m = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(v);
+  return m ? { lat: Number(m[1]), lng: Number(m[2]) } : v;
 }
 
 // Deep links for testing / sharing: ?screen=map|causes|alerts|cameras|why&id=...&area=...
@@ -91,7 +99,8 @@ function parseScreen(search: string): Screen | null {
   if (name === "trip" && q.get("to"))
     return {
       name,
-      to: q.get("to") as string,
+      to: toLocation(q.get("to") as string),
+      toName: q.get("toName") ?? undefined,
       from: q.get("from") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
@@ -139,6 +148,9 @@ export interface MapScene {
   fitPadding?: { topLeft: [number, number]; bottomRight: [number, number] };
   /** Show cause markers (default true) */
   markers?: boolean;
+  /** Route choices (Trip): the unselected ones dashed with a label bubble; tapping one calls pickRoute */
+  routes?: { id: string; geometry: LatLngTuple[]; label: string; time?: string; selected: boolean }[];
+  pickRoute?: (id: string) => void;
 }
 
 export interface MapLayers {
