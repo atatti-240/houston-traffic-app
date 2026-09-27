@@ -20,13 +20,15 @@ log = logging.getLogger("houston")
 
 def bootstrap() -> Services:
     """Make sure the DB has a network and trained scores, then build the services."""
-    from app.seed.network import seed_network
+    from app.seed.network import refresh_shapes, seed_network
 
     init_db()
     with SessionLocal() as s:
         if not s.scalar(select(func.count()).select_from(RoadSegment)):
             log.warning("Empty database: seeding Houston network")
             seed_network(s)
+        elif n := refresh_shapes(s):
+            log.warning("Updated %s road shapes, crossings and cameras to the traced roads", n)
         has_scores = bool(s.scalar(select(func.count()).select_from(ScoreEntry)))
     svc = Services(SessionLocal)
     if not has_scores:
