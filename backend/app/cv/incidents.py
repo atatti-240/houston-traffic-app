@@ -42,9 +42,9 @@ def incident_kind(text: str | None) -> IncidentKind:
 
 
 def incident_detail(text: str | None, camera_name: str | None) -> str:
-    seen = f"“{text.rstrip('.')}.”" if text else "Flagged in 2 of its last 3 checks."
-    on = f" on the {camera_name} camera" if camera_name else ""
-    return f"The camera AI{on} saw: {seen} (Baton Rouge live video standing in for this camera.)"
+    seen = f"“{text.rstrip('.')}.”" if text else "flagged in 2 of its last 3 checks."
+    on = f"On the {camera_name} camera" if camera_name else "On camera"
+    return f"{on}: {seen} (Baton Rouge live video standing in for it.)"
 
 
 class CameraAiIncidents:

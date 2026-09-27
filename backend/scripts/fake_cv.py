@@ -29,7 +29,6 @@ from statistics import median
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-NAMES = {"007": "I-10 @ College Dr", "009": "I-10 at Perkins"}
 INCIDENT_ALERT = 0.7  # same rule as the CV app: one check over the line is possible,
 CONFIRM = (2, 3)  # 2 of the last 3 is confirmed
 DETECTION_LAG_S = 0.3  # boxes arrive this long after their frame, like a real detector
@@ -146,7 +145,8 @@ def run_cameras(cams: list[FakeCamera], hub: Hub, view: dict, script: Script, fp
 
 
 def page(cams: list[FakeCamera], view: dict, incidents: bool, meta: dict) -> bytes:
-    live = [{"id": c.id, "key": f"br:{c.id}", "name": NAMES.get(c.id, f"Baton Rouge cam {c.id}"), "replay": True,
+    # Every camera plays the same recording, so each is named after the camera it was recorded from.
+    live = [{"id": c.id, "key": f"br:{c.id}", "name": meta.get("name") or "Baton Rouge recording", "replay": True,
              "expect": None} for c in cams]
     inc = {"model": "scripted test incident" if incidents else None, "alert": INCIDENT_ALERT, "confirm": list(CONFIRM)}
     server = {"fake": True, "recorded": meta.get("name"), "note": meta.get("note")}

@@ -7,6 +7,7 @@ time of its frame on the same clock).
 """
 
 import asyncio
+import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,8 @@ router = APIRouter(tags=["cameras"])
 MAX_STREAM_S = 30 * 60  # a forgotten tab stops streaming after this (the card reconnects)
 STREAM_IDLE_S = 15.0  # no new frame for this long: the feed stopped, end the stream
 BOUNDARY = "frame"
+# Set when the server is told to stop: open video streams end, or it would wait for them forever.
+CLOSING = threading.Event()
 
 OFF = "Live AI camera feeds are off. Set CV_URL to the CV app's address (see README, Live AI camera feeds)."
 
@@ -84,7 +87,7 @@ async def cv_video(camera_id: str, request: Request, svc: Services = Depends(get
     async def parts():
         started = last = time.monotonic()
         sent = None
-        while time.monotonic() - started < MAX_STREAM_S:
+        while time.monotonic() - started < MAX_STREAM_S and not CLOSING.is_set():
             if await request.is_disconnected():
                 return
             bridge.touch(camera_id)
