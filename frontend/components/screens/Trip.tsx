@@ -630,7 +630,13 @@ export default function Trip() {
           </Banner>
         )}
         {choices.routes.length > 1 && (
-          <RouteList routes={choices.routes} selected={best} onPick={choices.pick} pendingTimes={choices.pendingTimes} />
+          <RouteList
+            routes={choices.routes}
+            selected={best}
+            onPick={choices.pick}
+            pendingTimes={choices.pendingTimes}
+            roughTimes={choices.roughTimes}
+          />
         )}
         <Card>
           <div className="flex flex-col gap-1">
@@ -642,7 +648,7 @@ export default function Trip() {
           </div>
           <div className="h-px bg-line" />
           <h3 className="m-0 text-[13px] font-semibold tracking-[0.08em] text-muted uppercase">Why this way</h3>
-          <Comparisons route={best} others={others} pendingTimes={choices.pendingTimes} />
+          <Comparisons route={best} others={others} roughTimes={choices.roughTimes} />
           <Reasons reasons={best.reasons} />
         </Card>
         <div className="grid grid-cols-3 gap-2">
