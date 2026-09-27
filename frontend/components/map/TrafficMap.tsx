@@ -12,7 +12,7 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import PlacesLayer from "@/components/places/PlacesLayer";
-import { camName } from "@/lib/format";
+import { camName, hasLiveVideo } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
 import type { LatLngTuple, Slowdown } from "@/lib/types";
 
@@ -369,12 +369,16 @@ export default function TrafficMap({
           <CircleMarker
             key={`cam-${cam.id}`}
             center={[cam.lat, cam.lng]}
-            radius={6}
+            radius={hasLiveVideo(cam.live_feed) ? 7 : 6}
             bubblingMouseEvents={false}
-            pathOptions={{ color: "#0E1015", weight: 2, fillColor: C.accent, fillOpacity: 1 }}
+            // Red: live video from the camera AI
+            pathOptions={{ color: "#0E1015", weight: 2, fillColor: hasLiveVideo(cam.live_feed) ? C.heavy : C.accent, fillOpacity: 1 }}
             eventHandlers={{ click: () => go({ name: "cameras", area: cam.area, camId: cam.id }) }}
           >
-            <Tooltip className="dark-tip">📷 {camName(cam.name)}</Tooltip>
+            <Tooltip className="dark-tip">
+              📷 {camName(cam.name)}
+              {hasLiveVideo(cam.live_feed) ? " · live AI video" : ""}
+            </Tooltip>
           </CircleMarker>
         ))}
 

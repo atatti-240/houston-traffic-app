@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SCHEDULER_INTERVAL_S", "0")
+os.environ["CV_URL"] = ""  # no live AI camera feeds unless a test builds its own bridge (no network)
 
 import pytest  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402

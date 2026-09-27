@@ -3,8 +3,10 @@ import type {
   Camera,
   ClockState,
   Crossing,
+  CvStatus,
   GeoSearch,
   LiveConditions,
+  LiveFeedDetail,
   Location,
   Place,
   PlaceDetails,
@@ -21,6 +23,9 @@ import type {
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/** Absolute URL for an API path (e.g. a camera's video for an <img>). */
+export const apiUrl = (path: string) => `${API_URL}${path}`;
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -59,6 +64,10 @@ export const api = {
     safety_weight?: number;
   }) => post<Recommendation>("/recommend", body),
   live: () => call<LiveConditions>("/live"),
+  cvStatus: () => call<CvStatus>("/cv/status"),
+  /** A camera's live AI feed; `since` (ms): only vehicle boxes newer than that */
+  cvCamera: (id: string, since?: number) =>
+    call<LiveFeedDetail>(`/cv/cameras/${encodeURIComponent(id)}${since ? `?since=${since}` : ""}`),
   slowdowns: () => call<SlowdownList>("/slowdowns"),
   slowdown: (id: string) => call<SlowdownDetail>(`/slowdowns/${encodeURIComponent(id)}`),
   watchSlowdown: (id: string) => post<{ id: number; watching: boolean }>(`/slowdowns/${encodeURIComponent(id)}/watch`),
