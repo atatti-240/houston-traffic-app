@@ -150,6 +150,10 @@ __pycache__/
 
 # Backend runtime data
 backend/data/*.db
+backend/data/*.db-*
+
+# Local Claude Code / dev-server launcher settings
+.claude/
 
 # Next.js
 frontend/.next/

@@ -79,7 +79,9 @@ def test_unknown_node_raises(router):
 
 
 def test_safe_path_explains_itself_without_repeating_roads(router):
-    safe, _ = router.route("downtown", "hobby", MON(17, 10), safe_path=True)
+    # From Midtown: from Downtown the detour streets (Harrisburg, Telephone) are on the Vision Zero
+    # High Injury Network, so Safe Path now stays on the Gulf Fwy.
+    safe, _ = router.route("midtown", "hobby", MON(17, 10), safe_path=True)
     assert any(r.startswith("Safe Path:") and "less crash exposure" in r for r in safe.reasons)
     avoided = [r.split(":")[0] for r in safe.reasons if r.startswith("Avoided")]
     assert len(avoided) == len(set(avoided))

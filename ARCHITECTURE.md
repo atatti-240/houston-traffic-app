@@ -31,6 +31,7 @@ Hackathon-sized: one Python backend, one Next.js frontend, one SQLite file. Ever
 |---|---|---|
 | Data-source adapters | `backend/app/adapters/` | Abstract interfaces. History: `SpeedSource`, `CrashSource`, `TrainSource.crossing_events`. Live: `TrainSource.crossing_status`, `LiveTrafficSource`, `IncidentSource`. Plus `CameraSource`. `Mock*` implementations are built on the synthetic generator, and the demo can inject live data or take a feed down. Picked by `DATA_SOURCE` config (`mock` only for now). |
 | Road-conditions layer | `backend/app/conditions/` | The only thing the router reads. For a segment or crossing at time T it combines the model predictions with live data by fixed priority rules, and records the confidence and source of every input. See [docs/routing-wiring.md](docs/routing-wiring.md). |
+| Vision Zero HIN | `backend/app/seed/visionzero.py`, `api/hazards.py` | Real city crash data: scales each street's synthetic crash rate, and serves the most dangerous streets at `GET /hazards/high-injury`. |
 | Scoring models | `backend/app/scoring/` | Three models with the same shape: key = (entity, time bucket), value updated by an exponential moving average. |
 | Score store | `backend/app/scoring/store.py` | Persists scores in the `score_entries` table and caches them in memory for fast routing. |
 | Routing engine | `backend/app/routing/` | Time-dependent Dijkstra-style search over the road graph with a blended cost and a 0-1 safety weight (the Faster ↔ Safer slider). It keeps several labels per node (time so far vs. penalty so far), because once roads can be waited on, reaching one later can be the better choice. |
@@ -63,6 +64,8 @@ The team's first idea was `score += today * factor`, which grows without bound. 
 | Congestion | road segment | `1 - observed_speed / free_flow_speed`, clamped to [0, 1] | score in [0, 1]; travel time = free-flow time / (1 - 0.85·score) |
 | Crash risk | road segment | crashes in bucket / segment miles | risk in [0, 1] = `1 - exp(-rate / CRASH_RATE_SCALE)`; starts from a small prior |
 | Train block | rail crossing | blocked at any point in bucket (0/1) and blocked minutes | `p_block`; `expected_delay = p_block × avg_block_min × 0.5` (on average you arrive halfway through a blockage) |
+
+**Street crash risk is calibrated to Vision Zero.** The synthetic crash history isn't uniform: each street link's crash rate is scaled by the City of Houston's Vision Zero High Injury Network 2025 (`app/seed/visionzero.py`, data in `seed/hin2025.json`). A link matches the HIN segments with the same street name within 1 km of it (our links are straight lines between nodes, so the radius is wide; the name keeps the same street across town out). Its factor is `1 + HIN crashes per mile / the citywide HIN average`, max ×4. Streets not on the HIN get ×1, freeways keep their hand-set `crash_mult` (the HIN has no freeways). The factor goes into the generator's ground truth, not the model's prior: the EMA forgets its starting value within a few weeks of replay, and a real crash feed (TxDOT CRIS) would plug in at the same place. `GET /hazards/high-injury` serves the raw HIN segments, worst first.
 
 **Live data** doesn't go into the models. It goes into the road-conditions layer, which blends it with the predictions for about the next 30 minutes:
 
@@ -169,7 +172,7 @@ backend/
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
     notifications/     service + scheduler
     api/               routers
-    seed/              Houston network + synthetic generator
+    seed/              Houston network + synthetic generator + Vision Zero HIN data (visionzero.py)
   scripts/             seed.py, replay_history.py
   tests/
 frontend/
