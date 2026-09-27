@@ -42,6 +42,7 @@ export type Screen =
       /** Faster (0) .. Safer (1) */
       safety?: number;
     }
+  | { name: "drive"; to: Location; toName?: string; from?: Location; fromName?: string; safety?: number }
   | { name: "map" }
   | { name: "cameras"; area?: string; camId?: string }
   | { name: "causes" }
@@ -60,6 +61,7 @@ export function tabOf(s: Screen): Tab | null {
 function parentOf(s: Screen): Screen {
   if (s.name === "why") return { name: "causes" };
   if (s.name === "trip") return { name: "where" };
+  if (s.name === "drive") return { name: "trip", to: s.to, toName: s.toName, from: s.from, fromName: s.fromName, safety: s.safety };
   return { name: "map" };
 }
 

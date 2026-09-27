@@ -20,6 +20,7 @@ import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { CAUSE, C, ICON } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
+import StartDrive from "./Drive/StartDrive";
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import { Comparisons, RouteList } from "./Trip/RouteList";
 import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
@@ -811,6 +812,10 @@ export default function Trip() {
             </button>
           )}
         </p>
+      )}
+
+      {!hidden && result && result.kind !== "plan" && choices.selected && to !== undefined && (
+        <StartDrive route={choices.selected} trip={{ to, toName, from: origin, fromName, safety }} busy={stale} />
       )}
 
       {/* When, and how */}
