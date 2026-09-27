@@ -16,7 +16,8 @@ reach a via point that snapped onto the wrong side of the road). At most 3 calls
     4. our line alone, no steps                                            -> status "unavailable"
 
 It never calls OSRM from a loop (recommender, planner): only for the routes we send back.
-Results are cached by (rounded endpoints, segment path), they don't depend on the time.
+Results are cached by (rounded endpoints, segment path), they don't depend on the time. A failure
+that may pass (OSRM down, busy or slow) isn't cached and says when to ask again (retry_after_s).
 
 Timing (door_timing): when a trip starts or ends at an arbitrary point, its time is our
 traffic-aware time for the part of our corridor it drives + OSRM's time for the way on and off
@@ -31,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from app.directions import geo
+from app.directions.limit import ClientLimiter
 from app.directions.osrm import OsrmClient, OsrmError, OsrmUnavailable
 from app.directions.steps import build_step, build_steps, corridor_step
 from app.graph import SegmentInfo
@@ -54,6 +56,7 @@ SIMPLIFY_M = 4
 CACHE_SIZE = 256
 BUILD_BUDGET_S = 8  # no further OSRM attempt that could end later than this into a build
 BUILD_WAIT_S = 10  # how long a request waits for the same trip's directions being built
+RETRY_MIN_S = 5  # after a failure that may pass, ask again no sooner than this
 FAR_M = 80_000  # a point farther than this from where it joins our roads (another city) gets none
 MPH = 0.44704  # m/s
 
@@ -101,6 +104,7 @@ class DoorPath:
     access_end_s: float = 0.0  # OSRM: from leave_m to the end
     note: str | None = None
     tried: list[str] = field(default_factory=list)
+    retry_after_s: int | None = None  # unavailable for now (OSRM down, busy, slow): worth asking again then
 
 
 @dataclass
@@ -251,6 +255,7 @@ class DoorDirections:
         self._cache: OrderedDict[tuple, DoorPath] = OrderedDict()
         self._lock = threading.Lock()
         self._building: dict[tuple, threading.Event] = {}  # key -> set when that build is done
+        self.limiter = ClientLimiter()  # POST /directions asks that may call OSRM, per client
 
     # --- cache ----------------------------------------------------------------------------
 
@@ -289,16 +294,19 @@ class DoorDirections:
             return hit
         if running is not None:
             running.wait(BUILD_WAIT_S)
-            return self.cached(segments, origin, destination) or self._unavailable(Corridor(segments), [])
+            return self.cached(segments, origin, destination) or self._unavailable(Corridor(segments), [], True)
         try:
             return self._build(segments, origin, destination)
         finally:
             with self._lock:
                 self._building.pop(key).set()
 
-    def _unavailable(self, corr: "Corridor", tried: list[str]) -> DoorPath:
+    def _unavailable(self, corr: "Corridor", tried: list[str], transient: bool = False) -> DoorPath:
         note = OFF_NOTE if not self.client.enabled else UNAVAILABLE_NOTE
-        return DoorPath("unavailable", None, [], None, 0.0, corr.length, note=note, tried=tried)
+        path = DoorPath("unavailable", None, [], None, 0.0, corr.length, note=note, tried=tried)
+        if transient and self.client.enabled:  # it may work once OSRM is back or less busy
+            path.retry_after_s = max(RETRY_MIN_S, math.ceil(self.client.retry_in()))
+        return path
 
     @staticmethod
     def too_far(corr: "Corridor") -> DoorPath:
@@ -351,7 +359,7 @@ class DoorDirections:
             self._store(self.key([s.id for s in segments], origin, destination), path)
             return path
 
-        path = self._unavailable(corr, tried)
+        path = self._unavailable(corr, tried, transient)
         if tried and not transient:  # the same route would be turned down again: remember that
             log.warning("No door-to-door directions for %s: %s", [s.id for s in segments], "; ".join(tried))
             self._store(self.key([s.id for s in segments], origin, destination), path)

@@ -1,6 +1,6 @@
 /** Route choices and door-to-door directions: API calls, and the words and arrows for them. */
 
-import { post } from "./api";
+import { API_URL, post } from "./api";
 import type { Location, Recommendation, Route, RouteDirections, RouteStep } from "./types";
 
 // ---- API ---------------------------------------------------------------------------------------
@@ -26,8 +26,36 @@ export type DirectionsPatch = Pick<Route, "geometry" | "depart_at" | "arrive_at"
   directions: RouteDirections;
 };
 
-export const routeDirections = (body: { origin: Location; destination: Location; segment_ids: string[]; depart_at?: string }) =>
-  post<DirectionsPatch>("/directions", body);
+/** POST /directions didn't answer. `retryAfterS`: worth asking again after about that long (too many asks, a
+ * server or network hiccup); null: asking again won't help (a route the server doesn't know). */
+export class DirectionsError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterS: number | null,
+  ) {
+    super(message);
+  }
+}
+
+export async function routeDirections(body: { origin: Location; destination: Location; segment_ids: string[]; depart_at?: string }) {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/directions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch {
+    throw new DirectionsError("Can't reach the server", 0);
+  }
+  if (res.ok) return (await res.json()) as DirectionsPatch;
+  const err = (await res.json().catch(() => ({}))) as { detail?: unknown; retry_after_s?: unknown };
+  const detail = typeof err.detail === "string" ? err.detail : res.statusText;
+  // 429: this device asked too often (the router is shared); try again when the server says
+  const again = res.status === 429 || res.status >= 500;
+  throw new DirectionsError(detail, again ? Math.max(0, Number(err.retry_after_s) || 0) : null);
+}
 
 // ---- words -------------------------------------------------------------------------------------
 

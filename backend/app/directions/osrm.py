@@ -112,6 +112,12 @@ class OsrmClient:
     def down(self) -> bool:
         return self.clock() < self._down_until
 
+    def retry_in(self) -> float:
+        """Seconds until a new request could go out: the rest of a cool-down, or of the queue."""
+        with self._lock:
+            now = self.clock()
+            return max(0.0, self._down_until - now, self._next_at - now)
+
     def _slot(self) -> None:
         """Wait for our turn (one request per min_interval), or give up if the queue is long."""
         with self._lock:

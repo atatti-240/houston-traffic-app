@@ -222,6 +222,8 @@ export interface RouteDirections {
    * (trips to or from an arbitrary point) */
   access_min: { start: number; end: number } | null;
   note: string | null;
+  /** Unavailable only for now (the router is down or busy): worth asking POST /directions again in that many seconds */
+  retry_after_s?: number | null;
 }
 
 export interface Recommendation {
