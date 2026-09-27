@@ -10,7 +10,7 @@
 import { useState } from "react";
 
 import { Icon } from "@/components/ui";
-import { fmtTime } from "@/lib/format";
+import { fmtTime, parseSim } from "@/lib/format";
 import { C } from "@/lib/theme";
 import type { PlaceHours, PlaceRef } from "@/lib/types";
 
@@ -38,6 +38,10 @@ export function StarButton({ place, size = 20 }: { place: PlaceRef; size?: numbe
       </svg>
     </button>
   );
+}
+
+function minutesBetween(a: string, b: string): number {
+  return (parseSim(b).getTime() - parseSim(a).getTime()) / 60000;
 }
 
 function hostOf(url: string): string {
@@ -109,8 +113,11 @@ export default function PlaceCard({ place, onDirections, compact, distance, arri
   const details = d.status === "ok" ? d.details : null;
   const address = place.address || details?.address;
   const kind = place.kind || details?.kind;
-  const closedOnArrival =
-    arriveAt && arrival.status === "ok" && arrival.details.hours?.open === false && details?.hours?.open !== false ? arrival.details.hours : null;
+  // At the time you'd get there: closed by then, or closing soon after.
+  const then = arriveAt && arrival.status === "ok" ? arrival.details.hours : null;
+  const closedOnArrival = then?.open === false && details?.hours?.open !== false ? then : null;
+  const closingOnArrival =
+    then?.open && then.closes_at && arriveAt && minutesBetween(arriveAt, then.closes_at) <= 20 ? then.closes_at : null;
   const cuisine = details?.cuisine && details.cuisine !== kind ? details.cuisine : null;
 
   return (
@@ -155,6 +162,11 @@ export default function PlaceCard({ place, onDirections, compact, distance, arri
       {closedOnArrival && (
         <span className="text-[13px] leading-snug font-medium" style={{ color: C.heavyText }}>
           When you get there at {fmtTime(arriveAt as string)}: {closedOnArrival.text ? closedOnArrival.text.charAt(0).toLowerCase() + closedOnArrival.text.slice(1) : "closed"}
+        </span>
+      )}
+      {closingOnArrival && (
+        <span className="text-[13px] leading-snug font-medium" style={{ color: C.moderate }}>
+          Closes at {fmtTime(closingOnArrival)}, soon after you get there ({fmtTime(arriveAt as string)})
         </span>
       )}
       {(details?.phone || details?.website) && (

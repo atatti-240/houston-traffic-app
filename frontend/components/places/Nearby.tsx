@@ -86,7 +86,9 @@ export default function Nearby() {
   const pick = (it: NearbyItem) => {
     const on = selected === it.key;
     setNearbyMarkers({ items: items.map((x) => ({ ...refOf(x), key: x.key, poi: x.kind })), selected: on ? null : it.key });
-    if (!on) focus({ lat: it.lat, lng: it.lng, zoom: 15 });
+    // Desktop: zoom to it. A phone keeps the fitted view (centering it would put it under the sheet);
+    // its marker grows instead.
+    if (!on && isDesktop) focus({ lat: it.lat, lng: it.lng, zoom: 15 });
   };
 
   const [one, many] = NOUN[kind];

@@ -265,7 +265,8 @@ export default function WhereTo() {
   );
   // Any address or business in Houston (OpenStreetMap), after our own places.
   const near = useMemo(() => (here ? { lat: here.lat, lng: here.lng } : null), [here?.lat, here?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
-  const geo = useGeocode(query, near);
+  const [attempt, setAttempt] = useState(0);
+  const geo = useGeocode(query, near, attempt);
   const geoResults = (geo.status === "ok" || geo.status === "loading" ? geo.results : []).filter((r) => !isOurs(r, results));
 
   // Recent trips, or a few popular places before there are any.
@@ -387,7 +388,10 @@ export default function WhereTo() {
               {geo.status === "error" && (
                 <span style={{ color: C.moderate }}>
                   {geo.message}
-                  {results.length ? " Our own places still work." : ""}
+                  {results.length ? " Our own places still work." : ""}{" "}
+                  <button type="button" onClick={() => setAttempt((n) => n + 1)} className="cursor-pointer font-medium text-accent">
+                    Try again
+                  </button>
                 </span>
               )}
               {geo.status === "ok" && geo.stale && <span>Search isn&apos;t answering, so these are saved results.</span>}
