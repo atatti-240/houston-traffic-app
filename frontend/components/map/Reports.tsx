@@ -26,6 +26,7 @@ import {
   useReports,
   type DriverReport,
 } from "@/lib/reports";
+import { C, SHADOW } from "@/lib/theme";
 
 function pinIcon(r: DriverReport, selected: boolean) {
   const k = REPORT_KINDS[r.kind];
@@ -43,9 +44,9 @@ function pinIcon(r: DriverReport, selected: boolean) {
           borderRadius: "50% 50% 50% 0",
           transform: "rotate(-45deg)",
           background: k.color,
-          border: "2px solid #0E1015",
+          border: "2px solid #ffffff",
           boxSizing: "border-box",
-          boxShadow: selected ? "0 0 0 3px #ECEDEF, 0 3px 10px rgba(0,0,0,0.6)" : "0 2px 8px rgba(0,0,0,0.6)",
+          boxShadow: selected ? `0 0 0 3px ${C.ink}, ${SHADOW[2]}` : SHADOW[1],
         }}
       />
       <svg
@@ -70,7 +71,7 @@ const previewIcon = L.divIcon({
   html: renderToStaticMarkup(
     <span
       className="bs-preview"
-      style={{ display: "block", width: 18, height: 18, borderRadius: 9, background: "#8FB0FF", border: "3px solid #FFFFFF", boxSizing: "border-box" }}
+      style={{ display: "block", width: 18, height: 18, borderRadius: 9, background: C.accent, border: "3px solid #ffffff", boxSizing: "border-box" }}
     />,
   ),
   className: "cause-icon",
@@ -216,7 +217,7 @@ export default function Reports() {
     <>
       <style>{`
         .bs-picking, .bs-picking .leaflet-interactive, .bs-picking .leaflet-grab { cursor: crosshair !important; }
-        @keyframes bs-preview { 0%, 100% { box-shadow: 0 0 0 0 rgba(143,176,255,0.7); } 50% { box-shadow: 0 0 0 10px rgba(143,176,255,0); } }
+        @keyframes bs-preview { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 50%, transparent); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--c-accent) 0%, transparent); } }
         .bs-preview { animation: bs-preview 1.6s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) { .bs-preview { animation: none; } }
       `}</style>

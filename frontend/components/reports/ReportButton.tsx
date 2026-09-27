@@ -15,10 +15,9 @@ export default function ReportButton() {
       aria-label="Report something on the road"
       aria-haspopup="dialog"
       aria-expanded={!!draft}
-      className="flex h-12 cursor-pointer items-center gap-2 rounded-3xl border border-edge bg-card pr-4 pl-3 text-[14px] font-semibold text-ink hover:bg-card-hi"
-      style={{ boxShadow: "0 4px 16px rgba(0,0,0,0.55)" }}
+      className="flex h-12 cursor-pointer items-center gap-2 rounded-3xl bg-float pr-4 pl-3 text-[14px] font-semibold text-ink shadow-e1 hover:bg-card"
     >
-      <Icon d={REPORT_ICON} color={C.moderate} />
+      <Icon d={REPORT_ICON} color={C.moderateText} />
       Report
     </button>
   );

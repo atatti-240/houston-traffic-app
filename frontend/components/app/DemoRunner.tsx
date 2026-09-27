@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useApp, type AppValue } from "@/components/app/AppContext";
 import { showDemoReport } from "@/components/reports/demo";
 import { api } from "@/lib/api";
-import { C } from "@/lib/theme";
+import { C, SHADOW, tint } from "@/lib/theme";
 
 const CRASH_ROAD = "I45S:gulf_ee>i45_610s";
 
@@ -172,7 +172,7 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
   const next = () => (last ? onExit() : go(index + 1));
   const nextLabel = busy ? "…" : index < 0 ? "Start" : last ? "Done" : "Next →";
   const errorBox = error && (
-    <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: "rgba(255,77,77,0.15)", color: C.heavyText }}>
+    <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: tint(C.heavy, 12), color: C.heavyText }}>
       Backend error: {error}. Is the API running on :8000?
     </p>
   );
@@ -182,8 +182,8 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
   if (!app.isDesktop) {
     return (
       <div
-        className="fixed inset-x-2 top-2 z-[1300] rounded-[18px] border border-pop-line px-3 py-2 text-ink"
-        style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+        className="fixed inset-x-2 top-2 z-[1300] rounded-[18px] px-3 py-2 text-ink"
+        style={{ background: C.pop, boxShadow: SHADOW[2] }}
       >
         <div className="flex items-center gap-2">
           <button
@@ -227,8 +227,8 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
 
   return (
     <div
-      className="fixed bottom-6 left-[calc(420px+(100vw-420px)/2)] z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] border border-pop-line p-4 text-ink"
-      style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      className="fixed bottom-6 left-[calc(420px+(100vw-420px)/2)] z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] p-4 text-ink"
+      style={{ background: C.pop, boxShadow: SHADOW[2] }}
     >
       <div className="flex items-center justify-between text-[12px] text-muted">
         <span>Demo {step ? `· step ${index + 1} of ${STEPS.length}` : ""}</span>

@@ -163,7 +163,7 @@ export default function Nearby() {
                   className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left"
                 >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: POI[it.kind].color }}>
-                    <Icon d={POI[it.kind].icon} size={17} color={C.onAccent} width={2.4} />
+                    <Icon d={POI[it.kind].icon} size={17} color="#ffffff" width={2.4} />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-[15px] font-semibold text-ink">{it.name}</span>
