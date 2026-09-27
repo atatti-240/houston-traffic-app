@@ -9,7 +9,7 @@ import ReportCard from "./ReportCard";
 
 export default function RoadReports({ segmentId }: { segmentId: string }) {
   const { items } = useReports();
-  const here = items.filter((r) => r.segment_id === segmentId);
+  const here = items.filter((r) => r.segment_id === segmentId || r.also_on === segmentId);
   if (!here.length) return null;
   return (
     <Card style={{ gap: 14 }}>

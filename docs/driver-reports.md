@@ -35,12 +35,19 @@ so routing, Why it's slow, Causes, Alerts, route reasons and "notify me when it 
 | Police | `police` | none: heads-up only | (listed, never a cause) |
 | Pothole | `pothole` | none: heads-up only | (listed, never a cause) |
 
+- Water covers the whole road: a flooding report also floods the other direction where the two
+  run within 70 m of each other there (a divided freeway's two sides are 20-60 m apart; one-way pairs
+  a block apart, like Westheimer by the Galleria, are separate roads). Crashes and the rest stay on
+  their own side.
 - A road counts only its worst incident, so a crash report under a two-lane closure adds nothing
   (the card says *"Another incident already slows this road more"*).
 - Driver reports aren't the incidents feed: they still count while that feed is down.
 - Labels say who and when: *"Reported by drivers, 12 min ago, 3 still there"* (*"Reported by a
   driver"* before anyone confirms). Route reasons read *"Rerouted around I-69 Southwest Fwy: crash
   reported (drivers, 5 min ago)"*.
+- The Causes tab lists every report under **Reported by drivers** (police and potholes too, which
+  never show up as a cause); tap one for its road's Why it's slow, which has a **Reported by
+  drivers** card with Still there / Not there.
 - A trip that crosses a flooding report (or any flooding incident) gets a **Flooding on your
   route** warning, and police and pothole reports on the route are listed too (they never change a route, so its reasons don't name them).
 - A new report, or a vote, re-checks saved trips and watched plans right away (in the background).
@@ -59,7 +66,8 @@ so routing, Why it's slow, Causes, Alerts, route reasons and "notify me when it 
 - One vote per client per report (the client is its IP address, stored only as a hash). Voting
   again changes your vote. The reporter can't confirm their own report.
 - Per client, in real time: 6 reports and 30 votes per 10 minutes (429 with `Retry-After`). The
-  limiter remembers at most 10,000 clients.
+  limiter remembers at most 10,000 clients, and `POST /demo/reset` starts it over (so a rehearsal
+  doesn't lock the presenter out of the live demo).
 - Kinds are fixed, the point has to be in the Houston area (lat 29.4-30.2, lng -95.9 to -94.9),
   and the optional detail is one line of at most 140 characters.
 
@@ -67,7 +75,7 @@ so routing, Why it's slow, Causes, Alerts, route reasons and "notify me when it 
 
 | Endpoint | |
 |---|---|
-| `GET /reports` | Reports up right now, newest first: kind, pin position, road, provenance, still there / not there, `affects_routing`, `delay_min`, `outweighed`, and `mine` (reported / still_there / not_there) for the asking client |
+| `GET /reports` | Reports up right now, newest first: kind, pin position, road, provenance, still there / not there, `affects_routing`, `delay_min`, `outweighed`, `also_on` (flooding: the other direction it floods too) and `mine` (reported / still_there / not_there) for the asking client |
 | `GET /reports/snap?lat=&lng=` | Where a report there would go: the road direction and the other direction, or `on_road: false` |
 | `POST /reports` | `{kind, lat, lng, note?, segment_id?}`. 201, or 200 with `merged: true` when it counted as a Still there |
 | `POST /reports/{id}/vote` | `{still_there: bool}`. `{removed, report}`; 404 once it's no longer up |

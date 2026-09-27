@@ -32,8 +32,8 @@ export function floodsOn(result: TripResultLike | null, reports: DriverReport[])
   if (route) {
     for (const s of route.segments) {
       // Each flooding report on this road (a road counts only its worst incident), else its flooding incident.
-      const said = reports.filter((r) => r.kind === "flooding" && r.segment_id === s.id);
-      for (const r of said) out.push({ road: r.road ?? s.name, said: r.provenance });
+      const said = reports.filter((r) => r.kind === "flooding" && (r.segment_id === s.id || r.also_on === s.id));
+      for (const r of said) out.push({ road: (r.segment_id === s.id && r.road) || s.name, said: r.provenance });
       if (!said.length && (s.incident?.kind === "flooding" || s.closure?.kind === "flooding")) out.push({ road: s.name });
     }
   } else if ("plan" in result) {

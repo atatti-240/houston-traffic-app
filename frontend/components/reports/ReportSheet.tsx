@@ -197,7 +197,13 @@ export default function ReportSheet() {
       upsertReport(res.report);
       closeReport();
       selectReport(res.report.id);
-      flash(res.merged ? "Already reported there: we counted yours as Still there." : "Thanks! Your report is on the map.");
+      flash(
+        !res.merged
+          ? "Thanks! Your report is on the map."
+          : res.report.mine === "reported"
+            ? "You already reported that."
+            : "Already reported there: we counted yours as Still there.",
+      );
       refresh();
     } catch (e) {
       setError(reportError(e));
@@ -314,7 +320,7 @@ export default function ReportSheet() {
         ref={sheetRef}
         role="dialog"
         aria-labelledby="report-h"
-        className="fade-in fixed bottom-[84px] left-[436px] z-[1250] flex max-h-[calc(100dvh-150px)] w-[372px] flex-col gap-3.5 overflow-y-auto rounded-[18px] border border-pop-line bg-pop p-5 text-ink"
+        className="fade-in fixed bottom-[84px] left-[436px] z-[1250] flex max-h-[calc(100dvh-150px)] w-[min(372px,calc(100vw-452px))] flex-col gap-3.5 overflow-y-auto rounded-[18px] border border-pop-line bg-pop p-5 text-ink"
         style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
       >
         {body}

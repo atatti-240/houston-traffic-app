@@ -18,6 +18,8 @@ export interface DriverReport {
   lat: number;
   lng: number;
   segment_id: string | null;
+  /** Flooding: the road's other direction, flooded too where the two run together */
+  also_on?: string | null;
   /** "Westheimer Rd northbound" (null off our roads) */
   road: string | null;
   /** "I-69 / 610 West to Galleria / Uptown", or "Near Midtown" off our roads */
@@ -193,12 +195,18 @@ export function setReports(items: DriverReport[]) {
   set({ items, loaded: true, selected: items.some((r) => r.id === state.selected) ? state.selected : null });
 }
 
+/** Bumped by every local change (a report sent, a vote): a list fetched before one is out of date. */
+let edits = 0;
+export const reportsEdits = () => edits;
+
 export function upsertReport(r: DriverReport) {
+  edits++;
   const i = state.items.findIndex((x) => x.id === r.id);
   set({ items: i < 0 ? [r, ...state.items] : state.items.map((x) => (x.id === r.id ? r : x)) });
 }
 
 export function dropReport(id: number) {
+  edits++;
   set({ items: state.items.filter((x) => x.id !== id), selected: state.selected === id ? null : state.selected });
 }
 
@@ -244,9 +252,20 @@ export function flash(text: string) {
   flashTimer = setTimeout(() => set({ flash: null }), 3200);
 }
 
+/** The backend's answer when a report expired or was taken down since the list was fetched. */
+const GONE = /no longer up/i;
+
 /** Vote on a report and update the store. */
 export async function voteReport(r: DriverReport, stillThere: boolean): Promise<void> {
-  const res = await reportsApi.vote(r.id, stillThere);
+  let res: Awaited<ReturnType<typeof reportsApi.vote>>;
+  try {
+    res = await reportsApi.vote(r.id, stillThere);
+  } catch (e) {
+    if (!(e instanceof Error && GONE.test(e.message))) throw e;
+    dropReport(r.id);
+    flash("That one's already off the map.");
+    return;
+  }
   if (res.removed || !res.report) {
     dropReport(r.id);
     flash(r.mine === "reported" ? "Your report is off the map." : "Thanks. It's off the map.");

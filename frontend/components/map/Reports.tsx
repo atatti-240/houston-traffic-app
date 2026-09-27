@@ -20,6 +20,7 @@ import {
   inHouston,
   pickSpot,
   reportsApi,
+  reportsEdits,
   selectReport,
   setReports,
   useReports,
@@ -84,8 +85,11 @@ function useReportsFeed() {
   const generation = dataGeneration(slowdowns);
   useEffect(() => {
     let live = true;
+    // A report sent or voted on while this was on its way: the list is older than the store
+    // (the refresh() after that change fetches it again).
+    const edits = reportsEdits();
     reportsApi.list().then(
-      (r) => live && setReports(r.items),
+      (r) => live && edits === reportsEdits() && setReports(r.items),
       () => {},
     );
     return () => {
