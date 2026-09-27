@@ -19,6 +19,7 @@ import type { Location, Route, RouteDirections } from "@/lib/types";
 
 const HISTORY_FIELD = "bsRoute";
 const FAILED_NOTE = "Turn-by-turn directions aren't available right now. The line follows our main roads.";
+const ROUGH_NOTE = "Times cover the main roads only."; // as the server says it, to or from a point
 const RETRY_NOTE = "Trying again shortly.";
 // At most MAX_TRIES asks per route and departure, the n-th retry at least BACKOFF_S[n - 1] after the last ask (or
 // later when the server says so), plus a little jitter so screens don't ask in step. After that only a refetch of
@@ -81,6 +82,7 @@ export function useRouteChoices(routes: Route[], origin: Location | undefined, t
   const trip = JSON.stringify([origin, to]);
   const timed = (origin !== undefined && typeof origin !== "string") || (to !== undefined && typeof to !== "string");
   const keyOf = useCallback((r: Route) => `${trip}|${r.id}|${r.depart_at}`, [trip]);
+  const failedNote = timed ? `${FAILED_NOTE} ${ROUGH_NOTE}` : FAILED_NOTE;
 
   const merged = useMemo(
     () =>
@@ -93,14 +95,14 @@ export function useRouteChoices(routes: Route[], origin: Location | undefined, t
         const t = tries[key];
         const shown =
           !p && t && r.directions?.status === "pending"
-            ? { ...r, directions: { ...r.directions, status: "unavailable" as const, note: FAILED_NOTE } }
+            ? { ...r, directions: { ...r.directions, status: "unavailable" as const, note: failedNote } }
             : withPatch;
         // Say so while they'll be asked for again (a first route that failed for now: /route asked once)
         const d = shown.directions;
         if (d?.status !== "unavailable" || t?.never || (t?.n ?? 1) >= MAX_TRIES) return shown;
-        return { ...shown, directions: { ...d, note: `${d.note ?? FAILED_NOTE} ${RETRY_NOTE}` } };
+        return { ...shown, directions: { ...d, note: `${d.note ?? failedNote} ${RETRY_NOTE}` } };
       }),
-    [routes, patches, tries, keyOf],
+    [routes, patches, tries, keyOf, failedNote],
   );
   const selected = merged.find((r) => r.id === picked) ?? merged[0];
 
