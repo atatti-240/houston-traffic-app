@@ -1,7 +1,7 @@
 /** Walk, bike and transit: the Trip screen's other tabs. Types and client for /travel/route and
  * /transit/*, plus what they draw on the map. */
 
-import { post } from "@/lib/api";
+import { API_URL } from "@/lib/api";
 import { CAUSE, ICON } from "@/lib/theme";
 import type { LatLngTuple } from "@/lib/types";
 
@@ -135,10 +135,44 @@ export interface TransitPlan {
   legend: string;
 }
 
+/** A request that failed. `retry`: asking again may help (BlindSpot or the routing service was down,
+ * slow or busy); not for a trip that's outside the area, too far or has no route. */
+export class TravelError extends Error {
+  retry: boolean;
+  constructor(message: string, retry: boolean) {
+    super(message);
+    this.retry = retry;
+  }
+}
+
+async function send<T>(path: string, body: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch {
+    throw new TravelError("Can't reach BlindSpot right now.", true);
+  }
+  if (!res.ok) {
+    let detail: unknown;
+    try {
+      detail = (await res.json()).detail;
+    } catch {}
+    // 4xx (422 outside the area or too far, 404 no route) says the same next time; 5xx may not.
+    const retry = res.status >= 500 || res.status === 408 || res.status === 429;
+    throw new TravelError(typeof detail === "string" ? detail : "Something went wrong.", retry);
+  }
+  return res.json();
+}
+
 export const travelApi = {
   walkBike: (body: { mode: "walk" | "bike"; origin: LatLng; destination: LatLng; depart_at?: string }) =>
-    post<WalkBikeRoute>("/travel/route", body),
-  transitTrip: (body: { origin: LatLng; destination: LatLng; depart_at?: string }) => post<TransitPlan>("/transit/trip", body),
+    send<WalkBikeRoute>("/travel/route", body),
+  transitTrip: (body: { origin: LatLng; destination: LatLng; depart_at?: string }) => send<TransitPlan>("/transit/trip", body),
 };
 
 // ---- map --------------------------------------------------------------------------------------------

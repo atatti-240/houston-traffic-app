@@ -285,6 +285,112 @@ def test_http_calls_have_a_timeout_and_a_user_agent(monkeypatch):
     assert seen["timeout"] == osrm.TIMEOUT_S and "BlindSpot" in seen["ua"]
 
 
+STREET = (29.760379, -95.369764)  # on Bagby Street, a few meters from Downtown's point
+
+
+def nearest_body(*ways) -> dict:
+    """A /nearest answer: (name, lat, lng) ways, closest first."""
+    return {"code": "Ok", "waypoints": [{"name": n, "location": [lng, lat], "distance": 1.0} for n, lat, lng in ways]}
+
+
+DOWNTOWN_WAYS = nearest_body(
+    ("West Walker Tunnel", 29.760422, -95.369784),
+    ("", 29.760461, -95.369808),  # unnamed: could be a tunnel link too
+    ("Bagby Street Bikeway", *STREET),
+    ("Bagby Street", 29.760422, -95.369838),
+)
+
+
+class DowntownServer:
+    """Downtown's point snaps into the pedestrian tunnels; the street next to it snaps to the street."""
+
+    def __init__(self, nearest=DOWNTOWN_WAYS, nearest_error: Exception | None = None, street_route=None):
+        self.nearest, self.nearest_error, self.street_route, self.urls = nearest, nearest_error, street_route, []
+
+    def __call__(self, url: str) -> dict:
+        self.urls.append(url)
+        if "/nearest/" in url:
+            if self.nearest_error:
+                raise self.nearest_error
+            return self.nearest
+        ends = url.split("/driving/")[1].split("?")[0].split(";")
+        way = {f"{p[1]:.6f},{p[0]:.6f}": name for p, name in ((DOWNTOWN, "West Walker Tunnel"), (STREET, "Bagby Street Bikeway"))}
+        names = [way.get(e, "") for e in ends]
+        if "Bagby Street Bikeway" in names and self.street_route is not None:
+            return self.street_route
+        body = osrm_body()
+        body["routes"][0]["legs"][0]["steps"][0]["name"] = names[0] or "Main Street"
+        body["waypoints"] = [{"name": n, "location": [0, 0]} for n in names]
+        return body
+
+
+def test_indoor_way_names():
+    assert osrm.indoor("West Walker Tunnel") and osrm.indoor("Tunnel Loop") and osrm.indoor("Allen Center Skybridge")
+    assert not osrm.indoor("Bagby Street") and not osrm.indoor("Tunnelton Road") and not osrm.indoor("") and not osrm.indoor(None)
+
+
+def test_an_end_in_a_tunnel_moves_to_the_street_close_by():
+    server = DowntownServer()
+    router = make_router(server)
+    r = router.route("walk", DOWNTOWN, MIDTOWN)
+    assert server.urls == [
+        osrm.route_url("walk", DOWNTOWN, MIDTOWN),
+        "https://routing.openstreetmap.de/routed-foot/nearest/v1/driving/-95.369800,29.760400?number=8",
+        osrm.route_url("walk", STREET, MIDTOWN),  # the closest named way that isn't a tunnel
+    ]
+    assert r["steps"][0]["instruction"] == "Head south on Bagby Street Bikeway"
+    # Remembered for the point, whatever the mode: straight from the street next time.
+    router.route("bike", DOWNTOWN, MIDTOWN)
+    assert server.urls[3:] == [osrm.route_url("bike", STREET, MIDTOWN)]
+    assert router.route("walk", DOWNTOWN, MIDTOWN) == r and len(server.urls) == 4
+
+
+def test_the_end_of_a_trip_moves_too():
+    server = DowntownServer()
+    make_router(server).route("bike", MIDTOWN, DOWNTOWN)
+    assert server.urls[1:] == [osrm.nearest_url("bike", DOWNTOWN), osrm.route_url("bike", MIDTOWN, STREET)]
+
+
+def test_when_nearest_fails_the_point_stays_and_we_ask_again_later():
+    server = DowntownServer(nearest_error=urllib.error.URLError("down"))
+    router = make_router(server)
+    r = router.route("walk", DOWNTOWN, MIDTOWN)
+    assert r["steps"][0]["instruction"] == "Head south on West Walker Tunnel" and len(server.urls) == 2
+    server.nearest_error = None
+    assert router.route("walk", DOWNTOWN, MIDTOWN)["steps"][0]["instruction"] == "Head south on Bagby Street Bikeway"
+    assert len(server.urls) == 5  # the first answer wasn't kept
+
+
+def test_no_street_close_by_keeps_the_point():
+    far = (29.7625, -95.3698)  # ~230 m north
+    server = DowntownServer(nearest=nearest_body(("West Walker Tunnel", 29.760422, -95.369784), ("", *STREET), ("Travis Street", *far)))
+    router = make_router(server)
+    assert router.route("walk", DOWNTOWN, MIDTOWN)["steps"][0]["instruction"] == "Head south on West Walker Tunnel"
+    assert len(server.urls) == 2
+    router.route("walk", DOWNTOWN, (29.75, -95.37))
+    assert len(server.urls) == 3  # remembered: no second look
+
+
+def test_a_street_with_no_route_is_given_up():
+    server = DowntownServer(street_route={"code": "NoRoute"})
+    router = make_router(server)
+    assert router.route("walk", DOWNTOWN, MIDTOWN)["steps"][0]["instruction"] == "Head south on West Walker Tunnel"
+    router.route("walk", DOWNTOWN, (29.75, -95.37))
+    assert server.urls[3] == osrm.route_url("walk", DOWNTOWN, (29.75, -95.37)) and len(server.urls) == 4
+
+
+def test_a_slow_first_answer_isnt_made_slower():
+    t = FakeTime()
+    server = DowntownServer()
+
+    def slow(url):
+        t.t += osrm.STREET_BUDGET_S + 1
+        return server(url)
+
+    r = osrm.WalkBikeRouter(fetch=slow, clock=t.clock, sleep=t.sleep).route("walk", DOWNTOWN, MIDTOWN)
+    assert r["steps"][0]["instruction"] == "Head south on West Walker Tunnel" and len(server.urls) == 1
+
+
 def test_osrm_400_answers_are_read_as_json(monkeypatch):
     def fake_urlopen(req, timeout=None):
         body = io.BytesIO(json.dumps({"code": "NoSegment", "message": "Could not find a matching segment"}).encode())

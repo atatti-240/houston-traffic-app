@@ -3,11 +3,16 @@
 The URL is built here from two validated points, never from user text. Answers are cached,
 requests are spaced a second apart (a public server), every call has a timeout, and a server
 that is down, slow or busy becomes RoutingUnavailable, which the API turns into a clear message.
+
+The router snaps each end to the nearest walkable way, which downtown is often a pedestrian tunnel.
+When it does, we ask the same server for the ways nearby (/nearest) and start or end on the closest
+street instead, remembered per point.
 """
 
 import http.client
 import json
 import math
+import re
 import threading
 import time
 import urllib.error
@@ -32,6 +37,14 @@ CACHE_TTL_S = 3600
 BOUNDS = (29.2, 30.4, -96.1, -94.7)  # min lat, max lat, min lng, max lng
 # Farther than this in a straight line isn't a walk or a ride we'd suggest.
 MAX_KM: dict[str, float] = {"walk": 15.0, "bike": 50.0}
+# Moving an end out of a tunnel: ways to look through, how close a street must be, how long we
+# remember it, and no more tries once the first answer took this long (don't make a slow trip slower).
+NEAREST_N = 8
+STREET_MAX_M = 100
+STREET_TTL_S = 24 * 3600
+STREET_BUDGET_S = 3.0
+# Ways a trip shouldn't start or end in: downtown's pedestrian tunnels, skywalks, indoor ways.
+_INDOOR = re.compile(r"\b(tunnels?|skywalks?|sky ?bridges?|skyways?|indoor)\b", re.IGNORECASE)
 
 Fetch = Callable[[str], dict]
 
@@ -98,6 +111,36 @@ def route_url(mode: Mode, a: tuple[float, float], b: tuple[float, float]) -> str
         f"{BASE_URL}/{PROFILES[mode]}/route/v1/driving/{a[1]:.6f},{a[0]:.6f};{b[1]:.6f},{b[0]:.6f}"
         "?overview=full&geometries=geojson&steps=true"
     )
+
+
+def nearest_url(mode: Mode, p: tuple[float, float]) -> str:
+    return f"{BASE_URL}/{PROFILES[mode]}/nearest/v1/driving/{p[1]:.6f},{p[0]:.6f}?number={NEAREST_N}"
+
+
+def indoor(name: object) -> bool:
+    """A way's name says it's a tunnel, a skywalk or indoors."""
+    return isinstance(name, str) and bool(_INDOOR.search(name))
+
+
+def snapped_names(body: dict) -> list[object]:
+    """The name of the way each end was snapped to, from a route answer."""
+    wps = body.get("waypoints")
+    return [w.get("name") if isinstance(w, dict) else None for w in wps] if isinstance(wps, list) else []
+
+
+def pick_street(p: tuple[float, float], body: dict) -> tuple[float, float] | None:
+    """From a /nearest answer: the closest named way near p that isn't a tunnel or indoors (unnamed
+    ways can be tunnel links too), or None when there's none close by."""
+    if body.get("code") != "Ok":
+        raise ValueError(f"nearest said {body.get('code')!r}")
+    for wp in body.get("waypoints") or []:
+        name = wp.get("name")
+        if not isinstance(name, str) or not name.strip() or indoor(name):
+            continue
+        lng, lat = (float(v) for v in wp["location"])
+        if math.isfinite(lat) and math.isfinite(lng) and distance_km(p, (lat, lng)) * 1000 <= STREET_MAX_M:
+            return (lat, lng)
+    return None
 
 
 # ---- turn-by-turn text -----------------------------------------------------------------------------
@@ -253,7 +296,8 @@ class _Pending:
         self.error: Exception | None = None
 
     def wait(self) -> dict:
-        if not self.done.wait(MAX_WAIT_S + TIMEOUT_S + 1):
+        # The longest a request takes: its first call, or the street budget plus one more call.
+        if not self.done.wait(STREET_BUDGET_S + MAX_WAIT_S + TIMEOUT_S + 1):
             raise RoutingUnavailable("still waiting for the same directions")
         if self.error is not None:
             raise self.error
@@ -271,6 +315,8 @@ class WalkBikeRouter:
         self._next_slot = 0.0
         self._cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
         self._pending: dict[tuple, _Pending] = {}
+        # Point -> where to start or end instead (the point itself when no street is close by).
+        self._streets: OrderedDict[tuple, tuple[float, tuple[float, float]]] = OrderedDict()
 
     def route(self, mode: Mode, a: tuple[float, float], b: tuple[float, float]) -> dict:
         if mode not in PROFILES:
@@ -301,20 +347,84 @@ class WalkBikeRouter:
             mine.done.set()
 
     def _ask(self, mode: Mode, a: tuple[float, float], b: tuple[float, float], key: tuple) -> dict:
+        started = self._clock()
+        points = (a, b)
+        ends = [self._street(p) or p for p in points]
+        result, names = self._route(mode, ends)
+        # An end snapped into a tunnel or indoors: move it to a street close by, if there is one.
+        # Anything going wrong on the way keeps the first answer (not cached, so we try again).
+        moved, settled = list(ends), True
+        for i, name in enumerate(names[:2]):
+            if not indoor(name):
+                continue
+            street = self._street(points[i])
+            if street is None:
+                if self._clock() - started > STREET_BUDGET_S:
+                    settled = False
+                    break
+                try:
+                    street = pick_street(points[i], self._get(nearest_url(mode, points[i]))) or points[i]
+                except (RoutingUnavailable, KeyError, IndexError, TypeError, AttributeError, ValueError):
+                    settled = False
+                    continue
+                self._remember_street(points[i], street)
+            moved[i] = street
+        if moved != ends:
+            if self._clock() - started > STREET_BUDGET_S:
+                settled = False
+            else:
+                try:
+                    result, _ = self._route(mode, moved)
+                except RoutingUnavailable:
+                    settled = False
+                except NoRoute:  # that street was a dead end: stay on the point from now on
+                    for i in range(2):
+                        if moved[i] != ends[i]:
+                            self._remember_street(points[i], points[i])
+        if settled:
+            with self._lock:
+                self._cache[key] = (self._clock(), result)
+                while len(self._cache) > CACHE_SIZE:
+                    self._cache.popitem(last=False)
+        return result
+
+    def _get(self, url: str) -> dict:
+        """One call to the server, in its turn."""
         self._wait_turn()
         try:
-            body = self._fetch(route_url(mode, a, b))
+            body = self._fetch(url)
         except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
             raise RoutingUnavailable(str(e)) from e
+        if not isinstance(body, dict):
+            raise RoutingUnavailable("routing server sent something we can't read")
+        return body
+
+    def _route(self, mode: Mode, ends: list[tuple[float, float]]) -> tuple[dict, list[object]]:
+        """Directions between the two ends, and the names of the ways they snapped to."""
+        body = self._get(route_url(mode, ends[0], ends[1]))
         try:
-            result = parse_route(mode, body)
+            return parse_route(mode, body), snapped_names(body)
         except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
             raise RoutingUnavailable(f"routing server sent something we can't read: {e!r}") from e
+
+    def _street(self, p: tuple[float, float]) -> tuple[float, float] | None:
+        """Where to start or end instead of p, if we've looked (p itself when there was no street)."""
+        k = (round(p[0], 5), round(p[1], 5))
         with self._lock:
-            self._cache[key] = (self._clock(), result)
-            while len(self._cache) > CACHE_SIZE:
-                self._cache.popitem(last=False)
-        return result
+            hit = self._streets.get(k)
+            if hit is None:
+                return None
+            if self._clock() - hit[0] > STREET_TTL_S:
+                del self._streets[k]
+                return None
+            self._streets.move_to_end(k)
+            return hit[1]
+
+    def _remember_street(self, p: tuple[float, float], street: tuple[float, float]) -> None:
+        with self._lock:
+            self._streets[(round(p[0], 5), round(p[1], 5))] = (self._clock(), street)
+            while len(self._streets) > CACHE_SIZE:
+                self._streets.popitem(last=False)
 
     def _cached(self, key: tuple) -> dict | None:
         with self._lock:

@@ -11,7 +11,7 @@ import { addMinutesSim, fmtDayTime, fmtTime } from "@/lib/format";
 import { fmtDistance, fmtMinutes, stepIcon, travelApi, type LatLng, type WalkBikeRoute } from "@/lib/modes";
 import { C } from "@/lib/theme";
 
-import { BigLine, describeError, ErrorLine, Loading, sheetPadding } from "./modeParts";
+import { BigLine, canRetry, describeError, ErrorLine, Loading, sheetPadding } from "./modeParts";
 
 /** Past these, suggest another way to go. */
 const LONG_MIN = { walk: 60, bike: 90 };
@@ -31,14 +31,14 @@ export default function WalkBike({
 }) {
   const { clock, setScene, isDesktop } = useApp();
   const key = JSON.stringify({ mode, start, end });
-  const [res, setRes] = useState<{ key: string; route?: WalkBikeRoute; error?: string } | null>(null);
+  const [res, setRes] = useState<{ key: string; route?: WalkBikeRoute; error?: string; canRetry?: boolean } | null>(null);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let live = true;
     travelApi.walkBike({ mode, origin: start, destination: end }).then(
       (route) => live && setRes({ key, route }),
-      (e: unknown) => live && setRes({ key, error: describeError(e) }),
+      (e: unknown) => live && setRes({ key, error: describeError(e), canRetry: canRetry(e) }),
     );
     return () => {
       live = false;
@@ -71,10 +71,14 @@ export default function WalkBike({
     return (
       <ErrorLine
         message={current.error ?? "Something went wrong."}
-        onRetry={() => {
-          setRes(null);
-          setRetry((n) => n + 1);
-        }}
+        onRetry={
+          current.canRetry
+            ? () => {
+                setRes(null);
+                setRetry((n) => n + 1);
+              }
+            : undefined
+        }
       />
     );
 
