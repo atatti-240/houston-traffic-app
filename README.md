@@ -46,7 +46,7 @@ API docs: http://localhost:8000/docs
 | `make roads` | re-trace the road shapes along the real streets (writes `backend/app/seed/road_shapes.json`) |
 | `make test` | backend pytest + frontend typecheck |
 
-Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`).
+Config (env vars): `SIM_START` (default Monday `2026-09-28T07:15:00`), `CLOCK_SPEED` (simulated seconds per real second, default `1`), `HISTORY_WEEKS` (`8`), `SYNTHETIC_SEED` (`42`), `NEXT_PUBLIC_API_URL` (frontend → API, default `http://localhost:8000`), `NOMINATIM_URL` (address and business search, default the free public server `https://nominatim.openstreetmap.org`; point it at your own Nominatim for heavier use).
 
 ## The demo (≈3 minutes)
 
@@ -63,7 +63,16 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 9. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
 10. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
-You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`.
+You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>`, `trip&to=hobby&from=downtown&by=17:45&safety=1` or `nearby&kind=fuel` (`ev`, `parking`).
+
+### Places
+
+- **Search any address or business.** *Where to* finds our own places first, then anything in the Houston area from [OpenStreetMap](https://www.openstreetmap.org/copyright) through its free geocoder, Nominatim (`GET /geocode?q=`), nearest first. Tap one for the trip there.
+- **Place cards.** Tap a shop or place on the map (or open a search result) for its card: **"Open now, closes 9 PM"** with the week's hours, phone, website, and Directions. On the trip it also says when the place will be closed, or closing, by the time you get there. What OpenStreetMap doesn't know, the card leaves out (no ratings: OSM has none).
+- **Home, Work and favorites.** Chips on *Where to* (with the drive time) and an editor to set, change or remove them. Star any place to keep it; favorites show as stars on the map. Saved in the browser only, no accounts.
+- **Gas, EV chargers, parking.** Turn them on in the map's layers menu (from zoom 13), or open **Gas near me** there, or **Gas on the way** from a trip: the closest few with distance, each with its card.
+
+The public Nominatim server allows one request per second for the whole app and discourages search-as-you-type, so the backend rate-limits, caches every answer (memory + SQLite, and serves an older answer, marked as such, when the geocoder is down), and the app waits for a pause in typing, needs 3 letters and keeps one request in flight. For anything bigger than a demo, set `NOMINATIM_URL` to your own Nominatim. When search is down, our own places still work and the app says so.
 
 ## How it works
 
@@ -106,5 +115,6 @@ Notifications work the same way: `NotificationService` has a mock (stored and po
 - ✅ Road-conditions layer with priority rules for live vs predicted data, tested with mock live feeds
 - 🧪 Data: synthetic, with patterns baked in for the models to rediscover (rush hours, crash hot spots, recurring trains)
 - ✅ UI: phone-first dark design (full-screen screens on a phone, a side panel next to the map on desktop), installable PWA
-- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ✅ Map: free dark vector street map ([OpenFreeMap](https://openfreemap.org), no key), roads traced along the real streets, and shops and places as colored dots with names (tap one for its card and directions). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+- ✅ Places: search any Houston address or business, place cards with hours / phone / website, Home / Work / favorites, gas / EV / parking near you or along your route (all OpenStreetMap, free, no keys)
 - ⏭️ Next: real TranStar/TrainWatch adapters (`adapters/real/`), real camera feeds, full OSM road graph, real web push, the marketing website

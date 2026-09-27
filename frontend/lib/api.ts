@@ -3,9 +3,11 @@ import type {
   Camera,
   ClockState,
   Crossing,
+  GeoSearch,
   LiveConditions,
   Location,
   Place,
+  PlaceDetails,
   PlanResult,
   Recommendation,
   SlowdownDetail,
@@ -89,4 +91,25 @@ export const api = {
   clearLive: () => post<{ notifications: AppNotification[] }>("/demo/clear-live"),
   scenario: (name: "evening") => post<ClockState>(`/demo/scenario/${name}`),
   reset: () => post<ClockState>("/demo/reset"),
+
+  // Real places (OpenStreetMap through the backend's geocoder)
+  geocode: (q: string, near?: { lat: number; lng: number } | null, signal?: AbortSignal) => {
+    const p = new URLSearchParams({ q });
+    if (near) {
+      p.set("lat", near.lat.toFixed(4));
+      p.set("lng", near.lng.toFixed(4));
+    }
+    return call<GeoSearch>(`/geocode?${p}`, { signal });
+  },
+  placeDetails: (ref: { osm?: string | null; name?: string; lat?: number; lng?: number; at?: string }, signal?: AbortSignal) => {
+    const p = new URLSearchParams();
+    if (ref.osm) p.set("osm", ref.osm);
+    else if (ref.name && ref.lat !== undefined && ref.lng !== undefined) {
+      p.set("name", ref.name);
+      p.set("lat", ref.lat.toFixed(6));
+      p.set("lng", ref.lng.toFixed(6));
+    }
+    if (ref.at) p.set("at", ref.at);
+    return call<PlaceDetails>(`/geocode/details?${p}`, { signal });
+  },
 };

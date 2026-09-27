@@ -11,6 +11,7 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import VectorBasemap from "@/components/map/VectorBasemap";
+import PlacesLayer from "@/components/places/PlacesLayer";
 import { camName } from "@/lib/format";
 import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
 import type { LatLngTuple, Slowdown } from "@/lib/types";
@@ -418,6 +419,8 @@ export default function TrafficMap({
       </Pane>
 
       {interactive && <CauseMarkers />}
+      {/* Home, Work, favorites, the nearby list, and the card of any place you tap */}
+      {interactive && <PlacesLayer />}
     </MapContainer>
   );
 }

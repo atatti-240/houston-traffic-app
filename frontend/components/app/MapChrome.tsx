@@ -5,6 +5,7 @@
 import { useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
+import NearbyMenu from "@/components/places/NearbyMenu";
 import { Icon, RoundButton } from "@/components/ui";
 import { C, ICON } from "@/lib/theme";
 
@@ -61,7 +62,7 @@ export function LayersButton() {
       </RoundButton>
       {open && (
         <div
-          className="fade-in absolute top-14 right-0 z-[1200] w-48 rounded-[14px] border border-pop-line bg-pop p-2"
+          className="fade-in absolute top-14 right-0 z-[1200] w-52 rounded-[14px] border border-pop-line bg-pop p-2"
           style={{ boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
         >
           {rows.map(([k, label]) => (
@@ -70,6 +71,7 @@ export function LayersButton() {
               <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers({ ...layers, [k]: e.target.checked })} />
             </label>
           ))}
+          <NearbyMenu onDone={() => setOpen(false)} />
         </div>
       )}
     </div>

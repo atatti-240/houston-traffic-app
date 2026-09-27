@@ -11,7 +11,8 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
-import { useApp, type MapPoint, type MapScene } from "@/components/app/AppContext";
+import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/app/AppContext";
+import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
@@ -40,6 +41,11 @@ type Result =
   | { kind: "route"; key: string; best: Route; alt: Route | null }
   | { kind: "rec"; key: string; rec: Recommendation }
   | ({ kind: "plan"; key: string } & TimedPlan);
+
+/** How each trip (stack entry) was set, so Back from "Gas on the way" (or a place's trip) returns to
+ * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. */
+type Settings = { mode: Mode; by: string; safety: number; stops: string[]; showAlt: boolean };
+const memory = new WeakMap<Screen, Settings>();
 
 /** `existing`: saved before (found on the server, not made on this screen), so an edit doesn't replace it. */
 type Watch = { key: string; tripId?: number; planId?: string; existing?: boolean };
@@ -337,12 +343,13 @@ export default function Trip() {
   const params = screen.name === "trip" ? screen : null;
   const paramsKey = JSON.stringify(params);
 
-  const [mode, setMode] = useState<Mode>(params?.arriveBy ? "by" : "now");
-  const [by, setBy] = useState(params?.arriveBy ?? "");
-  const [safety, setSafety] = useState(initialSafety(params?.safety));
-  const [stops, setStops] = useState<string[]>([]);
+  const kept = memory.get(screen);
+  const [mode, setMode] = useState<Mode>(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
+  const [by, setBy] = useState(kept?.by ?? params?.arriveBy ?? "");
+  const [safety, setSafety] = useState(kept?.safety ?? initialSafety(params?.safety));
+  const [stops, setStops] = useState<string[]>(kept?.stops ?? []);
   const [picking, setPicking] = useState(false);
-  const [showAlt, setShowAlt] = useState(false);
+  const [showAlt, setShowAlt] = useState(kept?.showAlt ?? false);
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -355,14 +362,17 @@ export default function Trip() {
   const [seenParams, setSeenParams] = useState(paramsKey);
   if (seenParams !== paramsKey) {
     setSeenParams(paramsKey);
-    setMode(params?.arriveBy ? "by" : "now");
-    setBy(params?.arriveBy ?? "");
-    setSafety(initialSafety(params?.safety));
-    setStops([]);
+    setMode(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
+    setBy(kept?.by ?? params?.arriveBy ?? "");
+    setSafety(kept?.safety ?? initialSafety(params?.safety));
+    setStops(kept?.stops ?? []);
     setPicking(false);
-    setShowAlt(false);
+    setShowAlt(kept?.showAlt ?? false);
     setWatch(null);
   }
+  useEffect(() => {
+    memory.set(screen, { mode, by, safety, stops, showAlt });
+  }, [screen, mode, by, safety, stops, showAlt]);
 
   const to = params?.to;
   const origin: Location | undefined = params?.from ?? here?.place;
@@ -463,7 +473,8 @@ export default function Trip() {
       route: best.geometry,
       alternative: shownAlt,
       points: pts,
-      fit: [...best.geometry, ...(shownAlt ?? [])],
+      // With the start and end too: a real place can sit off our road map (or the route be tiny).
+      fit: [...best.geometry, ...(shownAlt ?? []), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
       fitPadding: sheetPadding(isDesktop),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -765,6 +776,9 @@ export default function Trip() {
   const busy = !result && !error && !hidden;
   // The result on screen is for other inputs (a new one is on its way): don't act on it.
   const outdated = result !== null && result.key !== inputs;
+  // For the destination's card ("closed when you get there") and "Gas on the way".
+  const arriveAt = result?.kind === "rec" ? result.rec.eta : result?.kind === "route" ? result.best.arrive_at : result?.plan.legs.at(-1)?.arrive_at;
+  const routeLine = result?.kind === "rec" ? result.rec.route.geometry : result?.kind === "route" ? result.best.geometry : result?.plan.legs.flatMap((l) => l.geometry);
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-3 pb-8 md:pt-6">
@@ -803,6 +817,8 @@ export default function Trip() {
           )}
         </p>
       )}
+
+      {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
 
       {/* When, and how */}
       <div className="flex flex-col gap-4">
@@ -875,6 +891,7 @@ export default function Trip() {
       </div>
 
       {!hidden && body && <div className={`flex flex-col gap-3 transition-opacity ${stale ? "opacity-60" : ""}`}>{body}</div>}
+      {!hidden && !outdated && <GasOnTheWay route={routeLine} toName={toName} />}
 
       {!hidden && result && (
         <div className="flex flex-col gap-2">

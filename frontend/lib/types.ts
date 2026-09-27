@@ -431,3 +431,73 @@ export interface TrafficAlert {
   slowdown_id: string | null;
   source: string;
 }
+
+// ---- real places (OpenStreetMap, via GET /geocode) ---------------------------------------------
+
+/** A search result: an address or a business. `id` is its OpenStreetMap id ("W123"). */
+export interface GeoResult {
+  id: string | null;
+  name: string;
+  /** Short line: "3407 Montrose Boulevard, Montrose" */
+  address: string | null;
+  lat: number;
+  lng: number;
+  /** "Cafe", "Gas station", "Address"... */
+  kind: string;
+  distance_km: number | null;
+}
+
+export interface GeoSearch {
+  query: string;
+  results: GeoResult[];
+  /** The geocoder didn't answer: these are older cached results */
+  stale: boolean;
+  attribution: string;
+}
+
+export interface PlaceHours {
+  /** The OpenStreetMap opening_hours text */
+  raw: string;
+  /** null when the text was too complex to read (show `raw`) */
+  open: boolean | null;
+  /** "Open now, closes 9 PM", "Closed, opens 7 AM tomorrow" */
+  text: string | null;
+  closes_at: string | null;
+  opens_at: string | null;
+  week: { day: string; hours: string }[] | null;
+  today: string | null;
+}
+
+export interface PlaceDetails {
+  id: string | null;
+  name: string;
+  address: string | null;
+  lat: number;
+  lng: number;
+  kind: string;
+  phone: { display: string; tel: string } | null;
+  /** Always http(s) */
+  website: string | null;
+  brand: string | null;
+  cuisine: string | null;
+  hours: PlaceHours | null;
+  /** When `hours` was worked out for (the app's clock, or the `at` asked for) */
+  at: string;
+  stale: boolean;
+  attribution: string;
+}
+
+/** Any real place the place card can show: a map dot, a search result, a saved place, a gas station. */
+export interface PlaceRef {
+  name: string;
+  lat: number;
+  lng: number;
+  /** OpenStreetMap id ("N123", "W456"): its details come from this */
+  osm?: string | null;
+  /** One of our own named places (Downtown, Galleria...): no business details */
+  placeId?: string;
+  kind?: string | null;
+  address?: string | null;
+  /** Dot color, as on the map */
+  color?: string;
+}
