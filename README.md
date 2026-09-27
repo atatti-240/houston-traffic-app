@@ -65,6 +65,8 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 
 You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>` or `trip&to=hobby&from=downtown&by=17:45&safety=1`.
 
+On a trip, **Share ETA** makes a read-only link (`/share/<id>`, good for 6 hours) with the route and an ETA that re-checks traffic along it every minute. See [ARCHITECTURE.md](ARCHITECTURE.md#share-eta).
+
 ## How it works
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture. The short version:

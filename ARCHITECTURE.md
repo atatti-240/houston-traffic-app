@@ -119,6 +119,15 @@ Endpoints: `GET /slowdowns` (every slowdown, worst first), `GET /slowdowns/{segm
 
 A watch on a road with something unusual (a non-routine cause of at least a minute: a crash, a live train, rain...) clears when nothing unusual is left, even if it's still rush hour. A watch on any other road clears when it's back to light traffic. One rule (`causes.unusual`) decides both. While the incidents, traffic or trains feed is down, watches stay open and aren't checked, since a missing crash would look like "cleared". Watches expire after 12 h.
 
+## Share ETA
+
+**Share ETA** on the Trip screen makes a read-only link, `/share/<id>`, for the route on screen. `POST /shares` takes the route's segment ids, the leave time and the two place names. It checks that the segments exist and join up, builds the geometry from our road map (never from the client), works out the ETA and the main road (the one with the most miles) itself, and stores a `Share` under an unguessable id (`secrets.token_urlsafe`). `GET /shares/{id}` is all a link ever sees: the names, main road, route, leave time, the ETA when it was shared and the ETA now. Nothing about who shared it.
+
+- **The ETA now** re-scores the stored segments with `Router.evaluate` from the planned leave time under the conditions known now, so a crash or train on the rest of the route pushes it back. We don't know where the driver is, and the page says so: it assumes they left on time. A leave time already past when the link is made counts as now. 15 min after the ETA (the live-data window for past times) it stops changing.
+- **Two clocks.** Leave time and ETAs are simulated time like everything else. Expiry is real time, 6 h after the link was made, so demo clock jumps neither kill links nor bring expired ones back.
+- **Limits.** 30 new links per client address per hour (in memory), at most 300 segments, names cut to 80 characters, a leave time at most 24 h ahead, and at most 1000 links: making one deletes the expired ones, then the oldest. Unknown, malformed and expired ids all get the same 404, "This link expired".
+- **The page** (`frontend/app/share/[id]`) stands alone: no app state or screen history, the route on its own map, refreshed every minute. Phones get the share sheet (`navigator.share`), computers copy the link, and when both fail the link is shown to copy by hand.
+
 ## Request flow
 
 1. The user saves a trip: origin, destination, arrive-by time, days of week, safety weight. Saving the same trip again (same device, places, time, days and safety) returns the one already saved instead of a copy that would alert twice.
@@ -145,6 +154,7 @@ A watch on a road with something unusual (a non-routine cause of at least a minu
 - `SavedPlan`: id, name, device_id, request_json, result_json (the `plan_result.json` shape), watch, announced, leave_now_sent (leg indexes), held ("Hold on" sent), done, created_at, last_planned_at
 - `SlowdownWatch`: id, segment_id, device_id, created_at (sim time), routine_only (nothing unusual when watched), done
 - `Notification`: id, trip_id or plan_id, created_at (sim time), title, body, kind (`plan`, `leave_now`, `leave_earlier`, `leave_later`, `reroute`, `order_changed`, `cleared`, `info`)
+- `Share` (in `app/shares.py`): id (the link), origin_name, destination_name, main_road, segment_ids, geometry, end_point, miles, depart_at, shared_eta, eta (latest), created_at (sim time), created_wall and expires_at (real time, UTC), extra (JSON, for fields added later)
 
 ## Folder layout
 
@@ -167,6 +177,7 @@ backend/
     plan_io.py         plan request/result JSON (docs/contracts shapes)
     causes.py          why it's slow: delay split into causes, slowdowns, speed history
     demo_scenarios.py  canned live data for the demo (Monday 5 PM "evening")
+    shares.py          Share ETA links: snapshot, re-checked ETA, expiry, limits
     notifications/     service + scheduler
     api/               routers
     seed/              Houston network + synthetic generator
