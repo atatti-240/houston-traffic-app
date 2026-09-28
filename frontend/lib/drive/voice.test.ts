@@ -210,10 +210,11 @@ function oneStep(type: string, modifier: string | null, instruction: string): Co
   return buildCourse({ ...r, directions: { ...r.directions!, steps } });
 }
 
-function callsAlong(course: Course, speed: number): { at: number; s: Say }[] {
+/** The turn calls for step 1 (2 km in), driving toward it from `from` meters along. */
+function callsAlong(course: Course, speed: number, from = 0): { at: number; s: Say }[] {
   const said = new Set<string>();
   const out: { at: number; s: Say }[] = [];
-  for (let along = 0; along <= 2000; along += 5) {
+  for (let along = from; along <= 2000; along += 5) {
     for (const s of turnCalls(course.steps, { along, next: 1, toNext: 2000 - along }, speed, said, "k|")) {
       said.add(s.key);
       s.covers?.forEach((k) => said.add(k));
@@ -244,6 +245,19 @@ test("exits and freeway speeds: an extra call a quarter mile ahead, to change la
   // Any turn at 45+ mph too; a town turn at 30 mph keeps two calls
   assert.equal(callsAlong(oneStep("turn", "right", "Turn right onto Main St"), 22).length, 3);
   assert.equal(callsAlong(oneStep("turn", "right", "Turn right onto Main St"), 13.4).length, 2);
+});
+
+test("an exit that comes up about a quarter mile after the last turn: 'in a quarter mile' once, not twice in a row", () => {
+  const course = oneStep("off ramp", "slight right", "Take exit 48A toward I-10 East");
+  for (const gap of [420, 500, 580]) {
+    const calls = callsAlong(course, 29, 2000 - gap).map((c) => c.s.text);
+    assert.deepEqual(calls, ["In a quarter mile, take exit 48A toward I-10 East", "Take exit 48A toward I-10 East"], `${gap} m: ${calls.join(" | ")}`);
+  }
+  // A little farther off it's still half a mile, then a quarter mile
+  assert.deepEqual(
+    callsAlong(course, 29, 2000 - 650).map((c) => c.s.text),
+    ["In half a mile, take exit 48A toward I-10 East", "In a quarter mile, take exit 48A toward I-10 East", "Take exit 48A toward I-10 East"],
+  );
 });
 
 test("read aloud: road words in full, route numbers, slashes, compass words", () => {
