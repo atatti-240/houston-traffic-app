@@ -360,7 +360,7 @@ export default function WhereTo() {
     <div className="flex min-h-full flex-col px-5 pt-[60px] pb-10 leading-[normal] md:pt-6 md:pb-6">
       <div className="flex flex-col gap-5">
         {/* The landing page (public/about): a plain link, it isn't an app route */}
-        <a href="/home" aria-label="About BlindSpot" className="w-fit rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+        <a href="/" aria-label="About BlindSpot" className="w-fit rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Logo size={17} />
         </a>
         <h1 className="m-0 mt-2 text-[40px] leading-none font-bold tracking-[-0.03em]">{picking ? `Set ${SLOT_LABEL[picking].toLowerCase()}` : "Where to?"}</h1>
