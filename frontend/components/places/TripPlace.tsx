@@ -5,7 +5,6 @@
 
 import { useApp, type Screen } from "@/components/app/AppContext";
 import { Icon } from "@/components/ui";
-import { C } from "@/lib/theme";
 import type { LatLngTuple } from "@/lib/types";
 
 import PlaceCard from "./PlaceCard";
