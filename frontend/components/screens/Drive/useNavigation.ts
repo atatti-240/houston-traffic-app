@@ -98,6 +98,9 @@ export function useNavigation(trip: DriveTrip) {
   const gate = useRef(openGate());
   const off = useRef(onRoute());
   const wrong = useRef(goingForward());
+  /** The fix off-route and wrong-way tracking last counted: each fix counts once (the effect that feeds them also runs
+   * when live data changes, and a fix from before location was turned off must not count again) */
+  const tracked = useRef<Fix | null>(null);
   const seenHeavy = useRef(new Set<string>());
   const baselineFor = useRef<string | null>(null);
   const hint = useRef<{ key: string; along: number } | null>(null);
@@ -223,10 +226,13 @@ export function useNavigation(trip: DriveTrip) {
     hint.current = { key: course.key, along: progress.along };
     if (!navFix || arrived) return;
     const moving = navFix.source !== "start";
-    if (moving) {
+    if (moving && tracked.current !== navFix) {
+      tracked.current = navFix;
       off.current = trackOffRoute(off.current, progress.off, navFix.accuracy, navFix.at);
       if (progress.off <= 50)
         wrong.current = trackWrongWay(wrong.current, { heading: navFix.heading, speed: navFix.speed, along: progress.along, roadHeading: progress.heading, at: navFix.at });
+    }
+    if (moving) {
       if (off.current.since === null && wrong.current.since === null) {
         setReroute((r) => (r?.state === "failed" ? null : r));
         // Back on the route: the next stretch off it is said again
