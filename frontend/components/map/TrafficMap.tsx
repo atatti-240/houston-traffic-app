@@ -13,6 +13,7 @@ import { useApp, type MapHandle, type MapScene } from "@/components/app/AppConte
 import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
 import ModeRouteLayer from "@/components/map/ModeRouteLayer";
+import PinConnectors, { scenePins } from "@/components/map/PinConnectors";
 import VectorBasemap from "@/components/map/VectorBasemap";
 import PlacesLayer from "@/components/places/PlacesLayer";
 import { camName, hasLiveVideo } from "@/lib/format";
@@ -310,7 +311,8 @@ export default function TrafficMap({
       <VectorBasemap places={interactive} />
       {interactive && <Register />}
       {interactive && <ClickAway />}
-      {interactive && <FitScene fit={scene?.fit} padding={scene?.fitPadding} />}
+      {/* A route's fit takes in its pins too: an off-road one can sit past the line's end */}
+      {interactive && <FitScene fit={scene?.fit && [...scene.fit, ...scenePins(scene)]} padding={scene?.fitPadding} />}
       {!interactive && center && <Recenter center={center} zoom={zoom} />}
 
       {/* Traffic: each direction offset to its right, a thin casing (the map's halo color) under the colored line */}
@@ -366,6 +368,7 @@ export default function TrafficMap({
           </span>
         ))}
       </Pane>
+      {scene && <PinConnectors lines={scene.legs ?? (scene.route ? [scene.route] : [])} points={scene.points} />}
       <ModeRouteLayer route={scene?.modeRoute} />
 
       {/* Crossings layer */}
