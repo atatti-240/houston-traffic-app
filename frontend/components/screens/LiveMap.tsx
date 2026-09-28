@@ -172,7 +172,9 @@ export default function LiveMap() {
     return (
       <div className="flex flex-col gap-4 px-5 pt-6 pb-6">
         <div className="flex items-center justify-between">
-          <Logo size={18} />
+          <a href="/home" aria-label="About BlindSpot" className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <Logo size={18} />
+          </a>
         </div>
         <SearchBar onOpen={() => go({ name: "where" })} />
         <div className="flex flex-col gap-2">
@@ -186,7 +188,9 @@ export default function LiveMap() {
   return (
     <>
       <div className="pointer-events-auto absolute top-3 left-4 z-[900]">
-        <Logo size={18} pill />
+        <a href="/home" aria-label="About BlindSpot" className="block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          <Logo size={18} pill />
+        </a>
       </div>
       {/* Above the legend and zoom buttons: the layers menu opens down over them */}
       <div className="pointer-events-auto absolute top-14 right-4 left-4 z-[910] flex items-center gap-2.5">

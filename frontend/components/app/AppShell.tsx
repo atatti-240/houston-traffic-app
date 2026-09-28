@@ -128,6 +128,8 @@ function Shell() {
   const { screen, isDesktop, backendDown, refresh } = app;
   const [toasts, setToasts] = useState<AppNotification[]>([]);
   const [demo, setDemo] = useState(false);
+  // Opened from a link (/?demo=1, the landing page's "Watch the demo"): the runner starts the first step itself.
+  const [demoAuto, setDemoAuto] = useState(false);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const onNew = useCallback((fresh: AppNotification[]) => {
@@ -153,6 +155,25 @@ function Shell() {
   // The service worker shows system notifications (sw.js). Alerts > Turn on asks for permission.
   useEffect(() => {
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }, []);
+
+  // /?demo=1 starts the scripted demo, once: the param comes off this history entry right away (keeping the
+  // app's own state fields), so a reload or Back doesn't start it again. Other params (?screen=...) stay. After a
+  // tick: Next hooks history and AppProvider marks this entry in their effects, which run after this one.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("demo")) return;
+      const start = url.searchParams.get("demo") === "1";
+      url.searchParams.delete("demo");
+      const st = window.history.state as { bsDepth?: number; bsScreen?: Screen } | null;
+      window.history.replaceState({ bsDepth: st?.bsDepth, bsScreen: st?.bsScreen }, "", url);
+      if (start) {
+        setDemoAuto(true);
+        setDemo(true);
+      }
+    });
+    return () => clearTimeout(t);
   }, []);
 
   const tabScreen = tabOf(screen) !== null;
@@ -255,7 +276,15 @@ function Shell() {
           }}
         />
       )}
-      {demo && <DemoRunner onExit={() => setDemo(false)} />}
+      {demo && (
+        <DemoRunner
+          autoStart={demoAuto}
+          onExit={() => {
+            setDemo(false);
+            setDemoAuto(false);
+          }}
+        />
+      )}
     </main>
   );
 }
