@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Pane, Polyline, TileLayer, Tooltip, useMap } from "react-leaflet";
 
 import { ATTRIBUTION, RASTER_ATTRIBUTION, STYLE, WORKER, hasWebGL, rasterUrl, restyle } from "@/components/map/basemapStyle";
+import PinConnectors from "@/components/map/PinConnectors";
 import { C } from "@/lib/theme";
 import { useTheme } from "@/lib/themeMode";
 import type { LatLngTuple } from "@/lib/types";
@@ -102,6 +103,7 @@ export default function ShareMap({
           </>
         )}
       </Pane>
+      {route && end && <PinConnectors lines={[route]} points={[{ lat: end[0], lng: end[1], kind: "end" }]} pane="share-connectors" />}
       <Pane name="share-points" style={{ zIndex: 640 }}>
         {start && (
           <CircleMarker center={start} radius={8} interactive={false} pathOptions={{ color: C.halo, weight: 3, fillColor: C.light, fillOpacity: 1 }} />
