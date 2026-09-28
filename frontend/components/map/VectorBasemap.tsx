@@ -14,6 +14,7 @@ import { setWorkerUrl, type ExpressionSpecification, type Map as LibreMap } from
 import { useEffect, useState } from "react";
 import { Popup, TileLayer, useMap } from "react-leaflet";
 import { useApp } from "@/components/app/AppContext";
+import { drive } from "@/components/drive/store";
 import { C } from "@/lib/theme";
 
 const STYLE = "https://tiles.openfreemap.org/styles/dark";
@@ -186,7 +187,8 @@ export default function VectorBasemap({ places = false }: { places?: boolean }) 
     // lines or icons is theirs, not the place's under it.
     const ours = (e: L.LeafletMouseEvent) => (e.originalEvent.target as Element | null)?.closest?.(".leaflet-interactive, .leaflet-marker-icon");
     const onClick = (e: L.LeafletMouseEvent) => {
-      if (ours(e)) return;
+      // Driving: a tap only moves the map
+      if (ours(e) || drive.get().active) return;
       const p = placeAt(gl, e.latlng.lat, e.latlng.lng);
       if (p) setPicked(p);
     };
