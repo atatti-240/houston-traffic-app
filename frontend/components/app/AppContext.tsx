@@ -200,6 +200,10 @@ export interface Here {
   level: Level;
   /** true when it came from the device's location */
   fromDevice: boolean;
+  /** Where a trip from here starts: the device's own spot (door to door), or the named place when location is off */
+  start: Location;
+  /** What that start is called: "Your location", or the place's name */
+  startName: string;
 }
 
 export interface Recent {
@@ -545,6 +549,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       street: base.address ?? base.name,
       level,
       fromDevice: !!device,
+      start: device ? { lat: device.lat, lng: device.lng } : base.id,
+      startName: device ? "Your location" : base.name,
     };
   }, [places, segments, liveLevels, device]);
 

@@ -9,11 +9,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, type Recent } from "@/components/app/AppContext";
 import ClientTrafficMap from "@/components/map/ClientTrafficMap";
 import { StarButton } from "@/components/places/PlaceCard";
+import { metersBetween, miles } from "@/components/places/pois";
 import { SLOT_LABEL, SavedChips, SavedEditor, savedTo } from "@/components/places/SavedPlaces";
 import { setSlot, useSaved, type SavedPlace, type Slot } from "@/components/places/store";
 import { MIN_CHARS, useGeocode } from "@/components/places/useGeocode";
 import { Icon, LevelDot, Logo, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
+import { routeChoices } from "@/lib/directions";
 import { C, ICON, LEVEL, type Level } from "@/lib/theme";
 import type { GeoResult, LatLngTuple, Location, Place, PlaceRef } from "@/lib/types";
 
@@ -22,6 +24,8 @@ import { dataGeneration, tripLevel } from "./Trip/shared";
 /** Places to offer before you've been anywhere (first ones that exist). */
 const POPULAR = ["galleria", "medcenter", "downtown", "heights", "hobby"];
 const ROW_LINE = C.line;
+/** Further than this from the nearest named place, Where to says how far instead of "Near" it */
+const NEAR_M = 3000;
 /** The design's search-result pin (a little rounder than ICON.pin). */
 const PIN = "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 7a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z";
 
@@ -29,29 +33,37 @@ const PIN = "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 7a2.5 2
 
 type Eta = { min: number; level: Level } | { here: true } | { error: true };
 
-/** Leave-now drive time from where you are to each destination, refreshed with live data. */
-function useEtas(origin: string | undefined, dests: { key: string; to: Location }[], generation: number) {
+/** Leave-now drive time from where you are to each destination, refreshed with live data. To or from a point
+ * (the device, a dropped pin) it's door to door, like the trip it opens. */
+function useEtas(origin: Location | undefined, dests: { key: string; to: Location }[], generation: number) {
   const [etas, setEtas] = useState<Record<string, Eta>>({});
   const asked = useRef(new Set<string>());
+  const latest = useRef<Record<string, string>>({}); // an older answer (e.g. from before the device's location came) doesn't win
   const destsKey = dests.map((d) => `${d.key}=${JSON.stringify(d.to)}`).join("|");
+  const from = JSON.stringify(origin ?? null);
 
   useEffect(() => {
-    if (!origin) return;
+    if (origin === undefined) return;
     for (const d of dests) {
-      const ask = `${origin}|${generation}|${d.key}`;
+      const ask = `${from}|${generation}|${d.key}`;
       if (asked.current.has(ask)) continue;
       asked.current.add(ask);
-      if (d.to === origin) {
-        setEtas((e) => ({ ...e, [d.key]: { here: true } }));
+      latest.current[d.key] = ask;
+      const set = (eta: Eta) => {
+        if (latest.current[d.key] === ask) setEtas((e) => ({ ...e, [d.key]: eta }));
+      };
+      if (JSON.stringify(d.to) === from) {
+        set({ here: true });
         continue;
       }
-      api
-        .route({ origin, destination: d.to })
-        .then((r) => setEtas((e) => ({ ...e, [d.key]: { min: Math.max(1, Math.round(r.best.total_min)), level: tripLevel(r.best) } })))
-        .catch(() => setEtas((e) => ({ ...e, [d.key]: { error: true } })));
+      const body = { origin, destination: d.to };
+      const trip = typeof origin === "string" && typeof d.to === "string" ? api.route(body) : routeChoices(body);
+      trip
+        .then((r) => set({ min: Math.max(1, Math.round(r.best.total_min)), level: tripLevel(r.best) }))
+        .catch(() => set({ error: true }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin, generation, destsKey]);
+  }, [from, generation, destsKey]);
 
   return etas;
 }
@@ -189,10 +201,20 @@ function RecentRow({ name, eta, onPick }: { name: string; eta: Eta | undefined; 
 }
 
 function HereCard() {
-  const { here } = useApp();
+  const { here, places } = useApp();
   const [close, setClose] = useState(false);
   const zoom = close ? 15 : 13;
   const center: LatLngTuple | null = here ? [here.lat, here.lng] : null;
+  // From the device, the nearest named place is only there for context ("Near Midtown", "12 mi from Energy Corridor").
+  const base = here?.fromDevice ? places.find((p) => p.id === here.place) : undefined;
+  const away = base && here ? metersBetween([here.lat, here.lng], [base.lat, base.lng]) : 0;
+  const title = !here
+    ? "Finding you…"
+    : !here.fromDevice
+      ? `You're in ${here.name}`
+      : away > NEAR_M
+        ? `${miles(away)} from ${here.name}`
+        : `Near ${here.name}`;
   return (
     <div className="relative isolate h-[262px] overflow-hidden rounded-[20px] border border-line bg-map">
       {center ? (
@@ -231,10 +253,11 @@ function HereCard() {
         style={{ background: C.bg }}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[15px] font-semibold">{here ? `You're in ${here.name}` : "Finding you…"}</span>
-          <span className="truncate text-[12px] text-muted">{here?.street ?? " "}</span>
+          <span className="truncate text-[15px] font-semibold">{title}</span>
+          <span className="truncate text-[12px] text-muted">{here ? (here.fromDevice ? here.startName : here.street) : " "}</span>
         </div>
-        {here && (
+        {/* The traffic on our roads around that place: not "nearby" when you're miles from it */}
+        {here && away <= NEAR_M && (
           <span className="flex shrink-0 items-center gap-1.5 rounded-xl bg-card px-2.5 py-[5px] text-[12px] font-medium whitespace-nowrap text-soft">
             <LevelDot level={here.level} />
             {LEVEL[here.level].label} nearby
@@ -285,7 +308,7 @@ export default function WhereTo() {
     });
     return [...slots, ...list.map((r) => ({ key: r.id, to: r.to }))];
   }, [q, results, list, saved]);
-  const etas = useEtas(here?.place, dests, dataGeneration(slowdowns));
+  const etas = useEtas(here?.start, dests, dataGeneration(slowdowns));
 
   const open = (r: Row) => {
     addRecent({ id: r.id, name: r.name, address: r.address ?? null, to: r.to, osm: r.osm ?? null, kind: r.kind ?? null });

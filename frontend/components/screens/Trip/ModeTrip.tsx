@@ -25,7 +25,7 @@ export default function ModeTrip() {
   const travel = params?.travel ?? "walk";
   const to = params?.to;
   const toName = params?.toName ?? placeName(places, to);
-  const fromName = params?.fromName ?? (params?.from !== undefined ? placeName(places, params.from) : here?.name) ?? "";
+  const fromName = params?.fromName ?? (params?.from !== undefined ? placeName(places, params.from) : here?.startName) ?? "";
   // Where you are (the device, or the default place) when the trip doesn't say where from.
   const start: LatLng | null = params?.from !== undefined ? placePoint(places, params.from) : here ? { lat: here.lat, lng: here.lng } : null;
   const end: LatLng | null = to !== undefined ? placePoint(places, to) : null;
