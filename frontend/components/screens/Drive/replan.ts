@@ -27,7 +27,15 @@ export const hasSteps = (r: Route) => (r.directions?.status === "ok" || r.direct
 
 /** The best route from `origin`. `needSteps`: fail when it has no turn-by-turn (a reroute keeps the old route then). */
 export async function replan(
-  body: { origin: Location; heading?: number; destination: Location; safety_weight: number; safe_path: boolean },
+  body: {
+    origin: Location;
+    heading?: number;
+    destination: Location;
+    safety_weight: number;
+    safe_path: boolean;
+    avoid_tolls?: boolean;
+    avoid_highways?: boolean;
+  },
   { needSteps = true, signal: outer }: { needSteps?: boolean; signal?: AbortSignal } = {},
 ): Promise<Route> {
   const ctl = new AbortController();

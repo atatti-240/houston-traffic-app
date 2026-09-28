@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
-import { drive, handedRoute, handOff, type DriveTrip, type Fix } from "@/components/drive/store";
+import { drive, handedAvoid, handedRoute, handOff, type DriveTrip, type Fix } from "@/components/drive/store";
 import { call } from "@/lib/api";
 import { buildCourse, hazards as hazardsOn, locate, type Course, type Progress } from "@/lib/drive/course";
 import { offset, type Pt } from "@/lib/drive/geo";
@@ -39,6 +39,7 @@ import {
 import { simStep } from "@/lib/drive/simulate";
 import { browserSpeaker, primeSpeech, readMuted, writeMuted, type Speaker } from "@/lib/drive/speech";
 import { forSpeech, hazardCalls, leadDistances, nextCall, nextHazard, SOON_ENOUGH, turnCalls, type Say } from "@/lib/drive/voice";
+import { avoidBody, avoidParam, NO_AVOID, parseAvoid, storedAvoid } from "@/lib/roadrules";
 import type { LiveConditions, Location, Route, SlowdownList } from "@/lib/types";
 
 import { hasSteps, replan, ReplanError } from "./replan";
@@ -47,7 +48,7 @@ import { useGps, type GpsState } from "./useGps";
 const TICK_MS = 1000;
 const SIM_TICK_MS = 500;
 const POLL_MS = 15_000;
-/** Without a GPS answer by then, a reload plans from the trip's start */
+/** Without a GPS answer by then, a reload plans from where the app says you are (or the trip's own start) */
 const FIRST_FIX_WAIT_MS = 6000;
 /** Farthest the demo's wrong turn goes before it waits for a new route */
 const DETOUR_MAX_M = 1500;
@@ -75,8 +76,16 @@ function startFix(course: Course): Fix | null {
 }
 
 export function useNavigation(trip: DriveTrip) {
-  const { slowdowns: appSlow, live: appLive } = useApp();
+  const { slowdowns: appSlow, live: appLive, here } = useApp();
   const toName = trip.toName || "your destination";
+  // Trip's Avoid choices: from the drive's own params, else the ones its route was handed over with, else what this
+  // device chose last (as Trip does without them)
+  const [avoid] = useState(() => {
+    const said = trip.avoid ?? handedAvoid(trip);
+    return avoidParam(avoidBody(parseAvoid(said) ?? storedAvoid()));
+  });
+  /** The trip as handed over again with each new route (its Avoid choices kept for a reload) */
+  const kept = useMemo<DriveTrip>(() => ({ ...trip, avoid }), [trip, avoid]);
 
   const [route, setRoute] = useState<Route | null>(() => handedRoute(trip));
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -319,23 +328,35 @@ export function useNavigation(trip: DriveTrip) {
   }, [route]);
 
   // ---- re-planning ----------------------------------------------------------------------------------
-  const latest = useRef({ course, progress, fix: navFix, data, arrived, route, stepsGaveUp });
-  latest.current = { course, progress, fix: navFix, data, arrived, route, stepsGaveUp };
+  const latest = useRef({ course, progress, fix: navFix, data, arrived, route, stepsGaveUp, here });
+  latest.current = { course, progress, fix: navFix, data, arrived, route, stepsGaveUp, here };
 
+  /** Where a plan starts: the live position (GPS, or the demo's drive) with its heading; else the device's spot (the
+   * app's "Your location"); else the trip's own start (a place, or a point); else where the app starts trips (location
+   * off); else the route's start. */
   const origin = useCallback((): { origin: Location; heading?: number } | null => {
-    const { fix: f, course: c } = latest.current;
+    const { fix: f, course: c, here: h } = latest.current;
     if (f && f.source !== "start") {
       const moving = f.heading !== null && (f.speed ?? 0) >= HEADING_MPS;
       return { origin: { lat: round(f.lat), lng: round(f.lng) }, ...(moving ? { heading: Math.round(f.heading as number) % 360 } : {}) };
     }
+    if (h?.fromDevice && typeof h.start !== "string") return { origin: { lat: round(h.start.lat), lng: round(h.start.lng) } };
     if (trip.from !== undefined) return { origin: trip.from };
+    if (h) return { origin: h.start };
     const p = c?.line.points[0];
     return p ? { origin: { lat: round(p[0]), lng: round(p[1]) } } : null;
   }, [trip.from]);
 
   const body = useCallback(
-    (o: { origin: Location; heading?: number }) => ({ ...o, destination: trip.to, safety_weight: trip.safety ?? 0, safe_path: (trip.safety ?? 0) >= 1 }),
-    [trip.to, trip.safety],
+    (o: { origin: Location; heading?: number }) => ({
+      ...o,
+      destination: trip.to,
+      safety_weight: trip.safety ?? 0,
+      safe_path: (trip.safety ?? 0) >= 1,
+      // The same Avoid tolls / highways as the trip's own routes
+      ...avoidBody(parseAvoid(avoid) ?? NO_AVOID),
+    }),
+    [trip.to, trip.safety, avoid],
   );
 
   const doReroute = useCallback(
@@ -363,7 +384,7 @@ export function useNavigation(trip: DriveTrip) {
         off.current = onRoute();
         wrong.current = goingForward();
         setRoute(r);
-        handOff(trip, r);
+        handOff(kept, r);
         if (quiet) return;
         const same = reason === "slowdown" && !!oldId && r.id === oldId;
         setReroute({ state: "done", reason, road, same });
@@ -383,7 +404,7 @@ export function useNavigation(trip: DriveTrip) {
         if (inflight.current === ctl) inflight.current = null;
       }
     },
-    [origin, body, say, trip],
+    [origin, body, say, kept],
   );
 
   const rerouteRef = useRef(doReroute);
@@ -427,12 +448,13 @@ export function useNavigation(trip: DriveTrip) {
     const t = setTimeout(() => setWaited(true), FIRST_FIX_WAIT_MS);
     return () => clearTimeout(t);
   }, []);
-  // Plan once there's a GPS fix to plan from, or it's clear there won't be one soon
-  const canPlan = !route && !loadError && (fix?.source === "gps" || waited || NO_LOCATION.includes(gps.state));
+  // Plan once there's a GPS fix to plan from, or it's clear there won't be one soon (and the app knows where you are,
+  // for a trip without its own start)
+  const canPlan =
+    !route && !loadError && (fix?.source === "gps" || ((waited || NO_LOCATION.includes(gps.state)) && (trip.from !== undefined || !!here)));
   useEffect(() => {
     if (!canPlan) return;
-    const f = latest.current.fix;
-    const o = f?.source === "gps" ? origin() : trip.from !== undefined ? { origin: trip.from } : undefined;
+    const o = origin();
     if (o == null) {
       setLoadError("We don't know where this trip starts.");
       return;
@@ -442,7 +464,7 @@ export function useNavigation(trip: DriveTrip) {
       (r) => {
         if (ctl.signal.aborted) return;
         setRoute(r);
-        handOff(trip, r);
+        handOff(kept, r);
       },
       (e: unknown) => {
         if (!ctl.signal.aborted) setLoadError(e instanceof Error ? e.message : String(e));
