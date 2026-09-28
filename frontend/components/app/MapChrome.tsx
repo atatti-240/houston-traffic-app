@@ -1,12 +1,13 @@
 "use client";
 
-/** Floating map controls: legend, zoom, the layers menu (map details, nearby places, the theme) and the Live cams button. */
+/** Floating map controls: legend, zoom and locate, the layers menu (map details, nearby places, the theme) and the Live cams button. */
 
 import { useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import ThemeSetting from "@/components/app/ThemeSetting";
 import NearbyMenu from "@/components/places/NearbyMenu";
+import LocateButton from "@/components/map/LocateButton";
 import ReportButton from "@/components/reports/ReportButton";
 import { Icon, RoundButton } from "@/components/ui";
 import { C, ICON } from "@/lib/theme";
@@ -36,14 +37,18 @@ export function Legend() {
 export function ZoomButtons() {
   const { zoom } = useApp();
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl bg-float shadow-e1">
-      <button type="button" aria-label="Zoom in" onClick={() => zoom(1)} className="flex h-11 w-11 cursor-pointer items-center justify-center text-soft hover:bg-card">
-        <Icon d={ICON.plus} size={20} />
-      </button>
-      <div className="mx-2 h-px bg-line" />
-      <button type="button" aria-label="Zoom out" onClick={() => zoom(-1)} className="flex h-11 w-11 cursor-pointer items-center justify-center text-soft hover:bg-card">
-        <Icon d={ICON.minus} size={20} />
-      </button>
+    <div className="flex flex-col items-end gap-2.5">
+      <div className="flex flex-col overflow-hidden rounded-xl bg-float shadow-e1">
+        <button type="button" aria-label="Zoom in" onClick={() => zoom(1)} className="flex h-11 w-11 cursor-pointer items-center justify-center text-soft hover:bg-card">
+          <Icon d={ICON.plus} size={20} />
+        </button>
+        <div className="mx-2 h-px bg-line" />
+        <button type="button" aria-label="Zoom out" onClick={() => zoom(-1)} className="flex h-11 w-11 cursor-pointer items-center justify-center text-soft hover:bg-card">
+          <Icon d={ICON.minus} size={20} />
+        </button>
+      </div>
+      {/* Center on you and follow as you move */}
+      <LocateButton />
     </div>
   );
 }
