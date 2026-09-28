@@ -67,6 +67,8 @@ function bearing(a: { lat: number; lng: number }, b: { lat: number; lng: number 
 const HEADING_MAX_ACCURACY_M = 50;
 /** Move at least this far from the last heading point before taking a bearing from the fixes. */
 const HEADING_MIN_MOVE_M = 12;
+/** ...but a jump further than this between fixes resets the heading instead of pointing along it. */
+const HEADING_MAX_JUMP_M = 2000;
 
 let fix: Fix | null = null;
 let status: LocStatus = "idle";
@@ -100,8 +102,12 @@ function onPosition(pos: GeolocationPosition) {
     heading = c.heading;
     headingFrom = next;
   } else if (good) {
-    if (!headingFrom) headingFrom = next;
-    else if (metersApart(headingFrom, next) >= HEADING_MIN_MOVE_M) {
+    const moved = headingFrom ? metersApart(headingFrom, next) : 0;
+    if (!headingFrom || moved > HEADING_MAX_JUMP_M) {
+      // A jump this big (a stale fix, a long pause, leaving town and back) isn't a direction: start over.
+      if (headingFrom) heading = null;
+      headingFrom = next;
+    } else if (moved >= HEADING_MIN_MOVE_M) {
       heading = bearing(headingFrom, next);
       headingFrom = next;
     }
