@@ -1,10 +1,13 @@
 /**
  * Speaking driving directions with the browser's speech synthesis, one line at a time:
  *  - it never talks over itself: lines wait their turn, an urgent one (a turn you're reaching) goes first and cuts
- *    short a heads-up being read,
+ *    short a heads-up being read, which is then read again once (after the urgent lines; an early turn call it cuts
+ *    short is just dropped),
  *  - a newer line in the same group replaces one still waiting (an early call for a turn that's now due),
- *  - the same words aren't said twice within REPEAT_MS,
- *  - muted or without speech (some browsers have none) it says nothing and nothing breaks.
+ *  - with too many waiting, a heads-up gives way before a turn call does,
+ *  - the same line (its key, or its words when it has none) isn't said twice within REPEAT_MS,
+ *  - muted or without speech (some browsers have none) it says nothing and nothing breaks; when the browser refuses
+ *    to speak (no tap yet), it says so (`onBlocked`) and takes nothing more until `unblock()`.
  * The synth is passed in, so this is unit-tested with a fake (`node --test`); `browserSpeaker()` uses the real one.
  */
 
@@ -12,6 +15,10 @@ export interface Line {
   text: string;
   urgent?: boolean;
   group?: string;
+  /** Tells lines apart (two forks both "Keep left at the fork"); without one, the words do */
+  key?: string;
+  /** Already cut short once: not again */
+  retried?: boolean;
 }
 
 /** The bits of window.speechSynthesis used here. */
@@ -40,6 +47,9 @@ export class Speaker {
   private readonly make: ((text: string) => Utterance) | null;
   private readonly now: () => number;
   muted = false;
+  /** The browser refused to speak (it wants a tap first) */
+  blocked = false;
+  onBlocked: (() => void) | null = null;
 
   constructor(synth: Synth | null, make: ((text: string) => Utterance) | null, now: () => number = () => Date.now()) {
     this.synth = synth;
@@ -51,25 +61,46 @@ export class Speaker {
     return !!this.synth && !!this.make;
   }
 
-  /** Queue a line. False when it won't be said (muted, no speech, said just now). */
+  /** Queue a line. False when it won't be said (muted, no speech, blocked, said just now). */
   say(line: Line): boolean {
-    if (!this.supported || this.muted || !line.text) return false;
+    if (!this.supported || this.muted || this.blocked || !line.text) return false;
     const t = this.now();
-    const last = this.recent.get(line.text);
+    const id = line.key ?? line.text;
+    const last = this.recent.get(id);
     if (last !== undefined && t - last < REPEAT_MS) return false;
     if (line.group) this.waiting = this.waiting.filter((w) => w.group !== line.group);
     if (line.urgent) {
       this.waiting.unshift(line);
-      // A heads-up being read gives way to a turn
-      if (this.current && !this.current.line.urgent) this.interrupt();
-    } else {
-      this.waiting.push(line);
-      while (this.waiting.length > MAX_WAITING) this.waiting.splice(this.waiting.findIndex((w) => !w.urgent), 1);
+      // A heads-up being read gives way to a turn, and is read again right after the urgent lines (not an early
+      // call for a turn: the turn being called now replaces it)
+      const cut = this.current && !this.current.line.urgent ? this.current.line : null;
+      if (cut) {
+        this.interrupt();
+        if (!cut.retried && cut.group !== "turn" && (cut.group === undefined || cut.group !== line.group)) {
+          const at = this.waiting.findIndex((w) => !w.urgent);
+          this.waiting.splice(at < 0 ? this.waiting.length : at, 0, { ...cut, retried: true });
+        }
+      }
+    } else this.waiting.push(line);
+    while (this.waiting.length > MAX_WAITING) {
+      // The newest heads-up goes first, a turn call (or "Rerouting") only when there's nothing else
+      let i = -1;
+      for (let k = this.waiting.length - 1; k >= 0 && i < 0; k--) {
+        const w = this.waiting[k];
+        if (!w.urgent && w.group !== "turn" && w.group !== "reroute") i = k;
+      }
+      if (i < 0) i = this.waiting.findIndex((w) => !w.urgent);
+      this.waiting.splice(i < 0 ? this.waiting.length - 1 : i, 1);
     }
-    this.recent.set(line.text, t);
+    this.recent.set(id, t);
     for (const [k, at] of this.recent) if (t - at >= REPEAT_MS) this.recent.delete(k);
     this.pump();
     return true;
+  }
+
+  /** A tap happened: try speaking again. */
+  unblock(): void {
+    this.blocked = false;
   }
 
   /** Stop talking and forget everything waiting. */
@@ -115,7 +146,17 @@ export class Speaker {
       const u = this.make(line.text);
       u.lang = "en-US";
       u.onend = done;
-      u.onerror = done;
+      u.onerror = (e?: unknown) => {
+        // Chrome after a reload, iOS before a tap: nothing will be said until the page gets a tap
+        if ((e as { error?: string } | undefined)?.error === "not-allowed" && this.current?.token === token) {
+          this.blocked = true;
+          this.waiting = [];
+          this.finish();
+          this.onBlocked?.();
+          return;
+        }
+        done();
+      };
       this.synth.speak(u);
     } catch {
       done();

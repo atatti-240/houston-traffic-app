@@ -46,7 +46,7 @@ test("one line at a time, in order", () => {
   assert.equal(s.busy, false);
 });
 
-test("a turn goes first and cuts short a heads-up", () => {
+test("a turn goes first and cuts short a heads-up, which is read again right after it (once)", () => {
   const f = fake();
   const s = new Speaker(f.synth, make);
   s.say({ text: "Heads up: crash" });
@@ -54,7 +54,76 @@ test("a turn goes first and cuts short a heads-up", () => {
   s.say({ text: "Turn left", urgent: true });
   assert.deepEqual(f.spoken, ["Heads up: crash", "Turn left"]);
   f.finish();
-  assert.deepEqual(f.spoken, ["Heads up: crash", "Turn left", "Rail crossing"]);
+  assert.deepEqual(f.spoken, ["Heads up: crash", "Turn left", "Heads up: crash"]);
+  // Cut short a second time: not again
+  s.say({ text: "Turn right", urgent: true });
+  f.finish();
+  f.finish();
+  assert.deepEqual(f.spoken, ["Heads up: crash", "Turn left", "Heads up: crash", "Turn right", "Rail crossing"]);
+});
+
+test("an early call cut short by its own turn call isn't read again after it", () => {
+  const f = fake();
+  const s = new Speaker(f.synth, make);
+  s.say({ text: "In a quarter mile, take exit 124", group: "turn" });
+  s.say({ text: "Take exit 124", urgent: true, group: "turn" });
+  f.finish();
+  f.finish();
+  assert.deepEqual(f.spoken, ["In a quarter mile, take exit 124", "Take exit 124"]);
+});
+
+test("two different turns with the same words are both said; lines are told apart by key", () => {
+  let now = 0;
+  const f = fake();
+  const s = new Speaker(f.synth, make, () => now);
+  assert.equal(s.say({ text: "Keep left at the fork", urgent: true, group: "turn", key: "c|3:now" }), true);
+  f.finish();
+  now = 15_000;
+  assert.equal(s.say({ text: "Keep left at the fork", urgent: true, group: "turn", key: "c|5:now" }), true);
+  f.finish();
+  assert.deepEqual(f.spoken, ["Keep left at the fork", "Keep left at the fork"]);
+  // The same key again is still a repeat
+  assert.equal(s.say({ text: "Keep left at the fork", key: "c|5:now" }), false);
+});
+
+test("with too many waiting, heads-ups give way before a turn call", () => {
+  const f = fake();
+  const s = new Speaker(f.synth, make);
+  s.say({ text: "Starting the route to X. Head east on Main St" });
+  s.say({ text: "In a quarter mile, turn left onto North St", group: "turn" });
+  s.say({ text: "Heads up: crash on A, in half a mile.", group: "hazard:1" });
+  s.say({ text: "Heads up: stall on B, in 1 mile.", group: "hazard:2" });
+  s.say({ text: "Rail crossing on C in 1 mile.", group: "hazard:3" });
+  s.say({ text: "Road closure on D in 1.5 miles.", group: "hazard:4" });
+  for (let i = 0; i < 6; i++) f.finish();
+  assert.ok(f.spoken.includes("In a quarter mile, turn left onto North St"), JSON.stringify(f.spoken));
+  assert.ok(!f.spoken.includes("Road closure on D in 1.5 miles."), JSON.stringify(f.spoken));
+});
+
+test("a browser that refuses to speak: says so once, takes nothing more until unblocked", () => {
+  const spoken: string[] = [];
+  let current: Utterance | null = null;
+  const synth = {
+    speak(u: Utterance) {
+      spoken.push(u.text);
+      current = u;
+      queueMicrotask(() => current?.onerror?.({ error: "not-allowed" }));
+    },
+    cancel() {},
+  };
+  const s = new Speaker(synth, make);
+  let told = 0;
+  s.onBlocked = () => told++;
+  assert.equal(s.say({ text: "Turn left", urgent: true }), true);
+  return Promise.resolve().then(() => {
+    assert.equal(told, 1);
+    assert.equal(s.blocked, true);
+    assert.equal(s.busy, false);
+    assert.equal(s.say({ text: "Turn right", urgent: true }), false); // not used up: said again later
+    s.unblock();
+    assert.equal(s.say({ text: "Turn right", urgent: true }), true);
+    assert.deepEqual(spoken, ["Turn left", "Turn right"]);
+  });
 });
 
 test("a turn doesn't cut short another turn", () => {
