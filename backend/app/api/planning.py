@@ -26,7 +26,7 @@ def route(req: RouteRequest, directions: bool = False, svc: Services = Depends(g
         best, alt = svc.router.route(
             o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight, view=view
         )
-        return route_response(svc, req.origin, req.destination, best, alt, view, directions)
+        return route_response(svc, req.origin, req.destination, best, alt, view, directions, req.heading)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
 

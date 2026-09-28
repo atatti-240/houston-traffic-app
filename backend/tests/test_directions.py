@@ -1037,3 +1037,30 @@ def test_directions_are_not_limited_with_osrm_off(client):
     for i in range(12):
         door = {"lat": GALLERIA_DOOR["lat"] + 0.001 * i, "lng": GALLERIA_DOOR["lng"]}
         assert client.post("/directions", json=_directions_body(alt, door)).status_code == 200
+
+
+def test_a_replan_while_driving_starts_the_way_you_are_heading(client, services):
+    """POST /route with `heading` (driving): OSRM snaps the start to the side of the road going that
+    way, so the new directions don't begin with a U-turn. Without it, the start is free as before."""
+    fake = FakeOsrm()
+    services.directions = DoorDirections(client_with(fake))
+    here = {"lat": 29.7560, "lng": -95.3700}
+    body = {"origin": here, "destination": GALLERIA_DOOR}
+    assert client.post("/route?directions=true", json={**body, "heading": 271.6}).status_code == 200
+    assert _parse(fake.urls[-1])[1]["bearings"].startswith("272,90;")
+    # A different heading is a different answer (not the cached one)
+    client.post("/route?directions=true", json={**body, "heading": 90})
+    assert len(fake.urls) == 2 and _parse(fake.urls[-1])[1]["bearings"].startswith("90,90;")
+    client.post("/route?directions=true", json=body)
+    assert _parse(fake.urls[-1])[1]["bearings"].startswith(";")
+    assert client.post("/route", json={**body, "heading": 400}).status_code == 422
+
+
+def test_heading_reaches_a_short_door_to_door_hop_too():
+    fake = FakeOsrm()
+    door = DoorDirections(client_with(fake))
+    o = Endpoint(29.7560, -95.3700, True, 180)
+    door._direct(Corridor([]), o, Endpoint(29.7540, -95.3700, True), 0.0)
+    assert _parse(fake.urls[-1])[1]["bearings"] == "180,90;"
+    door._direct(Corridor([]), Endpoint(29.7560, -95.3700, True), Endpoint(29.7540, -95.3700, True), 0.0)
+    assert "bearings" not in _parse(fake.urls[-1])[1]

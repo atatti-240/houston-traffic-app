@@ -28,6 +28,12 @@ class RouteRequest(BaseModel):
     origin: Location
     destination: Location
     depart_at: datetime | None = Field(None, description="Defaults to the simulated now")
+    heading: float | None = Field(
+        None,
+        ge=0,
+        le=360,
+        description="Compass degrees you're heading at the origin (a re-plan while driving): directions start that way",
+    )
     safe_path: bool = False
     safety_weight: SafetyWeight = None
 
