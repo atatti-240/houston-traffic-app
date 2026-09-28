@@ -172,7 +172,7 @@ export default function LiveMap() {
     return (
       <div className="flex flex-col gap-4 px-5 pt-6 pb-6">
         <div className="flex items-center justify-between">
-          <a href="/about" aria-label="About BlindSpot" className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          <a href="/home" aria-label="About BlindSpot" className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             <Logo size={18} />
           </a>
         </div>
@@ -188,7 +188,7 @@ export default function LiveMap() {
   return (
     <>
       <div className="pointer-events-auto absolute top-3 left-4 z-[900]">
-        <a href="/about" aria-label="About BlindSpot" className="block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+        <a href="/home" aria-label="About BlindSpot" className="block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Logo size={18} pill />
         </a>
       </div>

@@ -23,6 +23,7 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 - Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` follow these shapes, with two differences: times are naive Houston local time (no `-05:00`), and fields a feed doesn't provide yet (camera vehicle counts, `stale`) are `null`. Both endpoints also return a few extra fields
 - Routing wiring (which decision uses which data, priority rules): [docs/routing-wiring.md](docs/routing-wiring.md)
 - Website style guide: [docs/website-style.md](docs/website-style.md)
+- Landing page: `/home` (`frontend/public/home/index.html`), by Jason Qian from [qian-json/blindspot-landing](https://github.com/qian-json/blindspot-landing); its "Open the app" buttons go to `/`. Rebuild its map in that repo and copy `index.html` over
 - Data-source spikes (throwaway): [spikes/](spikes/)
 
 ## Run it
