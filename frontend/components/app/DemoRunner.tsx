@@ -2,7 +2,7 @@
 
 /** Scripted demo: a Monday in Houston, from the morning commute to "why is it slow" at 5 PM. */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useApp, type AppValue } from "@/components/app/AppContext";
 import { showDemoReport } from "@/components/reports/demo";
@@ -147,7 +147,8 @@ const STEPS: Step[] = [
   },
 ];
 
-export default function DemoRunner({ onExit }: { onExit: () => void }) {
+/** `autoStart`: run the first step on open, as Start does (the demo was opened from a link). */
+export default function DemoRunner({ onExit, autoStart = false }: { onExit: () => void; autoStart?: boolean }) {
   const app = useApp();
   const [index, setIndex] = useState(-1);
   const [busy, setBusy] = useState(false);
@@ -166,6 +167,15 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
       setBusy(false);
     }
   }
+
+  // Once, even when effects run twice (dev Strict Mode).
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoStart || started.current) return;
+    started.current = true;
+    void go(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `go` is a fresh function each render
+  }, [autoStart]);
 
   const step = index >= 0 ? STEPS[index] : null;
   const last = index === STEPS.length - 1;
