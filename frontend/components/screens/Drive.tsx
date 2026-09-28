@@ -17,7 +17,7 @@ import { Icon, PillButton } from "@/components/ui";
 import { fmtDistance } from "@/lib/directions";
 import { addMinutesSim, fmtTime } from "@/lib/format";
 import { hazardLabel } from "@/lib/drive/voice";
-import { CAUSE, C, ICON } from "@/lib/theme";
+import { CAUSE, C, ICON, LEVEL, SHADOW } from "@/lib/theme";
 
 import { DRIVE_ICON, FloatButton, InlineAction, Note, PlainBanner, SpeedLimit, TurnBanner } from "./Drive/parts";
 import { useNavigation } from "./Drive/useNavigation";
@@ -92,7 +92,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
     banner = (
       <PlainBanner
         icon={CAUSE.crash.icon}
-        tone={C.moderate}
+        tone={LEVEL.moderate}
         title="Couldn't get your route"
         sub={
           <>
@@ -102,12 +102,12 @@ function DriveView({ trip }: { trip: DriveTrip }) {
       />
     );
   else if (!course) banner = <PlainBanner icon={ICON.car} title="Getting your route…" sub={`To ${toName}`} />;
-  else if (arrived) banner = <PlainBanner icon={DRIVE_ICON.pin} tone={C.heavy} title="You've arrived" sub={toName} />;
+  else if (arrived) banner = <PlainBanner icon={DRIVE_ICON.pin} tone={LEVEL.heavy} title="You've arrived" sub={toName} />;
   else if (lost)
     banner = (
       <PlainBanner
         icon={ICON.locate}
-        tone={C.moderate}
+        tone={LEVEL.moderate}
         title="Off the route"
         sub={reroute?.state === "rerouting" ? "Finding a way from here…" : "Head back to the blue line, or keep going for a new route from here."}
       />
@@ -143,19 +143,19 @@ function DriveView({ trip }: { trip: DriveTrip }) {
     );
   else if (reroute?.state === "failed")
     notes.push(
-      <Note key="rr" icon={CAUSE.crash.icon} tone={C.moderate} testId="drive-reroute" live>
+      <Note key="rr" icon={CAUSE.crash.icon} tone={C.moderateText} testId="drive-reroute" live>
         Couldn&apos;t get a new route right now. Still guiding on this one; trying again shortly.
       </Note>,
     );
   else if (reroute?.state === "done")
     notes.push(
-      <Note key="rr" icon={ICON.check} tone={C.light} testId="drive-reroute" live>
+      <Note key="rr" icon={ICON.check} tone={C.lightText} testId="drive-reroute" live>
         {reroute.same ? `This is still the fastest way, even with the traffic on ${reroute.road}.` : "New route from here."}
       </Note>,
     );
   if (offBy !== null && reroute?.state !== "rerouting")
     notes.push(
-      <Note key="off" icon={ICON.locate} tone={C.moderate} testId="drive-off">
+      <Note key="off" icon={ICON.locate} tone={C.moderateText} testId="drive-off">
         Off the route <span aria-hidden="true">by <span className="font-num">{fmtDistance(offBy)}</span></span>
       </Note>,
     );
@@ -163,7 +163,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
     const { hazard: h, distance } = nav.ahead;
     const icon = h.kind === "train" ? CAUSE.train.icon : h.kind === "closure" ? CAUSE.closure.icon : CAUSE.crash.icon;
     notes.push(
-      <Note key="hz" icon={icon} tone={h.kind === "train" && !h.blocked ? C.moderate : C.heavyText} testId="drive-hazard">
+      <Note key="hz" icon={icon} tone={h.kind === "train" && !h.blocked ? C.moderateText : C.heavyText} testId="drive-hazard">
         {hazardLabel(h)} ·{" "}
         {distance > 0 ? (
           <span className="font-num" aria-hidden="true">
@@ -211,13 +211,13 @@ function DriveView({ trip }: { trip: DriveTrip }) {
     );
   if (nav.voiceBlocked && !nav.muted)
     notes.push(
-      <Note key="voice" icon={DRIVE_ICON.voiceOff} tone={C.moderate} testId="drive-voice" live>
+      <Note key="voice" icon={DRIVE_ICON.voiceOff} tone={C.moderateText} testId="drive-voice" live>
         This browser needs a tap before it can speak. <InlineAction onClick={nav.wakeVoice}>Tap to turn on voice</InlineAction>
       </Note>,
     );
   else if (fix?.source === "gps" && fix.accuracy > 100)
     notes.push(
-      <Note key="gps" icon={ICON.locate} tone={C.moderate} testId="drive-gps">
+      <Note key="gps" icon={ICON.locate} tone={C.moderateText} testId="drive-gps">
         Weak GPS signal: turns may be called late.
       </Note>,
     );
@@ -226,7 +226,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
   const ask = gps.state === "ask" && !sim.on && (
     <div className="flex flex-col gap-3 rounded-[18px] border border-edge p-4" style={{ background: C.card }} data-testid="drive-ask">
       <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: C.cardHi, color: C.accent }}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: C.sel, color: C.accent }}>
           <Icon d={ICON.locate} size={22} />
         </span>
         <div className="flex min-w-0 flex-col gap-1">
@@ -266,7 +266,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
     <div className="flex flex-wrap items-center gap-2">
       {sim.on ? (
         <>
-          <span className="rounded-[10px] px-2 py-1 text-[11px] font-bold tracking-[0.08em] uppercase" style={{ background: C.moderate, color: "#11141A" }}>
+          <span className="rounded-[10px] px-2 py-1 text-[11px] font-bold tracking-[0.08em] uppercase" style={{ background: LEVEL.moderate.bg, color: LEVEL.moderate.fg }}>
             Demo
           </span>
           <span className="text-[13px] text-soft">Simulated</span>
@@ -295,7 +295,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
           type="button"
           onClick={() => nav.setSim((s) => ({ ...s, on: true }))}
           className="flex h-9 cursor-pointer items-center gap-2 rounded-[18px] border border-dashed px-3.5 text-[13px] font-medium"
-          style={{ borderColor: C.moderate, color: C.moderate }}
+          style={{ borderColor: C.moderateText, color: C.moderateText }}
         >
           <Icon d={ICON.play} size={14} />
           Simulate drive (demo)
@@ -333,7 +333,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
         type="button"
         onClick={end}
         className="flex h-[52px] shrink-0 cursor-pointer items-center gap-2 rounded-[26px] px-6 text-[16px] font-semibold"
-        style={{ background: arrived ? C.accent : C.heavy, color: "#11141A" }}
+        style={arrived ? { background: C.accent, color: C.onAccent } : { background: LEVEL.heavy.bg, color: LEVEL.heavy.fg }}
       >
         {arrived ? "Done" : "End"}
       </button>
@@ -373,10 +373,7 @@ function DriveView({ trip }: { trip: DriveTrip }) {
           <div className="pointer-events-auto">{limit !== null && <SpeedLimit mph={limit} />}</div>
           <div className="pointer-events-auto flex flex-col gap-2.5">{buttons}</div>
         </div>
-        <div
-          className="pointer-events-auto flex flex-col gap-3 rounded-t-3xl border-t border-line bg-bg px-5 pt-4 pb-6"
-          style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}
-        >
+        <div className="pointer-events-auto flex flex-col gap-3 rounded-t-3xl bg-bg px-5 pt-4 pb-6" style={{ boxShadow: SHADOW.up }}>
           {ask}
           {summary}
           {demo}

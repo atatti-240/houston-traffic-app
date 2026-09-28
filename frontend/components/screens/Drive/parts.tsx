@@ -1,12 +1,14 @@
 "use client";
 
-/** Driving view pieces: the next-turn banner, lane arrows, the speed limit sign, status lines and round buttons. */
+/** Driving view pieces: the next-turn banner, lane arrows, the speed limit sign, status lines and round buttons.
+ * All in theme colors (light and dark); floating pieces use the theme's surfaces and shadows like the other map controls. */
 
 import type { ReactNode } from "react";
 
 import { Icon } from "@/components/ui";
+import { SpeedLimitSign } from "@/components/ui/SpeedLimitSign";
 import { fmtDistance, laneIcons, lanesText, maneuverIcon } from "@/lib/directions";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, LEVEL, SHADOW } from "@/lib/theme";
 import type { RouteStep } from "@/lib/types";
 
 export const DRIVE_ICON = {
@@ -26,7 +28,7 @@ function Lanes({ lanes }: { lanes: NonNullable<RouteStep["lanes"]> }) {
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             {laneIcons(lane.indications).map((d) => (
-              <path key={d} d={d} stroke={lane.valid ? C.onAccent : C.muted} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+              <path key={d} d={d} stroke={lane.valid ? C.onInk : C.muted} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
             ))}
           </svg>
         </span>
@@ -52,11 +54,11 @@ export function TurnBanner({
   const arrive = step.maneuver.type === "arrive";
   const showRoad = step.road && !step.instruction.includes(step.road);
   return (
-    <div className="flex flex-col overflow-hidden rounded-[22px] border border-edge" style={{ background: C.cardHi, boxShadow: "0 6px 24px rgba(0,0,0,0.55)" }}>
+    <div className="flex flex-col overflow-hidden rounded-[22px] border border-edge" style={{ background: C.float, boxShadow: SHADOW[2] }}>
       <div className="flex items-start gap-3.5 p-4">
         <span
           className="flex h-[64px] w-[64px] shrink-0 items-center justify-center rounded-[18px]"
-          style={{ background: arrive ? C.heavy : C.accent, color: C.onAccent }}
+          style={arrive ? { background: LEVEL.heavy.bg, color: LEVEL.heavy.fg } : { background: C.accent, color: C.onAccent }}
           aria-hidden="true"
         >
           <Icon d={maneuverIcon(step)} size={40} width={2.4} />
@@ -88,10 +90,21 @@ export function TurnBanner({
 }
 
 /** Banner for everything that isn't a turn: arrived, no turn-by-turn, getting the route. */
-export function PlainBanner({ icon, title, sub, tone }: { icon: string; title: ReactNode; sub?: ReactNode; tone?: string }) {
+export function PlainBanner({
+  icon,
+  title,
+  sub,
+  tone,
+}: {
+  icon: string;
+  title: ReactNode;
+  sub?: ReactNode;
+  /** The icon tile's fill and icon color, e.g. LEVEL.heavy (a pill pair that reads in both themes) */
+  tone?: { bg: string; fg: string };
+}) {
   return (
-    <div className="flex items-center gap-3.5 rounded-[22px] border border-edge p-4" style={{ background: C.cardHi, boxShadow: "0 6px 24px rgba(0,0,0,0.55)" }}>
-      <span className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-[16px]" style={{ background: tone ?? C.card, color: tone ? C.onAccent : C.ink }} aria-hidden="true">
+    <div className="flex items-center gap-3.5 rounded-[22px] border border-edge p-4" style={{ background: C.float, boxShadow: SHADOW[2] }}>
+      <span className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-[16px]" style={{ background: tone?.bg ?? C.card, color: tone?.fg ?? C.ink }} aria-hidden="true">
         <Icon d={icon} size={32} width={2.2} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -105,30 +118,24 @@ export function PlainBanner({ icon, title, sub, tone }: { icon: string; title: R
   );
 }
 
-/** A US speed limit sign. Only drawn when the limit is known. */
+/** A US speed limit sign (the app's sign: black on white in both themes), lifted off the map. Only drawn when the
+ * limit is known. */
 export function SpeedLimit({ mph }: { mph: number }) {
   return (
-    <div
-      className="flex w-[64px] flex-col items-center rounded-[10px] border-[3px] px-1 pt-1 pb-1.5 leading-none"
-      style={{ background: "#FFFFFF", borderColor: "#11141A", color: "#11141A", boxShadow: "0 2px 12px rgba(0,0,0,0.5)" }}
-      role="img"
-      aria-label={`Speed limit ${mph}`}
-      data-testid="speed-limit"
-    >
-      <span className="text-[10px] font-bold tracking-[0.04em]">SPEED</span>
-      <span className="text-[10px] font-bold tracking-[0.04em]">LIMIT</span>
-      <span className="mt-0.5 text-[28px] font-bold tracking-[-0.03em]">{mph}</span>
+    <div className="flex rounded-[8px]" style={{ boxShadow: SHADOW[2] }} data-testid="speed-limit">
+      <SpeedLimitSign mph={mph} size={64} />
     </div>
   );
 }
 
-/** One status line under the banner (a hazard ahead, re-planning, location). `live`: announced by screen readers
- * when it changes (keep its text steady: a distance counting down would be read out every second). */
+/** One status line under the banner (a hazard ahead, re-planning, location). `tone`: the icon's color, one that reads on
+ * a surface in both themes (C.*Text, C.accent, C.muted). `live`: announced by screen readers when it changes (keep its
+ * text steady: a distance counting down would be read out every second). */
 export function Note({ icon, tone, children, testId, live = false }: { icon: string; tone: string; children: ReactNode; testId?: string; live?: boolean }) {
   return (
     <div
       className="flex items-start gap-2.5 rounded-[14px] border border-edge px-3.5 py-2.5 text-[14px] leading-snug"
-      style={{ background: "rgba(30,34,43,0.96)", color: C.ink, boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
+      style={{ background: C.float, color: C.ink, boxShadow: SHADOW[1] }}
       role={live ? "status" : undefined}
       data-testid={testId}
     >
@@ -172,8 +179,8 @@ export function FloatButton({
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
-      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full border border-edge text-ink disabled:cursor-default disabled:opacity-50"
-      style={{ background: pressed ? C.cardHi : C.card, boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
+      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full disabled:cursor-default disabled:opacity-50"
+      style={{ background: pressed ? C.sel : C.float, color: pressed ? C.onSel : C.ink, boxShadow: SHADOW[1] }}
     >
       {children}
     </button>
