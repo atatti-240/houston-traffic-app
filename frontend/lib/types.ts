@@ -356,8 +356,12 @@ export interface Recommendation {
 export interface Trip {
   id: number;
   name: string;
-  origin: string;
-  destination: string;
+  /** A place id, or a point (a searched address, a business, a dropped pin) */
+  origin: Location;
+  destination: Location;
+  /** A point's own name ("EaDo", a business) */
+  origin_name?: string | null;
+  destination_name?: string | null;
   arrive_by: string;
   days: number[];
   safe_path: boolean;

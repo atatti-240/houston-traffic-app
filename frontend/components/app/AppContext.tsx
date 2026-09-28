@@ -89,6 +89,8 @@ function screenUrl(s: Screen): string {
     else q.set("to", `${s.to.lat},${s.to.lng}`); // a point: to=29.739,-95.463 (+ toName)
     if (typeof s.to !== "string" && s.toName) q.set("toName", s.toName);
     if (typeof s.from === "string") q.set("from", s.from);
+    else if (s.from) q.set("from", `${s.from.lat},${s.from.lng}`); // a point start too (+ fromName)
+    if (s.from && typeof s.from !== "string" && s.fromName) q.set("fromName", s.fromName);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
     if (s.avoid !== undefined) q.set("avoid", s.avoid);
@@ -121,7 +123,8 @@ function parseScreen(search: string): Screen | null {
       name,
       to: toLocation(q.get("to") as string),
       toName: q.get("toName") ?? undefined,
-      from: q.get("from") ?? undefined,
+      from: q.get("from") ? toLocation(q.get("from") as string) : undefined,
+      fromName: q.get("fromName") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
       avoid: q.get("avoid") ?? undefined,
