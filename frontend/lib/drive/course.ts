@@ -202,6 +202,8 @@ export interface Progress {
   toNext: number;
   remainingM: number;
   remainingS: number;
+  /** Straight-line meters to the line's end (the destination), however the line gets there */
+  toEnd: number;
   /** The road segment you're on (ours, with its limit and incidents), null on the way to or from our roads */
   segment: CourseSegment | null;
   arrived: boolean;
@@ -231,6 +233,7 @@ export function locate(course: Course, p: Pt, hint: number | null = null): Progr
     toNext: next === null ? remainingM : course.steps[next].along - along,
     remainingM,
     remainingS: Math.max(0, course.totalS - timeAt(course, along)),
+    toEnd: line.points.length ? distanceM(p, line.points[line.points.length - 1]) : 0,
     segment,
     arrived: remainingM <= ARRIVE_M && off <= LOCAL_OK_M,
   };
@@ -248,7 +251,10 @@ export interface Hazard {
   /** Stable across re-plans, so it's announced once */
   key: string;
   kind: "train" | "closure" | "incident" | "report";
+  /** Where it starts along the line; `until`: where it ends (a crossing is a point: the same; an incident on one of
+   * our road segments has no spot of its own, so it covers the whole segment) */
   along: number;
+  until: number;
   /** The road it's on */
   road: string;
   /** "Multi-vehicle crash", "Train crossing" */
@@ -260,12 +266,17 @@ export interface Hazard {
   clearsInMin: number | null;
   /** Chance of a train there around now, 0-1 */
   chance: number;
+  /** A train that was blocking the crossing has gone (said only after its "blocking" heads-up was) */
+  cleared?: boolean;
+  /** From the demo's canned driver reports (never said to be from real drivers) */
+  demo?: boolean;
 }
 
 /** Crossings with at least this chance of a train are worth a heads-up. */
 export const TRAIN_CHANCE = 0.25;
 
-const isReport = (source: string) => /driver/i.test(source);
+/** Reports from people driving (feature/reports): "drivers"; the demo's canned ones are "demo_drivers". */
+const REPORT_SOURCES = new Set(["drivers", "demo_drivers"]);
 
 /** Trains, closures, incidents and driver reports on the course, nearest first (including ones already passed). */
 export function hazards(course: Course, live: LiveInput | null = null): Hazard[] {
@@ -273,14 +284,23 @@ export function hazards(course: Course, live: LiveInput | null = null): Hazard[]
   const liveCrossing = new Map((live?.crossings ?? []).map((c) => [c.id, c]));
   for (const { crossing: c, along } of course.crossings) {
     const lc = liveCrossing.get(c.id);
+    // Planned while a train was there: its chance is that block, not a pattern
+    const plannedBlock = c.live && c.block_probability >= 0.99;
     // Live status wins; without it, a route planned while a train was there says so (a certain block)
-    const blocked = lc ? lc.status === "blocked" : c.live && c.block_probability >= 0.99;
+    const blocked = lc ? lc.status === "blocked" : plannedBlock;
+    const road = c.name.split(" @ ")[0];
+    if (!blocked && plannedBlock) {
+      // The train has gone: said once, if its block was
+      out.push({ key: `x:${c.id}:cleared`, kind: "train", along, until: along, road, title: "Train crossing", lanesBlocked: 0, blocked: false, clearsInMin: null, chance: 0, cleared: true });
+      continue;
+    }
     if (!blocked && c.block_probability < TRAIN_CHANCE) continue;
     out.push({
       key: `x:${c.id}${blocked ? ":blocked" : ""}`,
       kind: "train",
       along,
-      road: c.name.split(" @ ")[0],
+      until: along,
+      road,
       title: "Train crossing",
       lanesBlocked: 0,
       blocked,
@@ -294,14 +314,16 @@ export function hazards(course: Course, live: LiveInput | null = null): Hazard[]
     seen.add(inc.id);
     out.push({
       key: `i:${inc.id}`,
-      kind: closed ? "closure" : isReport(inc.source) ? "report" : "incident",
+      kind: closed ? "closure" : REPORT_SOURCES.has(inc.source) ? "report" : "incident",
       along: seg.from,
+      until: seg.to,
       road: seg.name,
       title: inc.title,
       lanesBlocked: inc.lanes_blocked,
       blocked: false,
       clearsInMin: null,
       chance: 1,
+      demo: inc.source === "demo_drivers",
     });
   };
   // Only on roads the line really takes (you'd pass it)
