@@ -33,7 +33,7 @@ export default function Drive() {
   const params = screen.name === "drive" ? screen : null;
   const key = JSON.stringify(params);
   const trip = useMemo<DriveTrip | null>(
-    () => (params ? { to: params.to, toName: params.toName, from: params.from, fromName: params.fromName, safety: params.safety } : null),
+    () => (params ? { to: params.to, toName: params.toName, from: params.from, fromName: params.fromName, safety: params.safety, avoid: params.avoid } : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key],
   );

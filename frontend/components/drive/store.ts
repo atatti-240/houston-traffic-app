@@ -80,20 +80,32 @@ export function useDrive<T>(pick: (s: State) => T): T {
 export interface DriveTrip {
   to: Location;
   toName?: string;
+  /** The trip's own start when it has one (a place, or a point: from=lat,lng); omitted = from where you are */
   from?: Location;
   fromName?: string;
   safety?: number;
+  /** Trip's Avoid choices, as its link says them: "tolls", "highways", "tolls,highways" or "" (nothing) */
+  avoid?: string;
 }
 
 export const tripKey = (t: DriveTrip) => JSON.stringify([t.to, t.from ?? null, t.safety ?? 0]);
 
-type Handed = { key: string; route: Route };
+type Handed = { key: string; route: Route; avoid?: string };
 let handed: Handed | null = null;
 const HANDED_KEY = "blindspot.drive";
 
+function loadHanded() {
+  if (handed) return;
+  try {
+    const raw = sessionStorage.getItem(HANDED_KEY);
+    const saved = raw ? (JSON.parse(raw) as Handed | null) : null;
+    if (saved && typeof saved.key === "string" && Array.isArray(saved.route?.geometry)) handed = saved;
+  } catch {}
+}
+
 /** Trip's Start (and each new route while driving): the route to drive, for the driving screen. */
 export function handOff(trip: DriveTrip, route: Route) {
-  handed = { key: tripKey(trip), route };
+  handed = { key: tripKey(trip), route, ...(trip.avoid !== undefined ? { avoid: trip.avoid } : {}) };
   try {
     sessionStorage.setItem(HANDED_KEY, JSON.stringify(handed));
   } catch {}
@@ -101,12 +113,12 @@ export function handOff(trip: DriveTrip, route: Route) {
 
 /** The route handed over for this trip (still there for Forward after End, and after a reload), or null. */
 export function handedRoute(trip: DriveTrip): Route | null {
-  if (!handed) {
-    try {
-      const raw = sessionStorage.getItem(HANDED_KEY);
-      const saved = raw ? (JSON.parse(raw) as Handed | null) : null;
-      if (saved && typeof saved.key === "string" && Array.isArray(saved.route?.geometry)) handed = saved;
-    } catch {}
-  }
+  loadHanded();
   return handed && handed.key === tripKey(trip) ? handed.route : null;
+}
+
+/** The Avoid choices the route for this trip was handed over with (so re-plans keep them), or undefined. */
+export function handedAvoid(trip: DriveTrip): string | undefined {
+  loadHanded();
+  return handed && handed.key === tripKey(trip) && typeof handed.avoid === "string" ? handed.avoid : undefined;
 }
