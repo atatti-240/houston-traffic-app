@@ -815,7 +815,12 @@ export default function Trip() {
       )}
 
       {!hidden && result && result.kind !== "plan" && choices.selected && to !== undefined && (
-        <StartDrive route={choices.selected} trip={{ to, toName, from: origin, fromName, safety }} busy={stale} />
+        <StartDrive
+          route={choices.selected}
+          trip={{ to, toName, from: origin, fromName, safety }}
+          busy={stale}
+          advisedAt={result.kind === "rec" && result.rec.on_time && now && minutesBetween(now, result.rec.depart_at) > 0 ? result.rec.depart_at : null}
+        />
       )}
 
       {/* When, and how */}
