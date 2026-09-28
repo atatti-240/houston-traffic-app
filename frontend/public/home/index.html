@@ -1,13 +1,14 @@
 <!doctype html>
+<!-- Landing page by Jason Qian (github.com/qian-json/blindspot-landing), served at /home. Rebuild the map there. -->
 <html lang="en">
 <meta charset="utf-8">
-<!-- App address. Leave empty when the app serves this page at /about. When hosting it anywhere else, set it, e.g. content="https://app.example.com" -->
+<!-- App address. Leave empty when the app serves this page at /home. When hosting it anywhere else, set it, e.g. content="https://app.example.com" -->
 <meta name="blindspot-app-url" content="">
 <script>
-/* Points every a[data-app] at the app: the meta above if set, the same origin under /about, else a local dev app. */
+/* Points every a[data-app] at the app: the meta above if set, the same origin under /home, else a local dev app. */
 (function () {
   var m = document.querySelector('meta[name="blindspot-app-url"]'), set = m && m.content.trim();
-  var base = set ? set.replace(/\/+$/, '') : location.pathname.indexOf('/about') === 0 ? '' : 'http://localhost:3000';
+  var base = set ? set.replace(/\/+$/, '') : location.pathname.indexOf('/home') === 0 ? '' : 'http://localhost:3000';
   function link() { [].forEach.call(document.querySelectorAll('a[data-app]'), function (a) { a.href = base + a.getAttribute('data-app'); }); }
   window.BS_APP = base;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', link); else link();
