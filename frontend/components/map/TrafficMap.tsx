@@ -14,6 +14,7 @@ import { useDrive } from "@/components/drive/store";
 import LiveLocation from "@/components/map/LiveLocation";
 import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
+import LiveDot from "@/components/map/LiveDot";
 import ModeRouteLayer from "@/components/map/ModeRouteLayer";
 import PinConnectors, { scenePins } from "@/components/map/PinConnectors";
 import VectorBasemap from "@/components/map/VectorBasemap";
@@ -428,13 +429,10 @@ export default function TrafficMap({
         </CircleMarker>
       ))}
 
-      {/* You are here: Google's blue dot, the same in both themes. While driving with a GPS fix, LiveLocation draws it
-          instead (so there's always exactly one) */}
-      {here && !(interactive && liveDot) && (
-        <>
-          <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#4285f4", weight: 0, fillColor: "#4285f4", fillOpacity: 0.2 }} />
-          <CircleMarker center={[here.lat, here.lng]} radius={7} interactive={false} pathOptions={{ color: "#ffffff", weight: 2.5, fillColor: "#1a73e8", fillOpacity: 1 }} />
-        </>
+      {/* You are here: the live blue dot (or the default place's, with location off). While driving with a fix,
+          LiveLocation draws it instead and does the following (so there's always exactly one dot, one follow) */}
+      {!(interactive && liveDot) && (
+        <LiveDot fallback={here ? [here.lat, here.lng] : null} follow={!interactive ? "always" : driving ? "none" : "button"} />
       )}
 
       {/* Scene points: start / stops / end (own pane: above the route lines and cause icons) */}
