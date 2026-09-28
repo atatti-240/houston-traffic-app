@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BlindSpot · See what your map can't</title>
+<meta name="description" content="BlindSpot shows why Houston traffic is slow: crashes, trains, flooding, events, closures, construction or just rush hour.">
+<!-- Placeholder: the landing page (blindspot-landing index.html) replaces this file. Served at /about (next.config.ts). -->
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #FFFFFF; --tx: #1F1F1F; --mut: #5F6368; --card: #FFFFFF; --surf: #F1F3F4; --line: #DADCE0;
+  --acc: #1A73E8; --acc-ink: #FFFFFF; --ring: #1F1F1F;
+  --sh1: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
+  --font: 'Google Sans Flex', 'Google Sans', 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --gut: clamp(16px, 4.5vw, 64px);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202124; --tx: #E8EAED; --mut: #9AA0A6; --card: #28292C; --surf: #2D2E31; --line: #3C4043;
+    --acc: #8AB4F8; --acc-ink: #202124; --ring: #FFFFFF;
+    --sh1: 0 1px 2px rgba(0, 0, 0, .5), 0 1px 3px 1px rgba(0, 0, 0, .3);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 48px var(--gut); background: var(--bg); color: var(--tx); font: 400 16px/1.5 var(--font); text-align: center; }
+h1 { margin: 0; font-size: clamp(36px, 7vw, 64px); line-height: 1.05; letter-spacing: -0.02em; font-weight: 700; }
+p { margin: 16px auto 0; max-width: 34em; color: var(--mut); font-size: 18px; }
+.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 32px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 24px; border-radius: 24px; font: 600 16px/1 var(--font); text-decoration: none; cursor: pointer; border: 0; white-space: nowrap; transition: box-shadow .2s, background .2s, filter .2s; }
+.btn.pri { background: var(--acc); color: var(--acc-ink); }
+.btn.pri:hover { box-shadow: var(--sh1); filter: brightness(1.06); }
+.btn.sec { background: var(--card); color: var(--tx); border: 1px solid var(--line); }
+.btn.sec:hover { background: var(--surf); }
+.btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+</style>
+<main>
+  <h1>See what your map can't.</h1>
+  <p>BlindSpot shows why Houston traffic is slow: crashes, trains, flooding, events, closures, construction or just rush hour.</p>
+  <div class="ctas">
+    <a class="btn pri" href="/">Open BlindSpot</a>
+    <a class="btn sec" href="/?demo=1">Watch the demo</a>
+  </div>
+</main>
+</html>
