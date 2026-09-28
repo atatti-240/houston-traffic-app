@@ -42,17 +42,18 @@ export function Icon({
   );
 }
 
-/** The brand gradient (red to purple to blue) and the red of the spot. Brand colors: the same in both themes. */
+/** The brand gradient (red to purple to blue), the red of the spot and the dark fill of the pill (as on the app
+ * icon). Brand colors: the same in both themes. */
 const LOGO_RED = "#E8322F";
+const LOGO_FILL = "#131418";
 const LOGO_GRADIENT = `linear-gradient(90deg, ${LOGO_RED}, #7A3FA8 50%, #2F5BE0)`;
 
 /**
  * The "BlindSpot" wordmark (Figtree 900) in a pill with a gradient outline, and a red spot in the "o".
- * The pill is filled with the surface it sits on (the panel, or the floating surface when `pill`: over
- * the map, with a shadow), so it reads in both themes. It hugs its text, even in a stretching flex column.
+ * A white wordmark on the dark fill in both themes, like the app icon (`pill`: floating over the map, with a
+ * shadow). It hugs its text, even in a stretching flex column.
  */
 export function Logo({ size = 18, pill = false }: { size?: number; pill?: boolean }) {
-  const surface = pill ? C.float : C.bg;
   const mark = (
     <span
       role="img"
@@ -66,8 +67,8 @@ export function Logo({ size = 18, pill = false }: { size?: number; pill?: boolea
         padding: "0.22em 0.6em 0.26em",
         borderRadius: 999,
         border: "0.09em solid transparent",
-        background: `linear-gradient(${surface}, ${surface}) padding-box, ${LOGO_GRADIENT} border-box`,
-        color: C.ink,
+        background: `linear-gradient(${LOGO_FILL}, ${LOGO_FILL}) padding-box, ${LOGO_GRADIENT} border-box`,
+        color: "#fff",
         fontSize: size,
         fontWeight: 900,
         letterSpacing: "-0.02em",
