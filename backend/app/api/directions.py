@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_services, resolve_location, resolve_time
+from app.api.deps import get_services, joins_at, resolve_location, resolve_time
 from app.api.schemas import Location, route_json
 from app.directions.options import route_id
 from app.directions.trips import apply_patch, directions_for, door_patch, endpoint
@@ -29,11 +29,15 @@ class DirectionsRequest(BaseModel):
 def directions(req: DirectionsRequest, request: Request, svc: Services = Depends(get_services)):
     """Turn-by-turn steps and the door-to-door line for a route (its segment ids), plus its
     times when a point is involved. Answers with what changes in that route's JSON."""
-    o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
+    for loc in (req.origin, req.destination):
+        resolve_location(svc, loc)  # 404 for an unknown place
     segs = [svc.network.segments.get(sid) for sid in req.segment_ids]
     if any(s is None for s in segs):
         raise HTTPException(404, "Unknown segment id. See GET /segments.")
-    if segs[0].from_node != o or segs[-1].to_node != d or any(a.to_node != b.from_node for a, b in zip(segs, segs[1:])):
+    o, d = segs[0].from_node, segs[-1].to_node
+    # A point may join our roads at any of its nearby nodes (the one /route picked for this trip).
+    ends_ok = joins_at(svc, req.origin, o) and joins_at(svc, req.destination, d)
+    if not ends_ok or any(a.to_node != b.from_node for a, b in zip(segs, segs[1:])):
         raise HTTPException(422, "segment_ids must be a connected path from origin to destination")
     view = svc.router.view()
     route = svc.router.evaluate(req.segment_ids, o, d, resolve_time(svc, req.depart_at), 0.0, view)

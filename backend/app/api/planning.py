@@ -5,7 +5,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 
-from app.api.deps import get_services, is_clock_time, resolve_location, resolve_time
+from app.api.deps import get_services, is_clock_time, resolve_ends, resolve_location, resolve_time
 from app.api.schemas import RecommendRequest, RouteRequest, TripIn
 from app.directions.trips import recommend_response, route_response
 from app.models import Notification, Trip, TripState
@@ -16,19 +16,20 @@ from app.services import Services
 
 router = APIRouter(tags=["planning"])
 
+ENDS_LEAD_MIN = 30  # /recommend picks a point's way onto our roads for leaving about this early
+
 
 @router.post("/route")
 def route(req: RouteRequest, directions: bool = False, svc: Services = Depends(get_services)):
     """Best route, the router's alternative, and up to 3 different routes (`routes`).
     `?directions=true` adds door-to-door directions (app/directions)."""
-    o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
+    depart_at = resolve_time(svc, req.depart_at)
     view = svc.router.view()
     # Avoid tolls / highways: this router stays off them in every search, the extra routes' too.
     router = avoiding(svc.router, req.avoid)
+    o, d = resolve_ends(svc, req.origin, req.destination, depart_at, router, req.safe_path, req.safety_weight, view)
     try:
-        best, alt = router.route(
-            o, d, resolve_time(svc, req.depart_at), req.safe_path, safety_weight=req.safety_weight, view=view
-        )
+        best, alt = router.route(o, d, depart_at, req.safe_path, safety_weight=req.safety_weight, view=view)
         return route_response(svc, req.origin, req.destination, best, alt, view, directions, router=router)
     except NoRouteError as e:
         raise HTTPException(404, str(e)) from e
@@ -37,13 +38,16 @@ def route(req: RouteRequest, directions: bool = False, svc: Services = Depends(g
 @router.post("/recommend")
 def recommend(req: RecommendRequest, directions: bool = False, svc: Services = Depends(get_services)):
     """When to leave, plus the routes list. `?directions=true` adds door-to-door directions."""
-    o, d = resolve_location(svc, req.origin), resolve_location(svc, req.destination)
     arrive_by = resolve_time(svc, req.arrive_by)
     now = svc.clock.now()
     if is_clock_time(req.arrive_by) and arrive_by <= now:
         arrive_by += timedelta(days=1)  # "08:30" at 5 PM means tomorrow morning
     view = svc.router.view()
     router = avoiding(svc.router, req.avoid)
+    # Where a point joins our roads is picked once, for about when the trip leaves, and kept
+    # for every departure the recommender tries.
+    leave = max(now, arrive_by - timedelta(minutes=ENDS_LEAD_MIN))
+    o, d = resolve_ends(svc, req.origin, req.destination, leave, router, req.safe_path, req.safety_weight, view)
 
     def recommend_by(extra_min: int = 0):  # door to door, the way on and off our roads comes off the buffer
         # earliest=now: never suggest leaving in the past. A deadline that already passed
