@@ -192,7 +192,7 @@ export interface RouteSegment {
 export interface Incident {
   id: string;
   title: string;
-  kind: "crash" | "stall" | "roadwork" | "closure" | "hazard" | "other" | "flooding" | "police" | "pothole";
+  kind: "crash" | "stall" | "roadwork" | "lane_closure" | "closure" | "event" | "weather" | "hazard" | "other" | "flooding" | "police" | "pothole";
   segment_id: string | null;
   started_at: string;
   clears_at: string | null;

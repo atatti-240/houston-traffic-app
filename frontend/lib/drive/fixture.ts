@@ -28,7 +28,7 @@ function step(instruction: string, type: string, modifier: string | null, locati
   };
 }
 
-function segment(id: string, name: string, geometry: Pt[], extra: Partial<RouteSegment> & { speed_limit_mph?: number | null } = {}): RouteSegment {
+function segment(id: string, name: string, geometry: Pt[], extra: Partial<RouteSegment> = {}): RouteSegment {
   return {
     id,
     name,

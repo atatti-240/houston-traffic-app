@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { Incident } from "../types";
 import { buildCourse, hazards, locate, type Course, type Hazard } from "./course.ts";
 import { START, testRoute } from "./fixture.ts";
 import { offset } from "./geo.ts";
@@ -168,7 +169,7 @@ test("hazard sentences: demo titles, lanes, driver reports, trains", () => {
   // Reports: no "reported", no made-up lane count
   assert.equal(hazardText(hz({ kind: "report", title: "Crash reported", lanesBlocked: 1 }), 800), "Drivers report a crash on Westheimer Rd, in half a mile.");
   assert.equal(hazardText(hz({ kind: "report", title: "Police reported", lanesBlocked: 1 }), 800), "Drivers report police on Westheimer Rd, in half a mile.");
-  assert.equal(hazardText(hz({ kind: "report", title: "Object on the road", lanesBlocked: 1 }), 800), "Drivers report an object on the road on Westheimer Rd, in half a mile.");
+  assert.equal(hazardText(hz({ kind: "report", title: "Object on the road", lanesBlocked: 1 }), 800), "Drivers report an object on Westheimer Rd, in half a mile.");
   assert.equal(hazardText(hz({ kind: "report", demo: true, title: "Stalled car reported" }), 800), "Demo report: stalled car on Westheimer Rd, in half a mile.");
   // Trains
   const train = hz({ kind: "train", road: "Navigation Blvd", title: "Train crossing", blocked: true, clearsInMin: 0.7 });
@@ -183,6 +184,64 @@ test("a report from the demo's canned drivers isn't called real drivers; one fro
   assert.equal(hs.find((h) => h.key === "i:a")?.kind, "report");
   assert.equal(hs.find((h) => h.key === "i:b")?.demo, true);
   assert.equal(hs.find((h) => h.key === "i:c")?.kind, "incident");
+});
+
+// Driver reports as the backend sends them (app/reports.py): each report kind's incident title and kind, on its road
+// segment, with source "drivers" or, for the demo's canned ones, "demo_drivers"
+const REPORTED: [Incident["kind"], string, string, string][] = [
+  ["crash", "Crash reported", "a crash on Main St", "crash on Main St"],
+  ["police", "Police reported", "police on Main St", "police on Main St"],
+  ["hazard", "Object on the road", "an object on Main St", "object on Main St"],
+  ["pothole", "Pothole reported", "a pothole on Main St", "pothole on Main St"],
+  ["stall", "Stalled car reported", "a stalled car on Main St", "stalled car on Main St"],
+  ["flooding", "Flooding reported", "flooding on Main St", "flooding on Main St"],
+];
+const report = (n: number, kind: Incident["kind"], title: string, source: string): Incident => ({
+  id: `report-${n}`,
+  title,
+  kind,
+  segment_id: "S1",
+  started_at: "2026-09-28T07:05:00",
+  clears_at: "2026-09-28T07:50:00",
+  lanes_blocked: 1,
+  source,
+  updated_at: "2026-09-28T07:05:00",
+  detail: "Reported by drivers, 10 min ago",
+});
+
+test("driver reports of every kind, as the backend sends them, are named right", () => {
+  const c = buildCourse({ ...testRoute(), crossings: [] });
+  REPORTED.forEach(([kind, title, said, shown], i) => {
+    const h = hazards(c, { incidents: [report(i, kind, title, "drivers")] }).find((x) => x.key === `i:report-${i}`);
+    assert.ok(h, kind);
+    assert.equal(h.kind, "report");
+    assert.equal(h.demo, false);
+    assert.equal(hazardText(h, 800), `Drivers report ${said}, in half a mile.`);
+    assert.equal(hazardLabel(h), `Drivers report: ${shown}`);
+  });
+});
+
+test("the demo's canned reports are never said or shown as real drivers", () => {
+  REPORTED.forEach(([kind, title, , shown], i) => {
+    const inc = report(i, kind, title, "demo_drivers");
+    // Planned with the report on the route (the segment's own incident), and one that came in on /live after
+    const planned = testRoute();
+    planned.segments[0] = { ...planned.segments[0], incident: inc };
+    const fromRoute = hazards(buildCourse({ ...planned, crossings: [] }));
+    const fromLive = hazards(buildCourse({ ...testRoute(), crossings: [] }), { incidents: [inc] });
+    for (const hs of [fromRoute, fromLive]) {
+      const h = hs.find((x) => x.key === `i:report-${i}`);
+      assert.ok(h, kind);
+      assert.equal(h.kind, "report");
+      assert.equal(h.demo, true);
+      const calls = hazardCalls(hs, 0, 13, new Set());
+      const text = calls.find((s) => s.key === `hazard:i:report-${i}`)?.text ?? "";
+      assert.match(text, /^Demo report: /);
+      assert.doesNotMatch(forSpeech(text), /driver/i);
+      assert.doesNotMatch(hazardText(h, 800), /driver/i);
+      assert.equal(hazardLabel(h), `Demo report: ${shown}`);
+    }
+  });
 });
 
 test("a blocking train that clears: its planned 'certain' block isn't a pattern; the clearing is said once", () => {

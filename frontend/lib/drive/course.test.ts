@@ -122,6 +122,29 @@ test("hazards: crossings with a real chance of a train, incidents, and live chan
 
 test("course: a speed limit that isn't a sensible number is unknown", () => {
   const r = testRoute();
-  r.segments[0] = { ...r.segments[0], speed_limit_mph: "45" } as typeof r.segments[0];
+  r.segments[0] = { ...r.segments[0], speed_limit_mph: "45" } as unknown as typeof r.segments[0];
   assert.equal(buildCourse(r).segments[0].speedLimitMph, null);
+});
+
+test("course: speed limits as roadrules sends them (whole mph or null) are read, never made up", () => {
+  // Over the wire: a toll freeway posted 65, then a freeway OpenStreetMap has no limit for
+  const r = testRoute();
+  r.segments[0] = { ...r.segments[0], road_class: "freeway", speed_limit_mph: 65, toll: true };
+  r.segments[1] = { ...r.segments[1], road_class: "freeway", speed_limit_mph: null, toll: false };
+  const c = buildCourse(JSON.parse(JSON.stringify(r)));
+  assert.deepEqual(
+    c.segments.map((s) => [s.id, s.speedLimitMph]),
+    [
+      ["S1", 65],
+      ["S2", null],
+    ],
+  );
+  // Where you are: the sign shows 65 on S1 and nothing on S2 (not a guess from its road class or free-flow speed)
+  const p1 = locate(c, offset(START, 90, 500));
+  assert.equal(p1.segment?.speedLimitMph, 65);
+  const p2 = locate(c, offset(CORNER, 0, 300), p1.along);
+  assert.equal(p2.segment?.id, "S2");
+  assert.equal(p2.segment?.speedLimitMph, null);
+  // Off our roads (on the way to them): no segment, so no limit
+  assert.equal(locate(c, offset(offset(START, 90, 500), 180, 200)).segment, null);
 });
