@@ -74,3 +74,9 @@ export function camName(raw: string): string {
 export function hasLiveVideo(feed: LiveFeed | null | undefined): boolean {
   return !!feed && feed.status !== "offline" && feed.status !== "missing";
 }
+
+/** The 0..1 crash-risk score as the chance people see: 1% to 5% per trip (backend crash_chance matches). */
+export function crashChance(risk: number): string {
+  const pct = 1 + 4 * Math.min(1, Math.max(0, risk));
+  return `${pct.toFixed(1)}%`;
+}

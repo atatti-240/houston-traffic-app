@@ -17,7 +17,7 @@ import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { recommendChoices, routeChoices } from "@/lib/directions";
-import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
+import { crashChance, fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
 import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
 import { CAUSE, C, ICON, LEVEL, SHADOW, tint } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
@@ -617,7 +617,7 @@ export default function Trip() {
     const driveMin = Math.max(1, minutes - trainMin - closureMin);
     const third = closureMin
       ? { label: "Closure wait", value: `+${closureMin} min`, tone: C.heavyText }
-      : { label: "Crash risk", value: `${Math.round(b.max_crash_risk * 100)}%`, tone: b.max_crash_risk >= 0.5 ? C.heavyText : undefined };
+      : { label: "Crash risk", value: crashChance(b.max_crash_risk), tone: b.max_crash_risk >= 0.5 ? C.heavyText : undefined };
 
     head = (
       <Headline
