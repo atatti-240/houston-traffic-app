@@ -206,9 +206,30 @@ export interface Progress {
   remainingS: number;
   /** Straight-line meters to the line's end (the destination), however the line gets there */
   toEnd: number;
-  /** The road segment you're on (ours, with its limit and incidents), null on the way to or from our roads */
+  /** The road segment you're on (ours, with its limit and incidents), null on the way to or from our roads (with
+   * turn-by-turn: while the step you're driving isn't on its road) */
   segment: CourseSegment | null;
   arrived: boolean;
+}
+
+/** Route numbers in a road's name, as the directions write them: "I-69/US-59 Southwest Fwy" -> I-69, US-59. */
+const REF_RE = /\b(I|US|TX|SH|FM|BW|SL|CR|Spur|Loop)[- ](\d+[A-Z]?)\b/gi;
+const refs = (name: string) =>
+  new Set([...name.matchAll(REF_RE)].map((m) => `${m[1].toUpperCase().replace(/^TX$/, "SH")}-${m[2].toUpperCase()}`));
+const plain = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Whether a directions step's road (`RouteStep.road`) is our road segment's road. A freeway goes by its route
+ * number, and its frontage road isn't it; a street goes by its name ("Lawndale / Cullen Blvd": either one, "Cullen
+ * Blvd" or "Lawndale St"). An unnamed road (a ramp) is none of ours. */
+export function sameRoad(segmentName: string, stepRoad: string): boolean {
+  if (!stepRoad.trim()) return false;
+  const ours = refs(segmentName);
+  if (ours.size) return !/\b(frontage|service)\b/i.test(stepRoad) && [...refs(stepRoad)].some((r) => ours.has(r));
+  const road = plain(stepRoad);
+  return segmentName
+    .split("/")
+    .map(plain)
+    .some((name) => !!name && (road === name || road.startsWith(`${name} `) || name.startsWith(`${road} `)));
 }
 
 /** Where `p` is on the course. `hint`: the last `along`, so a line passing near itself doesn't make you jump. */
@@ -225,7 +246,13 @@ export function locate(course: Course, p: Pt, hint: number | null = null): Progr
     }
   }
   const remainingM = Math.max(0, line.length - along);
-  const segment = off <= LOCAL_OK_M ? (course.segments.find((s) => s.onLine && along >= s.from && along < s.to) ?? null) : null;
+  // A segment's shape can run beside the line before you're on its road (a freeway over the street that leads to
+  // its ramp, then its frontage road): with turn-by-turn, you're on it only while the step you're driving names it
+  const driving = course.steps.length > 1 ? course.steps[(next ?? course.steps.length) - 1].step.road : null;
+  const segment =
+    off <= LOCAL_OK_M
+      ? (course.segments.find((s) => s.onLine && along >= s.from && along < s.to && (driving === null || sameRoad(s.name, driving))) ?? null)
+      : null;
   return {
     along,
     off,
