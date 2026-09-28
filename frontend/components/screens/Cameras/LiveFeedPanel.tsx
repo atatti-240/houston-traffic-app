@@ -7,6 +7,8 @@ import { Icon, InfoToggle } from "@/components/ui";
 import { C, FLOW, ICON, VEHICLE, tint } from "@/lib/theme";
 import type { LiveFeed, LiveFeedDetail } from "@/lib/types";
 
+import type { LaCam } from "./laCams";
+
 function Stat({ label, value, sub, color }: { label: string; value: string; sub: string; color?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 rounded-xl bg-nav px-2.5 py-2">
@@ -122,12 +124,26 @@ export default function LiveFeedPanel({ feed, detail }: { feed: LiveFeed; detail
   );
 }
 
-/** Under the drawn view of a camera without live video right now. */
-export function FeedOffline({ feed }: { feed: LiveFeed | null }) {
-  const why = !feed
-    ? "Live AI feed offline for this camera. Showing a drawn view of its traffic."
+/** Under a camera without the camera AI's video: where the stand-in video comes from (`standIn`),
+ * or why the simulated view shows. */
+export function FeedOffline({ feed, standIn }: { feed: LiveFeed | null; standIn?: LaCam }) {
+  const ai = !feed
+    ? "The camera AI doesn't cover this camera, so there are no vehicle boxes or counts."
     : feed.status === "missing"
-      ? `Live AI feed offline: the camera AI isn't running its Baton Rouge camera ${feed.cv_camera}. Showing a drawn view of this road's traffic.`
-      : "Live AI feed offline: can't reach the camera AI right now. Showing a drawn view of this road's traffic.";
-  return <InfoToggle label="Why there's no live video">{why}</InfoToggle>;
+      ? `The camera AI isn't running its Baton Rouge camera ${feed.cv_camera} right now, so there are no vehicle boxes or counts.`
+      : "Can't reach the camera AI right now, so there are no vehicle boxes or counts.";
+  if (standIn)
+    return (
+      <InfoToggle label="Where this video comes from">
+        Live video from Louisiana DOTD&apos;s 511LA camera {standIn.id} in Baton Rouge ({standIn.name}), standing in for this
+        Houston camera until Houston live video is available. It shows Baton Rouge traffic: this road&apos;s traffic level
+        comes from Houston traffic data, not from this video. {ai}
+      </InfoToggle>
+    );
+  return (
+    <InfoToggle label="Why there's no live video">
+      Simulated view: live video unavailable. The Baton Rouge stand-in cameras (Louisiana DOTD 511LA) didn&apos;t load here,
+      so this is a drawing of this road&apos;s traffic from Houston traffic data, not video. {ai}
+    </InfoToggle>
+  );
 }
