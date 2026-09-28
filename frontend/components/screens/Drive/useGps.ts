@@ -1,13 +1,22 @@
 "use client";
 
 /**
- * Live GPS for driving mode (navigator.geolocation.watchPosition). It doesn't set off the browser's permission
- * prompt by itself: when the site hasn't been allowed yet it waits in "ask" until `allow()` (our own friendly ask
- * comes first). Heading and speed come from the fix, or from the last two fixes when the device doesn't say.
+ * Live GPS for driving mode, from the app's one live location (components/app/liveLocation.ts), so there's a single
+ * watchPosition for the whole app. It doesn't set off the browser's permission prompt by itself: when the site
+ * hasn't been allowed yet it waits in "ask" until `allow()` (our own friendly ask comes first). Heading and speed
+ * come from the fix, or from the last two fixes when the device doesn't say.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  askForLocation,
+  getLiveFix,
+  getLiveStatus,
+  startLiveLocation,
+  subscribeLiveLocation,
+  type Fix as LiveFix,
+} from "@/components/app/liveLocation";
 import type { Fix } from "@/components/drive/store";
 import { bearing, distanceM } from "@/lib/drive/geo";
 
@@ -21,7 +30,8 @@ const MOVED_M = 8; // moved at least this much (and more than the fix's error): 
 
 export function useGps(onFix: (f: Fix) => void): { state: GpsState; allow: () => void; decline: () => void } {
   const [state, setState] = useState<GpsState>("checking");
-  const watch = useRef<number | null>(null);
+  /** Stops listening to the live location (null: not started) */
+  const watch = useRef<(() => void) | null>(null);
   const last = useRef<Fix | null>(null);
   const onFixRef = useRef(onFix);
   onFixRef.current = onFix;
@@ -29,31 +39,37 @@ export function useGps(onFix: (f: Fix) => void): { state: GpsState; allow: () =>
   const start = useCallback(() => {
     if (watch.current !== null || typeof navigator === "undefined" || !navigator.geolocation) return;
     setState((s) => (s === "live" ? s : "waiting"));
-    watch.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude: lat, longitude: lng, accuracy, heading: h, speed: v } = pos.coords;
-        const prev = last.current;
-        const at = Date.now();
-        const moved = prev ? distanceM([prev.lat, prev.lng], [lat, lng]) : 0;
-        const dt = prev ? (at - prev.at) / 1000 : 0;
-        let heading: number | null = h !== null && Number.isFinite(h) && (v ?? 1) > 0.5 ? h : null;
-        if (heading === null) heading = prev && moved >= Math.max(MOVED_M, accuracy / 2) ? bearing([prev.lat, prev.lng], [lat, lng]) : (prev?.heading ?? null);
-        const speed = v !== null && Number.isFinite(v) ? v : prev && dt > 0 && dt < 30 ? moved / dt : null;
-        const fix: Fix = { lat, lng, accuracy: Number.isFinite(accuracy) ? accuracy : 50, heading, speed, at, source: "gps" };
-        last.current = fix;
-        setState("live");
-        onFixRef.current(fix);
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          if (watch.current !== null) navigator.geolocation.clearWatch(watch.current);
-          watch.current = null;
-          setState("denied");
-        }
-        // No signal or too slow: keep watching, it may come
-      },
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 20_000 },
-    );
+    let seen: LiveFix | null = null;
+    const check = () => {
+      if (getLiveStatus() === "denied") {
+        watch.current?.();
+        watch.current = null;
+        setState("denied");
+        return;
+      }
+      const live = getLiveFix();
+      if (!live || live === seen) return;
+      seen = live;
+      const { lat, lng, accuracy, at } = live;
+      const prev = last.current;
+      const moved = prev ? distanceM([prev.lat, prev.lng], [lat, lng]) : 0;
+      const dt = prev ? (at - prev.at) / 1000 : 0;
+      let heading = live.heading;
+      if (heading === null) heading = prev && moved >= Math.max(MOVED_M, accuracy / 2) ? bearing([prev.lat, prev.lng], [lat, lng]) : (prev?.heading ?? null);
+      const speed = live.speed !== null && Number.isFinite(live.speed) ? live.speed : prev && dt > 0 && dt < 30 ? moved / dt : null;
+      const fix: Fix = { lat, lng, accuracy: Number.isFinite(accuracy) ? accuracy : 50, heading, speed, at, source: "gps" };
+      last.current = fix;
+      setState("live");
+      onFixRef.current(fix);
+    };
+    const unsub = subscribeLiveLocation(check);
+    const stop = startLiveLocation();
+    watch.current = () => {
+      unsub();
+      stop();
+    };
+    askForLocation(); // our "Use my location" (or already allowed: nothing to ask)
+    check();
   }, []);
 
   useEffect(() => {
@@ -84,7 +100,7 @@ export function useGps(onFix: (f: Fix) => void): { state: GpsState; allow: () =>
     return () => {
       alive = false;
       status?.removeEventListener("change", onChange);
-      if (watch.current !== null) navigator.geolocation.clearWatch(watch.current);
+      watch.current?.();
       watch.current = null;
     };
   }, [start]);

@@ -1,12 +1,17 @@
 "use client";
 
-/** The map's locate button: center on you and follow as you move (filled while following; drag the map to stop). */
+/** The map's locate button: center on you and follow as you move (filled while following; drag the map to stop).
+ * While driving it is driving mode's Recenter (one follow at a time). */
 
 import { locateMe, useFollow, useLiveStatus } from "@/components/app/liveLocation";
+import { drive, useDrive } from "@/components/drive/store";
 import { C } from "@/lib/theme";
 
 export default function LocateButton() {
-  const { on } = useFollow();
+  const { on: following } = useFollow();
+  const driving = useDrive((s) => s.active);
+  const driveFollow = useDrive((s) => s.follow);
+  const on = driving ? driveFollow : following;
   const status = useLiveStatus();
   const off = status === "denied" || status === "unavailable";
   return (
@@ -15,7 +20,7 @@ export default function LocateButton() {
       aria-label={off ? "Center on the default spot (location is off)" : on ? "Following you: tap to recenter" : "Center on my location"}
       aria-pressed={on}
       title={off ? "Location is off" : undefined}
-      onClick={locateMe}
+      onClick={driving ? drive.recenter : locateMe}
       className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl bg-float shadow-e1 hover:bg-card"
     >
       <svg

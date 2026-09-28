@@ -304,13 +304,18 @@ function emitFollow() {
   for (const l of followListeners) l();
 }
 
+/** Ask for location now (a tap is a fine moment to ask), unless it's already allowed, denied or being asked. */
+export function askForLocation() {
+  if (typeof navigator !== "undefined" && navigator.geolocation && !allowed && status !== "denied" && status !== "asking") {
+    asked = false;
+    askOnce();
+  }
+}
+
 /** The locate button: center on you and keep following (again: recenter). Asks for location if it never did. */
 export function locateMe() {
   follow = { on: true, seq: follow.seq + 1 };
-  if (typeof navigator !== "undefined" && navigator.geolocation && !allowed && status !== "denied" && status !== "asking") {
-    asked = false; // a tap is a fine moment to ask
-    askOnce();
-  }
+  askForLocation();
   emitFollow();
 }
 
