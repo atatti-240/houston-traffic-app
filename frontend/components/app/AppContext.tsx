@@ -51,6 +51,7 @@ export type Screen =
       /** Walk / Bike / Transit tab; omitted = Drive */
       travel?: Travel;
     }
+  | { name: "drive"; to: Location; toName?: string; from?: Location; fromName?: string; safety?: number; avoid?: string }
   | { name: "map" }
   /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
   | { name: "nearby"; kind: PoiKind; route?: LatLngTuple[]; routeTo?: string }
@@ -71,6 +72,8 @@ export function tabOf(s: Screen): Tab | null {
 function parentOf(s: Screen): Screen {
   if (s.name === "why") return { name: "causes" };
   if (s.name === "trip") return { name: "where" };
+  if (s.name === "drive")
+    return { name: "trip", to: s.to, toName: s.toName, from: s.from, fromName: s.fromName, safety: s.safety, avoid: s.avoid };
   return { name: "map" };
 }
 

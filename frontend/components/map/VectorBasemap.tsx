@@ -13,6 +13,7 @@ import L from "leaflet";
 import { setWorkerUrl, type ExpressionSpecification, type Map as LibreMap } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { TileLayer, useMap } from "react-leaflet";
+import { drive } from "@/components/drive/store";
 import {
   ATTRIBUTION,
   BASEMAP,
@@ -161,7 +162,8 @@ export default function VectorBasemap({ places = false }: { places?: boolean }) 
     // lines or icons is theirs, not the place's under it.
     const ours = (e: L.LeafletMouseEvent) => (e.originalEvent.target as Element | null)?.closest?.(".leaflet-interactive, .leaflet-marker-icon");
     const onClick = (e: L.LeafletMouseEvent) => {
-      if (ours(e)) return;
+      // Driving: a tap only moves the map
+      if (ours(e) || drive.get().active) return;
       // A tap on nothing closes the open card.
       pickPlace(placeAt(gl, e.latlng.lat, e.latlng.lng));
     };
