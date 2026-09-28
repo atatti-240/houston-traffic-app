@@ -1,7 +1,8 @@
 "use client";
 
-/** The camera's "live video" card (design "Live cameras"): a procedural animated view with a LIVE
- * badge, the simulated clock, the camera name and pause / full-screen buttons. */
+/** The camera's simulated view (design "Live cameras"): a procedural animated picture of the road's
+ * traffic with a badge, the simulated clock, the camera name and pause / full-screen buttons. Shown
+ * when no live video plays, labeled as simulated. */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -100,11 +101,14 @@ export default function CameraFeed({
   cam,
   name,
   base,
+  simulated = false,
 }: {
   cam: LiveCam;
   /** Display name */
   name: string;
   base: SimBase | null;
+  /** Standing in for live video that didn't load: say so on the picture */
+  simulated?: boolean;
 }) {
   const [paused, setPaused] = useState(false);
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
@@ -182,6 +186,8 @@ export default function CameraFeed({
   const levelWord = cam.level === "heavy" ? "heavy" : cam.level === "moderate" ? "moderate" : "light";
   const snapshot = !cam.mock && cam.snapshot_url && !imgFailed ? cam.snapshot_url : null;
   const badge = "rgba(11,13,17,0.8)";
+  // A camera's own still photo is real; the drawing isn't.
+  const drawn = simulated && !snapshot;
 
   return (
     <div
@@ -195,7 +201,7 @@ export default function CameraFeed({
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         role="img"
-        aria-label={`Live camera view of ${name}, ${levelWord} traffic${blocked ? ", a train is crossing" : ""}`}
+        aria-label={`${drawn ? "Simulated view" : "Live camera view"} of ${name}, ${levelWord} traffic${blocked ? ", a train is crossing" : ""}`}
         className={full ? "block h-full w-full" : "block h-auto w-full"}
         style={full ? undefined : { aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
       >
@@ -270,8 +276,8 @@ export default function CameraFeed({
       )}
 
       <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-md px-2 py-1" style={{ background: badge }}>
-        <span className="h-2 w-2 rounded-full" style={{ background: paused ? C.muted : C.heavy }} />
-        <span className="text-[11px] font-bold tracking-[0.08em]">{paused ? "PAUSED" : "LIVE"}</span>
+        <span className="h-2 w-2 rounded-full" style={{ background: paused || drawn ? C.muted : C.heavy }} />
+        <span className="text-[11px] font-bold tracking-[0.08em]">{paused ? "PAUSED" : drawn ? "SIMULATED" : "LIVE"}</span>
       </div>
       {shownMs !== null && (
         <span className="font-num absolute top-2.5 right-2.5 rounded-md px-2 py-1 text-[11px] text-soft" style={{ background: badge }}>
@@ -282,7 +288,7 @@ export default function CameraFeed({
       <div className="absolute right-0 bottom-0 left-0 box-border flex h-[52px] items-center gap-1 pr-1.5 pl-3" style={{ background: "rgba(11,13,17,0.85)" }}>
         <div className="flex min-w-0 flex-grow flex-col gap-px">
           <span className="truncate text-[14px] font-semibold">{name}</span>
-          <span className="text-[12px] text-muted">{cam.looking ?? "Live view"}</span>
+          <span className="truncate text-[12px] text-muted">{drawn ? "Simulated view: live video unavailable" : (cam.looking ?? "Live view")}</span>
         </div>
         <button
           type="button"
