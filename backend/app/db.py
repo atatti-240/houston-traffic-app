@@ -37,7 +37,10 @@ def init_db(bind: Engine | None = None) -> None:
 # app.db from an older checkout gets them here. (For anything bigger: `make seed` rebuilds.)
 _ADDED_COLUMNS = {
     "trip_states": {"last_route": "VARCHAR"},
-    "trips": {"safety_weight": "FLOAT", "avoid_tolls": "BOOLEAN", "avoid_highways": "BOOLEAN"},
+    "trips": {
+        "safety_weight": "FLOAT", "avoid_tolls": "BOOLEAN", "avoid_highways": "BOOLEAN",
+        "origin_name": "VARCHAR", "destination_name": "VARCHAR",
+    },
     "notifications": {"plan_id": "VARCHAR"},
     "saved_plans": {"held": "BOOLEAN"},
     "road_segments": {"speed_limit_mph": "INTEGER", "toll": "BOOLEAN"},

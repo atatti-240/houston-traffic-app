@@ -90,6 +90,22 @@ class ScoreEntry(Base):
     n_obs: Mapped[int] = mapped_column(Integer, default=0)
 
 
+def point_key(lat: float, lng: float) -> str:
+    """How a saved trip stores a point (a searched address, a dropped pin...): "lat,lng"."""
+    return f"{lat:.6f},{lng:.6f}"
+
+
+def parse_point(value: str) -> tuple[float, float] | None:
+    """(lat, lng) of a stored point, None for a place id."""
+    lat, sep, lng = value.partition(",")
+    if not sep:
+        return None
+    try:
+        return float(lat), float(lng)
+    except ValueError:
+        return None
+
+
 class Trip(Base):
     """A saved commute the scheduler watches."""
 
@@ -98,8 +114,11 @@ class Trip(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String)
-    origin: Mapped[str] = mapped_column(String)  # node id
-    destination: Mapped[str] = mapped_column(String)  # node id
+    origin: Mapped[str] = mapped_column(String)  # place id, or "lat,lng" for a point (point_key)
+    destination: Mapped[str] = mapped_column(String)  # place id, or "lat,lng" for a point
+    # A point's own name ("EaDo", a business): alerts and the app show it. None on older rows.
+    origin_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination_name: Mapped[str | None] = mapped_column(String, nullable=True)
     arrive_by: Mapped[str] = mapped_column(String)  # "HH:MM"
     days: Mapped[str] = mapped_column(String, default="0,1,2,3,4")  # weekday numbers, Mon=0
     safe_path: Mapped[bool] = mapped_column(Boolean, default=False)
