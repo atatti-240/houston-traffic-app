@@ -48,7 +48,7 @@ const LOGO_RED = "#E8322F";
 const LOGO_FILL = "#131418";
 const LOGO_GRADIENT = `linear-gradient(90deg, ${LOGO_RED}, #7A3FA8 50%, #2F5BE0)`;
 
-/** The app icon, as on the landing page (public/home): a lens with a red spot on a dark tile. */
+/** The app icon, as on the landing page (public/landing): a lens with a red spot on a dark tile. */
 export function LogoMark({ size = 24 }: { size?: number }) {
   // Gradient ids must be unique per instance: a hidden copy's ids would blank the visible one.
   const id = useId().replace(/[^\w-]/g, "");

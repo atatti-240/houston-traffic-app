@@ -1,17 +1,27 @@
 <!doctype html>
-<!-- Landing page by Jason Qian (github.com/qian-json/blindspot-landing), served at /home. Rebuild the map there. -->
+<!-- Landing page by Jason Qian (github.com/qian-json/blindspot-landing), served at /. Rebuild the map there. -->
 <html lang="en">
 <meta charset="utf-8">
-<!-- App address. Leave empty when the app serves this page at /home. When hosting it anywhere else, set it, e.g. content="https://app.example.com" -->
+<!-- App address: where the app lives, e.g. content="https://blind-spot.app/home". Leave empty when the app serves this page (at /), or to link to a local dev app. -->
 <meta name="blindspot-app-url" content="">
 <script>
-/* Points every a[data-app] at the app: the meta above if set, the same origin under /home, else a local dev app. */
+/* Points every a[data-app] at the app: the address above if set; /home on this site if this site is the app (it
+   answers /manifest.webmanifest as BlindSpot); else the local dev app, http://localhost:3000/home. data-app holds
+   what follows the app's address (?screen=where). Until the check answers, the plain hrefs (/home?...) stand. */
 (function () {
   var m = document.querySelector('meta[name="blindspot-app-url"]'), set = m && m.content.trim();
-  var base = set ? set.replace(/\/+$/, '') : location.pathname.indexOf('/home') === 0 ? '' : 'http://localhost:3000';
-  function link() { [].forEach.call(document.querySelectorAll('a[data-app]'), function (a) { a.href = base + a.getAttribute('data-app'); }); }
-  window.BS_APP = base;
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', link); else link();
+  var app = set ? set.replace(/\/+$/, '') : 'http://localhost:3000/home', web = /^https?:$/.test(location.protocol);
+  // Launched from a home screen icon saved when the app lived at / (no referrer, standalone window): open the app.
+  if (!set && web && !document.referrer && (navigator.standalone === true || matchMedia('(display-mode: standalone)').matches)) {
+    location.replace('/home' + location.search + location.hash);
+    return;
+  }
+  function link() { window.BS_APP = app; [].forEach.call(document.querySelectorAll('a[data-app]'), function (a) { a.href = app + a.getAttribute('data-app'); }); }
+  function ready() { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', link); else link(); }
+  if (set || !web) return ready();
+  fetch('/manifest.webmanifest').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (mf) { if (mf && mf.name === 'BlindSpot') app = '/home'; }, function () {})
+    .then(ready);
 })();
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -495,7 +505,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
       <a class="nl" href="#routes">Routes</a>
       <a class="nl" href="#cameras">Cameras</a>
       <a class="nl" href="#why">The Why</a>
-      <a class="btn pri" href="/?screen=where" data-app="/?screen=where">Open the app</a>
+      <a class="btn pri" href="/home?screen=where" data-app="?screen=where">Open the app</a>
     </nav>
   </div>
 </header>
@@ -508,7 +518,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         <p class="lede">Every map shows you a red road. BlindSpot tells you why it's red: a crash, a concert, a freight train, a flooded underpass, or just 5 PM.</p>
         <p class="hint"><span class="ring"></span><span id="hintText">Move the lens over the red roads to see what's behind them.</span></p>
         <div class="ctas">
-          <a class="btn pri" href="/?screen=where" data-app="/?screen=where">Open BlindSpot</a>
+          <a class="btn pri" href="/home?screen=where" data-app="?screen=where">Open BlindSpot</a>
           <a class="btn sec" href="#problem">See how it works</a>
         </div>
       </div>
@@ -544,7 +554,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
       <div class="reveal-copy">
         <h2 class="h2" id="h-causes">Every slowdown has a reason.</h2>
         <p class="lede">BlindSpot tags each one, so you know whether to wait it out, take another road or leave now. Here are nine from tonight.</p>
-        <a class="go" href="/?screen=causes" data-app="/?screen=causes">See what's slowing Houston now<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="go" href="/home?screen=causes" data-app="?screen=causes">See what's slowing Houston now<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
     </div>
     <div class="chips"><div class="wrap"><div class="chips-row" id="chips" role="tablist" aria-label="Traffic causes"></div></div></div>
@@ -558,7 +568,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         <span class="eyebrow">Directions</span>
         <h2 class="h2" id="h-routes">Routes that know why they're slow.</h2>
         <p class="lede">See what's slowing each route, and when to leave.</p>
-        <a class="go" href="/?screen=trip&amp;to=galleria&amp;from=downtown" data-app="/?screen=trip&amp;to=galleria&amp;from=downtown">Plan Downtown to the Galleria<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="go" href="/home?screen=trip&amp;to=galleria&amp;from=downtown" data-app="?screen=trip&amp;to=galleria&amp;from=downtown">Plan Downtown to the Galleria<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
       <div class="panel" aria-label="Route planner example">
         <span class="rp-from">From Downtown <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M5 12h14M13 6l6 6-6 6"/></svg> <b>The Galleria</b></span>
@@ -587,7 +597,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         <span class="eyebrow">Driver reports</span>
         <h2 class="h2" id="h-report">Saw it first? Tell everyone.</h2>
         <p class="lede">Warn every driver behind you in two taps.</p>
-        <a class="go" href="/?screen=map" data-app="/?screen=map">Report what you see<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="go" href="/home?screen=map" data-app="?screen=map">Report what you see<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
       <div class="panel" aria-label="Report example">
         <span class="lbl-s">What do you see?</span>
@@ -653,7 +663,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
           <b id="camNow">Connecting to a camera</b>
           <span id="camWhere">Baton Rouge stand-in · Louisiana DOTD</span>
         </div>
-        <div class="ctas"><button type="button" class="btn sec" id="nextCam">Show another camera</button><a class="go" href="/?screen=cameras" data-app="/?screen=cameras">Open live cams<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+        <div class="ctas"><button type="button" class="btn sec" id="nextCam">Show another camera</button><a class="go" href="/home?screen=cameras" data-app="?screen=cameras">Open live cams<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
       </div>
       <div class="feed">
         <div class="screen" id="screen">
@@ -701,7 +711,7 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
 
   <section class="features" id="features" data-stop="features" aria-labelledby="h-feat">
     <div class="wrap">
-      <div class="feat-head"><span class="eyebrow">All features</span><h2 class="h2" id="h-feat">Everything that gets you home sooner.</h2><a class="go" href="/?screen=where" data-app="/?screen=where">Search anywhere in Houston<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+      <div class="feat-head"><span class="eyebrow">All features</span><h2 class="h2" id="h-feat">Everything that gets you home sooner.</h2><a class="go" href="/home?screen=where" data-app="?screen=where">Search anywhere in Houston<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
       <div class="fgrid">
         <article class="fcard">
           <span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg></span>
@@ -762,8 +772,8 @@ footer.site .l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
       <h2 id="h-join">Houston first.</h2>
       <p>Built for Houston roads. Launching here first.</p>
       <div class="ctas">
-        <a class="btn pri" href="/?screen=where" data-app="/?screen=where">Open BlindSpot</a>
-        <a class="btn sec" href="/?demo=1" data-app="/?demo=1"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>Watch the 3-minute demo</a>
+        <a class="btn pri" href="/home?screen=where" data-app="?screen=where">Open BlindSpot</a>
+        <a class="btn sec" href="/home?demo=1" data-app="?demo=1"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>Watch the 3-minute demo</a>
       </div>
     </div>
   </section>

@@ -23,7 +23,8 @@ Then it tells you **when to leave** (the latest departure that still gets you th
 - Sample API JSON: [docs/contracts/](docs/contracts/) (also in `frontend/public/mock/`). `POST /plan`, `GET /plan/{id}` and `GET /live` follow these shapes, with two differences: times are naive Houston local time (no `-05:00`), and fields a feed doesn't provide yet (camera vehicle counts, `stale`) are `null`. Both endpoints also return a few extra fields
 - Routing wiring (which decision uses which data, priority rules): [docs/routing-wiring.md](docs/routing-wiring.md)
 - Website style guide: [docs/website-style.md](docs/website-style.md)
-- Landing page: `/home` (`frontend/public/home/index.html`), by Jason Qian from [qian-json/blindspot-landing](https://github.com/qian-json/blindspot-landing); its "Open the app" buttons go to `/`. Rebuild its map in that repo and copy `index.html` over
+- Landing page: `/` (`frontend/public/landing/index.html`, served by a rewrite in `frontend/next.config.ts`), by Jason Qian from [qian-json/blindspot-landing](https://github.com/qian-json/blindspot-landing); its "Open the app" buttons go to the app at `/home` (`/home?screen=where`, `/home?demo=1`, ...). Rebuild its map in that repo and copy `index.html` over
+- The app: `/home` (`frontend/app/home/page.tsx`). It used to be at `/`, so `/?screen=...` and `/?demo=...` redirect to `/home` with the same query, and `/about` (an old landing page address) redirects to `/`. The installed app (`app/manifest.ts`) and notification taps open `/home`; shared trips stay at `/share/<id>`
 - Data-source spikes (throwaway): [spikes/](spikes/)
 
 ## Run it
@@ -38,7 +39,7 @@ make dev       # API on :8000, app on :3000
 
 **Running the demo? Run `make transit` once first** on that machine. It downloads METRO's bus and rail timetable and builds `backend/data/transit.db` (not in git). Without it the Transit tab only says the timetable isn't loaded; everything else works.
 
-Open http://localhost:3000 and hit **▶ Demo**.
+Open http://localhost:3000/home and hit **▶ Demo** (http://localhost:3000 is the landing page).
 
 On first boot the backend builds the Houston road network and replays 8 weeks of synthetic history into the models. That takes a few seconds. To rebuild from scratch: `make seed`.
 
@@ -74,7 +75,7 @@ The **▶ Demo** button walks through this with narration. Click **Next** to go 
 11. **Downtown → Hobby by 5:45.** The Gulf Freeway is the usual way. With the crash on it, the route goes around: *"Rerouted around I-45 Gulf Fwy: crash reported"*.
 12. **Notify me when it clears.** Watch the crash road and jump to 6:30 PM: *"I-45 Gulf Fwy southbound has cleared"*, even though it's still rush hour.
 
-You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>`, `trip&to=hobby&from=downtown&by=17:45&safety=1` or `nearby&kind=fuel` (`ev`, `parking`). On a trip, the **Walk**, **Bike** and **Transit** tabs give walking and cycling directions and METRO bus and rail trips (`trip&to=galleria&from=downtown&travel=transit`; run `make transit` once to load the timetable).
+You can also use the app yourself: search a place and set **Leave now / Arrive by**, the **Faster ↔ Safer** slider and up to 2 extra stops (BlindSpot picks the order), then **Alert me**. On the live map, tap the time chips to see predicted traffic in 30 min to 2 h, filter by cause, and turn on the camera and rail-crossing layers. Tap any road for *Why it's slow*. Use **+15m** to move the simulated clock. The `/demo/*` endpoints in http://localhost:8000/docs fake every kind of live input: trains, sensor outages, traffic readings, incidents and whole feeds going down. You can also open a screen directly: `/home?screen=map`, `causes`, `alerts`, `where`, `cameras&area=Galleria`, `why&id=<segment id>`, `trip&to=hobby&from=downtown&by=17:45&safety=1` or `nearby&kind=fuel` (`ev`, `parking`). On a trip, the **Walk**, **Bike** and **Transit** tabs give walking and cycling directions and METRO bus and rail trips (`trip&to=galleria&from=downtown&travel=transit`; run `make transit` once to load the timetable).
 
 ### Places
 
@@ -114,7 +115,7 @@ CV_URL=http://localhost:8500 make dev
 
 The CV app on another computer: start it with `--host 0.0.0.0` and use `CV_URL=http://<its address>:8500`. The incident check needs an Apple-silicon Mac (M1-M4); elsewhere the CV app runs without it and the card says "Incident check off".
 
-**No CV app, or no Mac?** `make dev-cv` runs everything with a fake CV server (`backend/scripts/fake_cv.py`, standard library only) that serves the same stream from 57 real frames recorded from the Baton Rouge I-10 @ College Dr camera, each with the boxes the CV app's detector found. Its incident is scripted and labeled as a test: `curl -X POST localhost:8500/incident` starts one (possible, confirmed 4 s later, the camera sees a clear road again after 90 s, and BlindSpot clears it 2 min after that), `curl -X POST 'localhost:8500/incident?clear=1'` ends it early, or start it with `make cv-fake CV_FAKE_ARGS="--incident-after 20"`. A good trip to try while it's on: Midtown → Hobby Airport (`/?screen=trip&from=midtown&to=hobby`) goes around the Gulf Freeway.
+**No CV app, or no Mac?** `make dev-cv` runs everything with a fake CV server (`backend/scripts/fake_cv.py`, standard library only) that serves the same stream from 57 real frames recorded from the Baton Rouge I-10 @ College Dr camera, each with the boxes the CV app's detector found. Its incident is scripted and labeled as a test: `curl -X POST localhost:8500/incident` starts one (possible, confirmed 4 s later, the camera sees a clear road again after 90 s, and BlindSpot clears it 2 min after that), `curl -X POST 'localhost:8500/incident?clear=1'` ends it early, or start it with `make cv-fake CV_FAKE_ARGS="--incident-after 20"`. A good trip to try while it's on: Midtown → Hobby Airport (`/home?screen=trip&from=midtown&to=hobby`) goes around the Gulf Freeway.
 
 | Env var | Default | What |
 |---|---|---|
