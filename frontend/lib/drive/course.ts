@@ -5,7 +5,7 @@
  * No framework imports (unit-tested with `node --test`).
  */
 
-import type { Incident, LatLngTuple, Route, RouteCrossing, RouteStep } from "../types";
+import type { Incident, LatLngTuple, Route, RouteCrossing, RouteSegment, RouteStep } from "../types";
 import { distanceM, measure, pointAt, project, type Line, type Pt } from "./geo.ts";
 
 /** Within this of a turn's spot (or past it) the turn is done: the next one is up. */
@@ -38,7 +38,8 @@ export interface CourseSegment {
   /** False when the line doesn't follow this road (the directions took another way): it then only marks where it
    * would be (between its neighbours) */
   onLine: boolean;
-  /** Posted limit when the data has one (another branch adds it to route segments); null when unknown */
+  /** The segment's posted limit (`speed_limit_mph`, from OpenStreetMap); null when it isn't known. Never guessed from
+   * the road class or free-flow speed. */
   speedLimitMph: number | null;
   incident: Incident | null;
   closure: Incident | null;
@@ -63,9 +64,10 @@ export interface Course {
   timeline: [number, number][];
 }
 
-/** A segment's posted limit, read as optional: missing, null or nonsense is "unknown". */
-function speedLimit(seg: object): number | null {
-  const v = (seg as { speed_limit_mph?: unknown }).speed_limit_mph;
+/** A segment's posted limit as the API sends it (a whole number of mph, or null): missing, null or nonsense is
+ * "unknown". */
+function speedLimit(seg: Pick<RouteSegment, "speed_limit_mph">): number | null {
+  const v: unknown = seg.speed_limit_mph;
   return typeof v === "number" && Number.isFinite(v) && v > 0 && v < 100 ? Math.round(v) : null;
 }
 

@@ -176,6 +176,15 @@ function what(h: Hazard): string {
   return t || h.title;
 }
 
+/** Its words with the road it's on: " on Westheimer Rd" after them, or in place of their own "on the road" (a
+ * reported "Object on the road" is an "object on Westheimer Rd"). A title that names the road already is left be. */
+function placed(h: Hazard): string {
+  const title = what(h);
+  if (!h.road || title.toLowerCase().includes(h.road.toLowerCase())) return title;
+  if (/\bon the road\b/i.test(title)) return title.replace(/\bon the road\b/i, `on ${h.road}`);
+  return `${title} on ${h.road}`;
+}
+
 /** A hazard as the banner shows it (its distance goes next to it): "Crash on Westheimer Rd", "Drivers report: police
  * on Westheimer Rd". */
 export function hazardLabel(h: Hazard): string {
@@ -183,10 +192,9 @@ export function hazardLabel(h: Hazard): string {
     if (h.cleared) return `Train cleared on ${h.road}`;
     return h.blocked ? `Train blocking ${h.road}` : `Rail crossing on ${h.road}: trains often block it now`;
   }
-  const title = what(h);
-  const on = h.road && !title.toLowerCase().includes(h.road.toLowerCase()) ? ` on ${h.road}` : "";
+  const t = placed(h);
   const prefix = h.kind === "report" ? (h.demo ? "Demo report: " : "Drivers report: ") : "";
-  return `${prefix}${prefix ? lower(title) : title}${on}`;
+  return `${prefix}${prefix ? lower(t) : t}`;
 }
 
 /** Where a hazard is: a crossing (or a short road) "in half a mile"; an incident on a long road, whose spot on it we
@@ -220,12 +228,13 @@ export function hazardText(h: Hazard, d: number, left = d): string {
     case "closure":
       return `Road closure${on}, ${at}.`;
     case "report": {
-      if (h.demo) return `Demo report: ${lower(title)}${on}, ${at}.`;
+      // The demo's canned reports are never said to come from drivers
+      if (h.demo) return `Demo report: ${lower(placed(h))}, ${at}.`;
       const a = MASS.test(title) ? "" : /^[aeiou]/i.test(title) ? "an " : "a ";
-      return `Drivers report ${a}${lower(title)}${on}, ${at}.`;
+      return `Drivers report ${a}${lower(placed(h))}, ${at}.`;
     }
     default:
-      return `Heads up: ${lower(title)}${on}, ${at}.${lanes}`;
+      return `Heads up: ${lower(placed(h))}, ${at}.${lanes}`;
   }
 }
 
