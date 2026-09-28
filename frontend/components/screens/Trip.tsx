@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/app/AppContext";
+import { useStableStart } from "@/components/app/liveLocation";
 import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -372,9 +373,11 @@ export default function Trip() {
 
   const to = params?.to;
   // No `from`: where you are (the device's own spot, door to door; or the default place when location is off).
-  const origin: Location | undefined = params?.from ?? here?.start;
+  // Kept from when the trip opened, so moving a little doesn't re-plan it.
+  const start = useStableStart(here, paramsKey);
+  const origin: Location | undefined = params?.from ?? start?.start;
   const toName = params?.toName ?? placeName(places, to);
-  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : here?.startName) ?? "";
+  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : start?.startName) ?? "";
   const byOk = /^\d{2}:\d{2}$/.test(by);
   const sameSpot = origin !== undefined && to !== undefined && JSON.stringify(origin) === JSON.stringify(to) && !stops.length;
 
