@@ -2,7 +2,7 @@
 
 /** Small shared UI pieces in the design's style. Screens should build from these. */
 
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 
 import { parseSim } from "@/lib/format";
 import { CAUSE, C, ICON, LEVEL, type CauseKind, type Level } from "@/lib/theme";
@@ -42,35 +42,69 @@ export function Icon({
   );
 }
 
-/** The BlindSpot mark: a ring with a yellow "spot". */
-export function LogoMark({ size = 24 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke={C.ink} strokeWidth="2" />
-      <circle cx="15.5" cy="9.5" r="3.5" fill={C.moderate} />
-    </svg>
-  );
-}
+/** The brand gradient (red to purple to blue), the red of the spot and the dark fill of the pill (as on the app
+ * icon). Brand colors: the same in both themes. */
+const LOGO_RED = "#E8322F";
+const LOGO_FILL = "#131418";
+const LOGO_GRADIENT = `linear-gradient(90deg, ${LOGO_RED}, #7A3FA8 50%, #2F5BE0)`;
 
+/**
+ * The "BlindSpot" wordmark (Figtree 900) in a pill with a gradient outline, and a red spot in the "o".
+ * A white wordmark on the dark fill in both themes, like the app icon (`pill`: floating over the map, with a
+ * shadow). It hugs its text, even in a stretching flex column.
+ */
 export function Logo({ size = 18, pill = false }: { size?: number; pill?: boolean }) {
-  const inner = (
-    <>
-      <LogoMark size={size + 6} />
-      <span style={{ fontSize: size, fontWeight: 700, letterSpacing: "-0.02em" }}>BlindSpot</span>
-    </>
-  );
-  if (!pill) return <div className="flex items-center gap-2 text-ink">{inner}</div>;
-  return (
-    <div
-      className="flex h-9 items-center gap-2 rounded-[18px] border border-edge pr-3.5 pl-2 text-ink"
-      style={{ background: "rgba(17,19,24,0.92)" }}
+  const mark = (
+    <span
+      role="img"
+      aria-label="BlindSpot"
+      style={{
+        fontFamily: "var(--font-figtree), system-ui, sans-serif",
+        display: "inline-flex",
+        alignItems: "center",
+        flexShrink: 0,
+        width: "fit-content",
+        padding: "0.22em 0.6em 0.26em",
+        borderRadius: 999,
+        border: "0.09em solid transparent",
+        background: `linear-gradient(${LOGO_FILL}, ${LOGO_FILL}) padding-box, ${LOGO_GRADIENT} border-box`,
+        color: "#fff",
+        fontSize: size,
+        fontWeight: 900,
+        letterSpacing: "-0.02em",
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
     >
-      {inner}
+      BlindSp
+      <span style={{ position: "relative", display: "inline-block" }}>
+        o
+        <span
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "0.52em",
+            width: "0.17em",
+            height: "0.17em",
+            marginLeft: "-0.085em",
+            borderRadius: "50%",
+            background: LOGO_RED,
+          }}
+        />
+      </span>
+      t
+    </span>
+  );
+  if (!pill) return mark;
+  // As tall as the other floating controls (36 px), so it lines up with them
+  return (
+    <div className="flex h-9 w-fit items-center">
+      <div className="flex rounded-full shadow-[var(--shadow-logo)]">{mark}</div>
     </div>
   );
 }
 
-/** White circle with a dark cause icon (map markers, chips). */
+/** A disc with the cause's icon in its color: white on the light theme, grey on the dark one (chips, rows). */
 export function CauseDot({ kind, size = 24, ring }: { kind: CauseKind; size?: number; ring?: string }) {
   return (
     <span
@@ -79,15 +113,15 @@ export function CauseDot({ kind, size = 24, ring }: { kind: CauseKind; size?: nu
         width: size,
         height: size,
         background: C.marker,
-        boxShadow: ring ? `0 0 0 3px ${ring}` : undefined,
+        boxShadow: ring ? `0 0 0 3px ${ring}` : `inset 0 0 0 1px ${C.line}`,
       }}
     >
-      <Icon d={CAUSE[kind].icon} size={Math.round(size * 0.54)} color={C.onAccent} width={2.4} />
+      <Icon d={CAUSE[kind].icon} size={Math.round(size * 0.54)} color={CAUSE[kind].color} width={2.4} />
     </span>
   );
 }
 
-/** Rounded dark chip with a cause dot: "(o) Rush hour" */
+/** Rounded outlined chip with a cause dot: "(o) Rush hour" (light blue when active) */
 export function CauseChip({ kind, label, count, onClick, active }: { kind: CauseKind; label?: string; count?: number; onClick?: () => void; active?: boolean }) {
   const Tag = onClick ? "button" : "span";
   return (
@@ -95,8 +129,12 @@ export function CauseChip({ kind, label, count, onClick, active }: { kind: Cause
       type={onClick ? "button" : undefined}
       onClick={onClick}
       aria-pressed={onClick ? !!active : undefined}
-      className={`flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap text-ink ${onClick ? "cursor-pointer" : ""}`}
-      style={{ background: active ? C.cardHi : C.card, border: `1px solid ${active ? C.accent : "transparent"}` }}
+      className={`flex h-[34px] shrink-0 items-center gap-1.5 rounded-[17px] pr-3 pl-1.5 text-[13px] font-medium whitespace-nowrap ${onClick ? "cursor-pointer" : ""}`}
+      style={
+        active
+          ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` }
+          : { background: "transparent", color: C.ink, border: `1px solid ${C.edge}` }
+      }
     >
       <CauseDot kind={kind} />
       {label ?? CAUSE[kind].label}
@@ -105,7 +143,14 @@ export function CauseChip({ kind, label, count, onClick, active }: { kind: Cause
   );
 }
 
-/** Filter pill: white when selected, outlined otherwise (Alerts, Live cams). */
+/** Style of a selectable chip: light blue when selected (like Google's filter chips), outlined otherwise. */
+export function chipStyle(selected: boolean): CSSProperties {
+  return selected
+    ? { background: C.sel, color: C.onSel, border: `1px solid ${C.sel}` }
+    : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` };
+}
+
+/** Filter pill (Alerts, Live cams). */
 export function FilterChip({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
   return (
     <button
@@ -113,11 +158,7 @@ export function FilterChip({ label, selected, onClick }: { label: string; select
       onClick={onClick}
       aria-pressed={selected}
       className="h-9 shrink-0 cursor-pointer rounded-[18px] px-3.5 text-[14px] font-medium whitespace-nowrap"
-      style={
-        selected
-          ? { background: C.ink, color: "#11141A", border: `1px solid ${C.ink}` }
-          : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` }
-      }
+      style={chipStyle(selected)}
     >
       {label}
     </button>
@@ -128,7 +169,7 @@ export function FilterChip({ label, selected, onClick }: { label: string; select
 export function LevelPill({ level, text }: { level: Level; text?: string }) {
   const lv = LEVEL[level];
   return (
-    <span className="rounded-[10px] px-2.5 py-[3px] text-[12px] font-semibold whitespace-nowrap" style={{ background: lv.color, color: lv.fg }}>
+    <span className="rounded-[10px] px-2.5 py-[3px] text-[12px] font-semibold whitespace-nowrap" style={{ background: lv.bg, color: lv.fg }}>
       {text ?? `${lv.label} traffic`}
     </span>
   );
@@ -149,7 +190,7 @@ export function PillButton({
     variant === "primary"
       ? { background: C.accent, color: C.onAccent, border: 0 }
       : variant === "outline"
-        ? { background: "transparent", color: C.ink, border: `1.5px solid ${C.ink}` }
+        ? { background: "transparent", color: C.accent, border: `1px solid ${C.edgeStrong}` }
         : { background: "transparent", color: C.ink, border: `1px solid ${C.edgeStrong}` };
   return (
     <button
@@ -181,10 +222,10 @@ export function BackHeader({ onBack, label, right }: { onBack: () => void; label
   );
 }
 
-/** Dark card section: 16px padding, 18px radius. */
+/** Card section (outlined, like Google's cards): 16px padding, 16px radius. */
 export function Card({ children, className = "", style }: { children: ReactNode; className?: string; style?: CSSProperties }) {
   return (
-    <section className={`flex flex-col gap-2.5 rounded-[18px] bg-card p-4 ${className}`} style={style}>
+    <section className={`flex flex-col gap-2.5 rounded-[16px] border border-line bg-bg p-4 ${className}`} style={style}>
       {children}
     </section>
   );
@@ -198,8 +239,8 @@ export function RoundButton({ children, label, onClick, active }: { children: Re
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
-      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full border border-edge text-ink"
-      style={{ background: active ? C.cardHi : C.card, boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
+      className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink shadow-e1"
+      style={{ background: active ? C.sel : C.float, color: active ? C.onSel : C.ink }}
     >
       {children}
     </button>
@@ -208,7 +249,7 @@ export function RoundButton({ children, label, onClick, active }: { children: Re
 
 /** Screen title (28px bold) */
 export function Title({ children }: { children: ReactNode }) {
-  return <h1 className="m-0 text-[28px] leading-[1.1] font-bold tracking-[-0.02em]">{children}</h1>;
+  return <h1 className="m-0 text-[28px] leading-[1.1] font-extrabold tracking-[-0.02em]">{children}</h1>;
 }
 
 /** Relative "N min ago" in simulated time. */
@@ -219,4 +260,30 @@ export function ago(iso: string | null | undefined, now: string | null | undefin
   if (m < 60) return `${m} min ago`;
   const h = Math.floor(m / 60);
   return `${h} h ago`;
+}
+
+/** A small ⓘ button; the note behind it shows only when tapped, so fine print stays out of the way. */
+export function InfoToggle({ children, label = "About this" }: { children: ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={id}
+        aria-label={open ? `Hide: ${label}` : label}
+        title={label}
+        className="-m-1.5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0"
+      >
+        <Icon d={ICON.info} size={17} color={open ? C.ink : C.muted} />
+      </button>
+      {open && (
+        <p id={id} className="m-0 text-[12px] leading-snug text-muted">
+          {children}
+        </p>
+      )}
+    </div>
+  );
 }

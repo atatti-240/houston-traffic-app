@@ -5,9 +5,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.api.avoid import AvoidIn
 from app.conditions.live import Incident
 from app.plan_io import hazards
 from app.recommender import Recommendation, route_summary
+from app.routing.limits import road_rules_json
 from app.routing.router import Route
 
 SafetyWeight = Annotated[
@@ -24,7 +26,7 @@ class LatLng(BaseModel):
 Location = str | LatLng  # node id / place id, or a point that snaps to the nearest node
 
 
-class RouteRequest(BaseModel):
+class RouteRequest(AvoidIn):
     origin: Location
     destination: Location
     depart_at: datetime | None = Field(None, description="Defaults to the simulated now")
@@ -38,7 +40,7 @@ class RouteRequest(BaseModel):
     safety_weight: SafetyWeight = None
 
 
-class RecommendRequest(BaseModel):
+class RecommendRequest(AvoidIn):
     origin: Location
     destination: Location
     arrive_by: str = Field(
@@ -49,10 +51,13 @@ class RecommendRequest(BaseModel):
     buffer_min: int = Field(5, ge=0, le=60)
 
 
-class TripIn(BaseModel):
+class TripIn(AvoidIn):
     name: str = "My commute"
-    origin: str
-    destination: str
+    origin: Location
+    destination: Location
+    # A point's own name ("EaDo", a business), shown instead of the nearest place's.
+    origin_name: str | None = None
+    destination_name: str | None = None
     arrive_by: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$", description="24h HH:MM")
     days: list[Annotated[int, Field(ge=0, le=6)]] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4], min_length=1, description="Weekdays, Mon=0 .. Sun=6"
@@ -89,7 +94,7 @@ class StopIn(PlaceIn):
     fixed_order: bool = False
 
 
-class TripPlanRequest(BaseModel):
+class TripPlanRequest(AvoidIn):
     name: str | None = None
     device_id: str | None = None
     start: PlaceIn
@@ -131,7 +136,10 @@ class LiveTrafficRequest(BaseModel):
 
 class IncidentRequest(BaseModel):
     segment_id: str
-    kind: Literal["crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other"] = "crash"
+    kind: Literal[
+        "crash", "stall", "roadwork", "lane_closure", "closure", "event", "weather", "hazard", "other",
+        "flooding", "police", "pothole",
+    ] = "crash"
     title: str | None = None
     detail: str = Field("", max_length=300)
     minutes: float | None = Field(45, gt=0, le=600, description="How long until it clears; null = unknown")
@@ -191,12 +199,15 @@ def route_json(r: Route | None) -> dict | None:
         },
         "reasons": r.reasons,
         "hazards": hazards(r),
+        **road_rules_json(r),
         "geometry": r.geometry,
         "segments": [
             {
                 "id": s.id,
                 "name": s.name,
                 "road_class": s.road_class,
+                "speed_limit_mph": s.speed_limit_mph,
+                "toll": s.toll,
                 "enter_at": s.enter_at,
                 "travel_min": round(s.travel_s / 60, 2),
                 "train_delay_min": round(s.train_delay_s / 60, 2),

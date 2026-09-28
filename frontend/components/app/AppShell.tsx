@@ -16,18 +16,20 @@ import DemoRunner from "@/components/app/DemoRunner";
 import MapChrome from "@/components/app/MapChrome";
 import ClientTrafficMap from "@/components/map/ClientTrafficMap";
 import { Toasts } from "@/components/Notifications";
+import Nearby from "@/components/places/Nearby";
 import Alerts from "@/components/screens/Alerts";
 import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
 import Drive from "@/components/screens/Drive";
 import LiveMap from "@/components/screens/LiveMap";
 import Trip from "@/components/screens/Trip";
+import ModeTrip from "@/components/screens/Trip/ModeTrip";
 import WhereTo from "@/components/screens/WhereTo";
 import WhySlow from "@/components/screens/WhySlow";
 import { Icon } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime } from "@/lib/format";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, LEVEL } from "@/lib/theme";
 import type { AppNotification } from "@/lib/types";
 
 function ScreenView({ screen }: { screen: Screen }) {
@@ -36,7 +38,7 @@ function ScreenView({ screen }: { screen: Screen }) {
     case "where":
       return <WhereTo />;
     case "trip":
-      return <Trip key={JSON.stringify(screen.to)} />;
+      return screen.travel ? <ModeTrip key={JSON.stringify(screen.to)} /> : <Trip key={JSON.stringify(screen.to)} />;
     case "drive":
       return <Drive />;
     case "map":
@@ -49,6 +51,8 @@ function ScreenView({ screen }: { screen: Screen }) {
       return <WhySlow key={screen.id} />;
     case "alerts":
       return <Alerts />;
+    case "nearby":
+      return <Nearby key={`${screen.kind}-${screen.route ? "route" : "here"}`} />;
   }
 }
 
@@ -102,8 +106,7 @@ function DemoBar({ onDemo }: { onDemo: () => void }) {
   };
   return (
     <div
-      className="pointer-events-auto flex items-center gap-1 rounded-[18px] border border-edge py-1 pr-1 pl-3 text-[12px]"
-      style={{ background: "rgba(17,19,24,0.92)" }}
+      className="pointer-events-auto flex items-center gap-1 rounded-[18px] bg-float py-1 pr-1 pl-3 text-[12px] shadow-e1"
     >
       {clock && (
         <span className="font-num mr-1 text-soft" title="Simulated time">
@@ -154,10 +157,12 @@ function Shell() {
 
   const tabScreen = tabOf(screen) !== null;
   const isMap = screen.name === "map";
-  const isTrip = screen.name === "trip";
   const isDrive = screen.name === "drive";
+  // Screens shown as a sheet over the lower part of the map on a phone (the route or places above it).
+  const isSheet = screen.name === "trip" || screen.name === "nearby";
   // Phone screens that cover the whole map: take the map out of the tab order and the a11y tree.
-  const mapHidden = !isDesktop && !isMap && !isTrip && !isDrive;
+  // Driving draws its banner and controls straight over the map, so the map stays live.
+  const mapHidden = !isDesktop && !isMap && !isSheet && !isDrive;
 
   let panel: ReactNode;
   if (isDesktop) {
@@ -177,14 +182,15 @@ function Shell() {
       </div>
     );
   } else if (isDrive) {
+    // Phone driving: no sheet; the drive screen places its own cards over the map.
     panel = (
-      <div className="pointer-events-none absolute inset-0 z-[1000]">
+      <div className="pointer-events-none absolute inset-0 z-[1000] text-ink">
         <ScreenView screen={screen} />
       </div>
     );
-  } else if (isTrip) {
+  } else if (isSheet) {
     panel = (
-      <div className="absolute inset-x-0 bottom-0 z-[1000] flex max-h-[64dvh] flex-col rounded-t-3xl border-t border-line bg-bg" style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}>
+      <div className="absolute inset-x-0 bottom-0 z-[1000] flex max-h-[64dvh] flex-col rounded-t-3xl bg-bg shadow-up">
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ScreenView screen={screen} />
         </div>
@@ -204,8 +210,8 @@ function Shell() {
   const down = backendDown && (
     <div
       role="alert"
-      className={`absolute left-1/2 z-[1500] w-max max-w-[92vw] -translate-x-1/2 rounded-xl px-4 py-2 text-sm text-white ${isDesktop ? "top-16" : "bottom-[100px]"}`}
-      style={{ background: C.heavy }}
+      className={`absolute left-1/2 z-[1500] w-max max-w-[92vw] -translate-x-1/2 rounded-xl px-4 py-2 text-sm shadow-e2 ${isDesktop ? "top-16" : "bottom-[100px]"}`}
+      style={{ background: LEVEL.heavy.bg, color: LEVEL.heavy.fg }}
     >
       Can&apos;t reach the API. Start it with <code>make backend</code>.{" "}
       <button type="button" className="cursor-pointer underline" onClick={refresh}>

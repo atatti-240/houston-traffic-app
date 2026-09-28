@@ -30,6 +30,8 @@ class SegmentInfo:
     length_m: float
     free_flow_mph: float
     geometry: tuple[tuple[float, float], ...]
+    speed_limit_mph: int | None = None  # posted limit (OpenStreetMap); None = not known
+    toll: bool = False
 
     @property
     def length_miles(self) -> float:
@@ -93,6 +95,8 @@ def load_network(session: Session) -> Network:
             s.length_m,
             s.free_flow_mph,
             tuple(tuple(p) for p in s.geometry),
+            speed_limit_mph=s.speed_limit_mph,
+            toll=bool(s.toll),
         )
         for s in session.scalars(select(RoadSegment))
     }

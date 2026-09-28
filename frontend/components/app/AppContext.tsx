@@ -5,13 +5,16 @@
  * and notifications. Screens read everything through `useApp()`.
  *
  * Screens:  where (start) -> trip       map -> cameras       causes -> why       alerts
- * Tabs (bottom nav): map | causes | alerts.  "where" and "trip" are full-screen flows (no nav).
+ *           map / trip -> nearby (gas, EV chargers, parking)
+ * Tabs (bottom nav): map | causes | alerts.  "where", "trip" and "nearby" are full-screen flows (no nav).
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import type { PoiKind } from "@/components/places/store";
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
+import { parseTravel, type ModeRoute, type Travel } from "@/lib/modes";
 import { levelForScore, type Level } from "@/lib/theme";
 import type {
   AppNotification,
@@ -41,9 +44,17 @@ export type Screen =
       arriveBy?: string;
       /** Faster (0) .. Safer (1) */
       safety?: number;
+      /** A real place (search result, map dot, saved place): shows its card (hours, phone...) */
+      toPlace?: { osm?: string | null; address?: string | null; kind?: string | null };
+      /** "tolls", "highways" or "tolls,highways"; omitted = what this device chose last */
+      avoid?: string;
+      /** Walk / Bike / Transit tab; omitted = Drive */
+      travel?: Travel;
     }
   | { name: "drive"; to: Location; toName?: string; from?: Location; fromName?: string; safety?: number }
   | { name: "map" }
+  /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
+  | { name: "nearby"; kind: PoiKind; route?: LatLngTuple[]; routeTo?: string }
   | { name: "cameras"; area?: string; camId?: string }
   | { name: "causes" }
   | { name: "why"; id: string }
@@ -65,6 +76,8 @@ function parentOf(s: Screen): Screen {
   return { name: "map" };
 }
 
+const POI_KINDS: PoiKind[] = ["fuel", "ev", "parking"];
+
 /** Deep link for a screen: the params `parseScreen` reads. */
 function screenUrl(s: Screen): string {
   const q = new URLSearchParams({ screen: s.name });
@@ -78,9 +91,14 @@ function screenUrl(s: Screen): string {
     else q.set("to", `${s.to.lat},${s.to.lng}`); // a point: to=29.739,-95.463 (+ toName)
     if (typeof s.to !== "string" && s.toName) q.set("toName", s.toName);
     if (typeof s.from === "string") q.set("from", s.from);
+    else if (s.from) q.set("from", `${s.from.lat},${s.from.lng}`); // a point start too (+ fromName)
+    if (s.from && typeof s.from !== "string" && s.fromName) q.set("fromName", s.fromName);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
+    if (s.avoid !== undefined) q.set("avoid", s.avoid);
+    if (s.travel) q.set("travel", s.travel);
   }
+  if (s.name === "nearby") q.set("kind", s.kind);
   return `${window.location.pathname}?${q}`;
 }
 
@@ -98,14 +116,21 @@ function parseScreen(search: string): Screen | null {
   if (name === "map" || name === "causes" || name === "alerts" || name === "where") return { name };
   if (name === "cameras") return { name, area: q.get("area") ?? undefined, camId: q.get("cam") ?? undefined };
   if (name === "why" && id) return { name, id };
+  if (name === "nearby") {
+    const kind = q.get("kind") as PoiKind;
+    return { name, kind: POI_KINDS.includes(kind) ? kind : "fuel" };
+  }
   if (name === "trip" && q.get("to"))
     return {
       name,
       to: toLocation(q.get("to") as string),
       toName: q.get("toName") ?? undefined,
-      from: q.get("from") ?? undefined,
+      from: q.get("from") ? toLocation(q.get("from") as string) : undefined,
+      fromName: q.get("fromName") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      avoid: q.get("avoid") ?? undefined,
+      travel: parseTravel(q.get("travel")),
     };
   return null;
 }
@@ -153,6 +178,8 @@ export interface MapScene {
   /** Route choices (Trip): the unselected ones dashed with a label bubble; tapping one calls pickRoute */
   routes?: { id: string; geometry: LatLngTuple[]; label: string; time?: string; selected: boolean }[];
   pickRoute?: (id: string) => void;
+  /** Walk / bike / transit route (Trip's other tabs) */
+  modeRoute?: ModeRoute;
 }
 
 export interface MapLayers {
@@ -175,6 +202,10 @@ export interface Here {
   level: Level;
   /** true when it came from the device's location */
   fromDevice: boolean;
+  /** Where a trip from here starts: the device's own spot (door to door), or the named place when location is off */
+  start: Location;
+  /** What that start is called: "Your location", or the place's name */
+  startName: string;
 }
 
 export interface Recent {
@@ -183,6 +214,9 @@ export interface Recent {
   address?: string | null;
   to: Location;
   at: number;
+  /** A real place's OpenStreetMap id (its card shows on the trip) */
+  osm?: string | null;
+  kind?: string | null;
 }
 
 // ---- context -------------------------------------------------------------------------------------
@@ -360,6 +394,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [refresh]);
 
+  // The camera AI confirms (or clears) incidents in real time, even while the demo clock stands still:
+  // fetch slowdowns / alerts / live again when its set of incidents changes.
+  const cvKey = useRef<string | null>(null);
+  useEffect(() => {
+    const poll = () =>
+      api
+        .cvStatus()
+        .then((s) => {
+          if (cvKey.current !== null && s.incidents_key !== cvKey.current) refresh();
+          cvKey.current = s.incidents_key;
+        })
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
   // Responses that arrive after a newer request started are dropped (`current`).
   const clockMinute = clock?.now.slice(0, 16);
   useEffect(() => {
@@ -500,6 +551,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       street: base.address ?? base.name,
       level,
       fromDevice: !!device,
+      start: device ? { lat: device.lat, lng: device.lng } : base.id,
+      startName: device ? "Your location" : base.name,
     };
   }, [places, segments, liveLevels, device]);
 

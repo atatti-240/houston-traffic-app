@@ -34,7 +34,9 @@ def test_rush_hour_trip_takes_longer_than_midday(router):
 
 def test_avoids_crossing_during_blockage_window_but_uses_it_at_noon(router):
     rush, _ = router.route("eastend", "medcenter", MON(7, 35))
-    noon, _ = router.route("eastend", "medcenter", MON(12))
+    # 11 AM: at 12 the Telephone Rd + freeway route wins by ~0.1 min once Old Spanish Trail's
+    # Vision Zero crash risk counts.
+    noon, _ = router.route("eastend", "medcenter", MON(11))
     assert "x_cullen" not in {c.id for c in rush.crossings}
     assert "x_cullen" in {c.id for c in noon.crossings}
     assert any("Cullen" in r and "train" in r for r in rush.reasons)
@@ -79,7 +81,9 @@ def test_unknown_node_raises(router):
 
 
 def test_safe_path_explains_itself_without_repeating_roads(router):
-    safe, _ = router.route("downtown", "hobby", MON(17, 10), safe_path=True)
+    # From Midtown: from Downtown the detour streets (Harrisburg, Telephone) are on the Vision Zero
+    # High Injury Network, so Safe Path now stays on the Gulf Fwy.
+    safe, _ = router.route("midtown", "hobby", MON(17, 10), safe_path=True)
     assert any(r.startswith("Safe Path:") and "less crash exposure" in r for r in safe.reasons)
     avoided = [r.split(":")[0] for r in safe.reasons if r.startswith("Avoided")]
     assert len(avoided) == len(set(avoided))

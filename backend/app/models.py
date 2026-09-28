@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.routing.avoid import Avoid
 
 
 class Node(Base):
@@ -34,6 +35,9 @@ class RoadSegment(Base):
     length_m: Mapped[float] = mapped_column(Float)
     free_flow_mph: Mapped[float] = mapped_column(Float)
     geometry: Mapped[list] = mapped_column(JSON)  # [[lat, lng], ...]
+    # From OpenStreetMap (app/seed/road_limits.json). None = the limit isn't known.
+    speed_limit_mph: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    toll: Mapped[bool | None] = mapped_column(Boolean, default=False)
 
     @property
     def length_miles(self) -> float:
@@ -86,6 +90,22 @@ class ScoreEntry(Base):
     n_obs: Mapped[int] = mapped_column(Integer, default=0)
 
 
+def point_key(lat: float, lng: float) -> str:
+    """How a saved trip stores a point (a searched address, a dropped pin...): "lat,lng"."""
+    return f"{lat:.6f},{lng:.6f}"
+
+
+def parse_point(value: str) -> tuple[float, float] | None:
+    """(lat, lng) of a stored point, None for a place id."""
+    lat, sep, lng = value.partition(",")
+    if not sep:
+        return None
+    try:
+        return float(lat), float(lng)
+    except ValueError:
+        return None
+
+
 class Trip(Base):
     """A saved commute the scheduler watches."""
 
@@ -94,14 +114,20 @@ class Trip(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String)
-    origin: Mapped[str] = mapped_column(String)  # node id
-    destination: Mapped[str] = mapped_column(String)  # node id
+    origin: Mapped[str] = mapped_column(String)  # place id, or "lat,lng" for a point (point_key)
+    destination: Mapped[str] = mapped_column(String)  # place id, or "lat,lng" for a point
+    # A point's own name ("EaDo", a business): alerts and the app show it. None on older rows.
+    origin_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination_name: Mapped[str | None] = mapped_column(String, nullable=True)
     arrive_by: Mapped[str] = mapped_column(String)  # "HH:MM"
     days: Mapped[str] = mapped_column(String, default="0,1,2,3,4")  # weekday numbers, Mon=0
     safe_path: Mapped[bool] = mapped_column(Boolean, default=False)
     # 0 = fastest ... 1 = safest. None = derive from safe_path (older rows).
     safety_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Avoid tolls / highways (app.routing.avoid). None = off (older rows).
+    avoid_tolls: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    avoid_highways: Mapped[bool | None] = mapped_column(Boolean, default=False)
 
     @property
     def weight(self) -> float:
@@ -112,6 +138,10 @@ class Trip(Base):
     @property
     def day_list(self) -> list[int]:
         return [int(d) for d in self.days.split(",") if d.strip()]
+
+    @property
+    def avoid(self) -> Avoid:
+        return Avoid(bool(self.avoid_tolls), bool(self.avoid_highways))
 
 
 class TripState(Base):
@@ -173,3 +203,14 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String)  # "leave_now" | "leave_earlier" | "info"
     title: Mapped[str] = mapped_column(String)
     body: Mapped[str] = mapped_column(String)
+
+
+class GeoCache(Base):
+    """Answers from the free geocoder (OpenStreetMap's Nominatim), kept so we ask it as little as
+    possible and still have something to show when it's down. See app/geo/nominatim.py."""
+
+    __tablename__ = "geo_cache"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)  # "search|..." / "place|W123"
+    value: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)  # None: nothing found
+    fetched_at: Mapped[datetime] = mapped_column(DateTime)  # real UTC time, not the simulated clock

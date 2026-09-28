@@ -9,12 +9,14 @@
  * route's line, times and steps change in place when they come. One that would fail again isn't asked again.
  *
  * The pick lives in this screen's browser history entry (and its URL, ?route=<id>), so Back, Forward and a reload
- * keep it; a new trip starts on the best route.
+ * keep it; a new trip starts on the best route. To or from a point, when the trip is set to Fastest, that's the
+ * fastest door to door: the routes come ordered by the time on our main roads, so once every route's directions have
+ * answered, the fastest of the ones with door-to-door times is picked (one whose directions failed can't win).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { DirectionsError, routeDirections, type DirectionsPatch } from "@/lib/directions";
+import { DirectionsError, routeDirections, shownMinutes, type DirectionsPatch } from "@/lib/directions";
 import type { Location, Route, RouteDirections } from "@/lib/types";
 
 const HISTORY_FIELD = "bsRoute";
@@ -68,8 +70,16 @@ export interface RouteChoiceState {
   roughTimes: (r: Route) => boolean;
 }
 
-export function useRouteChoices(routes: Route[], origin: Location | undefined, to: Location | undefined): RouteChoiceState {
+export function useRouteChoices(
+  routes: Route[],
+  origin: Location | undefined,
+  to: Location | undefined,
+  /** Set to Fastest: default to the fastest door to door (to or from a point) */
+  fastest = false,
+): RouteChoiceState {
   const [picked, setPicked] = useState<string | null>(initialPick);
+  // The route picked for you by door-to-door time, by trip: kept while a refetch's times are on the way.
+  const [auto, setAuto] = useState<{ trip: string; id: string } | null>(null);
   // By trip, route and departure: the same roads leaving at another time have other times.
   const [patches, setPatches] = useState<Record<string, DirectionsPatch>>({});
   const [tries, setTries] = useState<Record<string, Tries>>({});
@@ -104,7 +114,15 @@ export function useRouteChoices(routes: Route[], origin: Location | undefined, t
       }),
     [routes, patches, tries, keyOf, failedNote],
   );
-  const selected = merged.find((r) => r.id === picked) ?? merged[0];
+  // Door-to-door times all in (none still on the way): the fastest of them, unless the first has none to compare.
+  let fastestId: string | null = null;
+  if (fastest && timed && merged[0]?.id && !merged.some((r) => r.directions?.status === "pending")) {
+    const door = (r: Route) => r.directions?.status !== "unavailable";
+    if (door(merged[0])) fastestId = merged.filter(door).reduce((a, r) => (shownMinutes(r) < shownMinutes(a) ? r : a), merged[0]).id ?? null;
+  }
+  if (fastestId && (auto?.trip !== trip || auto.id !== fastestId)) setAuto({ trip, id: fastestId });
+  const autoId = fastestId ?? (fastest && auto?.trip === trip ? auto.id : null);
+  const selected = merged.find((r) => r.id === picked) ?? merged.find((r) => r.id === autoId) ?? merged[0];
 
   useEffect(() => {
     if (origin === undefined || to === undefined) return;

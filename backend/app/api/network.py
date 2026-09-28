@@ -35,6 +35,8 @@ def segments(svc: Services = Depends(get_services)):
             "to_node": s.to_node,
             "miles": round(s.length_miles, 2),
             "free_flow_mph": s.free_flow_mph,
+            "speed_limit_mph": s.speed_limit_mph,
+            "toll": s.toll,
             "geometry": [list(p) for p in s.geometry],
         }
         for s in svc.network.segments.values()
@@ -102,9 +104,14 @@ def crossings(at: datetime | None = None, svc: Services = Depends(get_services))
     return {"at": t, "crossings": out}
 
 
+def live_feed(svc: Services, camera_id: str) -> dict | None:
+    """The camera's live AI feed (a CV app camera standing in for it), or None."""
+    return svc.cv.summary(camera_id) if svc.cv is not None else None
+
+
 @router.get("/cameras")
 def cameras(svc: Services = Depends(get_services)):
-    return svc.sources.cameras.cameras()
+    return [{**cam, "live_feed": live_feed(svc, cam["id"])} for cam in svc.sources.cameras.cameras()]
 
 
 def _congestion_label(score: float | None) -> str:
@@ -184,6 +191,9 @@ def live(svc: Services = Depends(get_services)):
                 "mock": cam.get("mock", False),
                 # What the camera's road looks like right now (area, direction, level, why).
                 **camera_status(engine, svc.network, cam),
+                # Live video, vehicle boxes and the incident check from the CV app (a Baton Rouge
+                # camera standing in for this one), or None. Counts above stay Houston-only.
+                "live_feed": live_feed(svc, cam["id"]),
             }
         )
 
@@ -228,7 +238,7 @@ def live(svc: Services = Depends(get_services)):
         "cameras": cameras,
         "incidents": incidents,
         "travel_times": travel_times,
-        "high_injury_segments_url": None,  # Vision Zero layer: not wired yet
+        "high_injury_segments_url": "/hazards/high-injury",  # Vision Zero HIN 2025, see api/hazards.py
         "feeds": {
             f.name: {"ok": f.ok, "records": f.records, "error": f.error} for f in view.live.feeds.values()
         },

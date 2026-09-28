@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Maps show you traffic. BlindSpot shows you why, and when to leave.",
     start_url: "/",
     display: "standalone",
-    background_color: "#111318",
-    theme_color: "#111318",
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png" },

@@ -126,10 +126,12 @@ def test_closure_changes_the_stop_order(world):
 def test_live_blocked_crossing_is_avoided_by_the_plan(world):
     network, sources, router, clock = world
     stops = [stop(network, "downtown")]
-    before = plan_trip(router, place(network, "eastend"), stops, NOW, NOW, safety_weight=1.0)
+    # Halfway to Safer: at full Safer the plan would rather wait out the train than detour via
+    # Old Spanish Trail, which is on the Vision Zero High Injury Network.
+    before = plan_trip(router, place(network, "eastend"), stops, NOW, NOW, safety_weight=0.5)
     assert "x_navigation" in {c.id for c in before.legs[0].route.crossings}
     sources.trains.inject("x_navigation", NOW, 30)
-    after = plan_trip(router, place(network, "eastend"), stops, NOW, NOW, safety_weight=1.0)
+    after = plan_trip(router, place(network, "eastend"), stops, NOW, NOW, safety_weight=0.5)
     assert "x_navigation" not in {c.id for c in after.legs[0].route.crossings}
     assert any(r.startswith("Rerouted around Navigation") for r in after.legs[0].route.reasons)
 
