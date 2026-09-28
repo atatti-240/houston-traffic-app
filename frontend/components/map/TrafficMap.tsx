@@ -1,6 +1,6 @@
 "use client";
 
-/** The live traffic map (Leaflet, dark): road lines by level, cause markers with the design's
+/** The live traffic map (Leaflet over the street map): road lines by level, cause markers with the design's
  * tooltip card, plus whatever the current screen put in the map scene (route, road, points). */
 
 import "leaflet/dist/leaflet.css";
@@ -12,10 +12,14 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import { useDrive } from "@/components/drive/store";
 import LiveLocation from "@/components/map/LiveLocation";
+import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
+import ModeRouteLayer from "@/components/map/ModeRouteLayer";
+import PinConnectors, { scenePins } from "@/components/map/PinConnectors";
 import VectorBasemap from "@/components/map/VectorBasemap";
-import { camName } from "@/lib/format";
-import { CAUSE, C, LEVEL, type CauseKind } from "@/lib/theme";
+import PlacesLayer from "@/components/places/PlacesLayer";
+import { camName, hasLiveVideo } from "@/lib/format";
+import { CAUSE, CLOSED, C, LEVEL, SHADOW, tint, type CauseKind } from "@/lib/theme";
 import type { LatLngTuple, Slowdown } from "@/lib/types";
 
 export const HOUSTON_CENTER: LatLngTuple = [29.7604, -95.3698];
@@ -87,8 +91,9 @@ function ClickAway() {
   return null;
 }
 
+/** A flat disc (white on the light map, grey on the dark one) with the cause's icon in its color. */
 function markerIcon(kind: CauseKind, selected: boolean, ring: string) {
-  const size = selected ? 38 : 32;
+  const size = selected ? 36 : 30;
   const html = renderToStaticMarkup(
     <span
       style={{
@@ -96,15 +101,15 @@ function markerIcon(kind: CauseKind, selected: boolean, ring: string) {
         height: size,
         borderRadius: "50%",
         background: C.marker,
-        border: `2px solid ${C.onAccent}`,
+        border: `1px solid ${C.markerLine}`,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        boxShadow: selected ? `0 0 0 3px ${ring}, 0 3px 10px rgba(0,0,0,0.6)` : "0 2px 8px rgba(0,0,0,0.6)",
+        boxShadow: selected ? `0 0 0 3px ${ring}, ${SHADOW[2]}` : SHADOW[1],
       }}
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.onAccent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={CAUSE[kind].color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
         <path d={CAUSE[kind].icon} />
       </svg>
     </span>,
@@ -117,10 +122,20 @@ export function CauseCard({ s, onWhy }: { s: Slowdown; onWhy?: () => void }) {
   const kind = (s.kind ?? "rush") as CauseKind;
   const lv = LEVEL[s.level];
   return (
-    <div style={{ width: 248, display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-grotesk), system-ui, sans-serif" }}>
+    <div style={{ width: 248, display: "flex", flexDirection: "column", gap: 6, fontFamily: "inherit" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 22, height: 22, borderRadius: 11, background: C.marker, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.onAccent} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            background: tint(CAUSE[kind].color, 18),
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={CAUSE[kind].color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <path d={CAUSE[kind].icon} />
           </svg>
         </span>
@@ -132,7 +147,16 @@ export function CauseCard({ s, onWhy }: { s: Slowdown; onWhy?: () => void }) {
       </div>
       <div style={{ fontSize: 13, lineHeight: 1.4, color: C.muted }}>{s.detail}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
-        <span style={{ padding: "3px 10px", borderRadius: 10, fontSize: 12, fontWeight: 600, background: lv.color, color: lv.fg }}>
+        <span
+          style={{
+            padding: "3px 10px",
+            borderRadius: 10,
+            fontSize: 12,
+            fontWeight: 600,
+            background: s.closed ? CLOSED.bg : lv.bg,
+            color: s.closed ? CLOSED.fg : lv.fg,
+          }}
+        >
           {s.closed ? "Closed" : `${lv.label} traffic`}
         </span>
         <span className="font-num" style={{ fontSize: 15, color: C.ink }}>
@@ -276,6 +300,8 @@ export default function TrafficMap({
   // Driving: the live GPS dot (LiveLocation) takes the place of the static one, and a tap on the map only moves it
   // (no leaving the drive for a road's or a camera's screen)
   const driving = useDrive((s) => s.active);
+  // The live dot shows only once driving has a fix: until then the static one stays
+  const liveDot = useDrive((s) => s.active && s.fix !== null);
   return (
     <MapContainer
       center={center ?? HOUSTON_CENTER}
@@ -292,16 +318,15 @@ export default function TrafficMap({
       <VectorBasemap places={interactive} />
       {interactive && <Register />}
       {interactive && <ClickAway />}
-      {interactive && <FitScene fit={scene?.fit} padding={scene?.fitPadding} />}
+      {/* A route's fit takes in its pins too: an off-road one can sit past the line's end */}
+      {interactive && <FitScene fit={scene?.fit && [...scene.fit, ...scenePins(scene)]} padding={scene?.fitPadding} />}
       {!interactive && center && <Recenter center={center} zoom={zoom} />}
 
-      {/* Traffic: each direction offset to its right, dark casing under the colored line */}
+      {/* Traffic: each direction offset to its right, a thin casing (the map's halo color) under the colored line */}
       {segments.map((s) => {
         const geom = offsetLine(s.geometry);
         const w = s.road_class === "freeway" ? 5 : 3.5;
-        return (
-          <Polyline key={`k-${s.id}`} positions={geom} pathOptions={{ color: "#0E1015", weight: w + 3, opacity: 0.9 }} interactive={false} />
-        );
+        return <Polyline key={`k-${s.id}`} positions={geom} pathOptions={{ color: C.halo, weight: w + 3, opacity: 0.9 }} interactive={false} />;
       })}
       {segments.map((s) => {
         const geom = offsetLine(s.geometry);
@@ -327,27 +352,32 @@ export default function TrafficMap({
       {/* Selected road (Why it's slow) */}
       {scene?.highlight && (
         <>
-          <Polyline positions={offsetLine(scene.highlight)} pathOptions={{ color: "#FFFFFF", weight: 14, opacity: 0.18 }} interactive={false} />
-          <Polyline positions={offsetLine(scene.highlight)} pathOptions={{ color: "#FFFFFF", weight: 3, opacity: 0.9 }} interactive={false} />
+          <Polyline positions={offsetLine(scene.highlight)} pathOptions={{ color: C.ink, weight: 14, opacity: 0.14 }} interactive={false} />
+          <Polyline positions={offsetLine(scene.highlight)} pathOptions={{ color: C.ink, weight: 2.5, opacity: 0.85 }} interactive={false} />
         </>
       )}
 
-      {/* Routes: own panes over the traffic, the dashed alternative always under the main route (within a pane,
-          whichever line is added last is drawn on top) */}
+      {/* Routes: own panes over the traffic, the grey alternative always under the main route (within a pane,
+          whichever line is added last is drawn on top). Blue with a darker casing, like Google Maps. */}
       <Pane name="alt-route" style={{ zIndex: 410 }}>
         {scene?.alternative && (
-          <Polyline positions={scene.alternative} pathOptions={{ color: C.muted, weight: 6, opacity: 0.7, dashArray: "8 8" }} interactive={false} />
+          <>
+            <Polyline positions={scene.alternative} pathOptions={{ color: C.halo, weight: 9, opacity: 1 }} interactive={false} />
+            <Polyline positions={scene.alternative} pathOptions={{ color: C.alt, weight: 6, opacity: 1 }} interactive={false} />
+          </>
         )}
       </Pane>
       {interactive && <RouteOptions />}
       <Pane name="route" style={{ zIndex: 420 }}>
         {(scene?.legs ?? (scene?.route ? [scene.route] : [])).map((leg, i) => (
           <span key={`r-${i}`}>
-            <Polyline positions={leg} pathOptions={{ color: "#0E1015", weight: 12, opacity: 0.9 }} interactive={false} />
-            <Polyline positions={leg} pathOptions={{ color: C.accent, weight: 7, opacity: 1 }} interactive={false} />
+            <Polyline positions={leg} pathOptions={{ color: C.routeCasing, weight: 10, opacity: 1 }} interactive={false} />
+            <Polyline positions={leg} pathOptions={{ color: C.route, weight: 6, opacity: 1 }} interactive={false} />
           </span>
         ))}
       </Pane>
+      {scene && <PinConnectors lines={scene.legs ?? (scene.route ? [scene.route] : [])} points={scene.points} />}
+      <ModeRouteLayer route={scene?.modeRoute} />
 
       {/* Crossings layer */}
       {interactive && layers.crossings &&
@@ -358,9 +388,9 @@ export default function TrafficMap({
             radius={c.status === "blocked" ? 9 : 6}
             className={c.status === "blocked" ? "pulse" : undefined}
             pathOptions={{
-              color: c.status === "blocked" ? C.heavy : "#0E1015",
+              color: c.status === "blocked" ? C.heavy : C.halo,
               weight: 2,
-              fillColor: c.status === "blocked" ? "#11141A" : C.moderate,
+              fillColor: c.status === "blocked" ? C.stopped : C.moderate,
               fillOpacity: 1,
             }}
           >
@@ -376,29 +406,34 @@ export default function TrafficMap({
           <CircleMarker
             key={`cam-${cam.id}`}
             center={[cam.lat, cam.lng]}
-            radius={6}
+            radius={hasLiveVideo(cam.live_feed) ? 7 : 6}
             bubblingMouseEvents={false}
-            pathOptions={{ color: "#0E1015", weight: 2, fillColor: C.accent, fillOpacity: 1 }}
+            // Red: live video from the camera AI
+            pathOptions={{ color: C.halo, weight: 2, fillColor: hasLiveVideo(cam.live_feed) ? C.heavy : C.accent, fillOpacity: 1 }}
             eventHandlers={{ click: () => go({ name: "cameras", area: cam.area, camId: cam.id }) }}
           >
-            <Tooltip className="dark-tip">📷 {camName(cam.name)}</Tooltip>
+            <Tooltip className="dark-tip">
+              📷 {camName(cam.name)}
+              {hasLiveVideo(cam.live_feed) ? " · live AI video" : ""}
+            </Tooltip>
           </CircleMarker>
         ))}
 
       {/* Place labels */}
       {places.map((p) => (
-        <CircleMarker key={`p-${p.id}`} center={[p.lat, p.lng]} radius={2} interactive={false} pathOptions={{ color: "#9CA3B0", weight: 0, fillColor: "#9CA3B0", fillOpacity: 0.8 }}>
+        <CircleMarker key={`p-${p.id}`} center={[p.lat, p.lng]} radius={2} interactive={false} pathOptions={{ color: C.muted, weight: 0, fillColor: C.muted, fillOpacity: 0.8 }}>
           <Tooltip permanent direction="right" offset={[4, 0]} className="place-label">
             {p.name.replace(" / Uptown", "")}
           </Tooltip>
         </CircleMarker>
       ))}
 
-      {/* You are here */}
-      {here && !(interactive && driving) && (
+      {/* You are here: Google's blue dot, the same in both themes. While driving with a GPS fix, LiveLocation draws it
+          instead (so there's always exactly one) */}
+      {here && !(interactive && liveDot) && (
         <>
-          <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#3B6FD1", weight: 0, fillColor: "#3B6FD1", fillOpacity: 0.25 }} />
-          <CircleMarker center={[here.lat, here.lng]} radius={6} interactive={false} pathOptions={{ color: "#FFFFFF", weight: 2, fillColor: "#6E9BFF", fillOpacity: 1 }} />
+          <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#4285f4", weight: 0, fillColor: "#4285f4", fillOpacity: 0.2 }} />
+          <CircleMarker center={[here.lat, here.lng]} radius={7} interactive={false} pathOptions={{ color: "#ffffff", weight: 2.5, fillColor: "#1a73e8", fillOpacity: 1 }} />
         </>
       )}
 
@@ -410,7 +445,7 @@ export default function TrafficMap({
             center={[pt.lat, pt.lng]}
             radius={pt.kind === "stop" ? 8 : 9}
             pathOptions={{
-              color: "#FFFFFF",
+              color: "#ffffff",
               weight: 3,
               fillColor: pt.kind === "start" ? C.light : pt.kind === "end" ? C.heavy : C.accent,
               fillOpacity: 1,
@@ -426,6 +461,11 @@ export default function TrafficMap({
       </Pane>
 
       {interactive && !driving && <CauseMarkers />}
+      {/* Home, Work, favorites, the nearby list, and the card of any place you tap (not while driving: its card
+          would leave the drive for a trip) */}
+      {interactive && !driving && <PlacesLayer />}
+      {/* Driver reports stay on while driving: hazards ahead, and their card doesn't leave the drive */}
+      {interactive && <Reports />}
       {interactive && <LiveLocation />}
     </MapContainer>
   );

@@ -1,0 +1,9 @@
+stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station
+A1,101,Main St @ Elgin St,29.7400,-95.3800,,
+A2,102,Main St @ Gray St,29.7450,-95.3780,,
+A3,103,Main St @ Pease St,29.7500,-95.3760,,
+A4,104,Main St @ Dallas St,29.7550,-95.3740,,
+B1,201,Pease St @ Travis St,29.7502,-95.3770,,
+B2,202,Pease St @ Chenevert St,29.7520,-95.3650,,
+B3,203,Pease St @ Hamilton St,29.7540,-95.3550,,
+STN,,Main Street Station,29.7475,-95.3770,1,

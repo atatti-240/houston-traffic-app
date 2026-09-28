@@ -15,6 +15,7 @@ from datetime import datetime
 from app.causes import INCIDENT_CAUSE, RUSH_WINDOWS
 from app.conditions.provider import ConditionsView
 from app.graph import Network
+from app.routing.avoid import avoid_notes
 from app.routing.router import (
     ALT_PENALTY,
     LIVE_REASON_EXTRA,
@@ -61,8 +62,9 @@ def route_options(
     different enough); `naive()` (the traffic-only route, only asked for when a route is added
     here) explains the extra ones.
 
-    NOTE: the extra searches only know the safety weight. Any other option given to
-    router.route() (say, roads to avoid) has to be passed on to router._search here too."""
+    The extra searches use the safety weight and the router's own options: a router from
+    app.routing.avoid.avoiding() stays off tolls / highways here too (router._search reads them).
+    Any other option given to router.route() has to be passed on to router._search here too."""
     net = router.network
     kept, seen = [best], [best]
 
@@ -92,7 +94,7 @@ def route_options(
             continue
         cand = router.evaluate(ids, best.origin, best.destination, best.depart_at, best.safety_weight, view)
         if consider(cand) and naive is not None:
-            cand.reasons = _dedupe_live(router._reasons(cand, naive(), view))
+            cand.reasons = _dedupe_live(avoid_notes(cand, router.avoid) + router._reasons(cand, naive(), view))
     return kept
 
 

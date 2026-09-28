@@ -8,6 +8,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useApp } from "@/components/app/AppContext";
+import CausesReports from "@/components/reports/CausesReports";
 import { Card, CauseChip, CauseDot, Icon, LevelDot, Title, ago } from "@/components/ui";
 import { fmtTime } from "@/lib/format";
 import { CAUSE, CAUSE_ORDER, C, ICON, type CauseKind } from "@/lib/theme";
@@ -247,6 +248,7 @@ export default function Causes() {
               ))}
             </Section>
           )}
+          <CausesReports />
 
           {usual.length > 0 && (
             <Section id="usual-h" title="Usual for this time" count={usual.length} caption={when ? `${isRushHour ? "Rush hour: busy" : "Busy"}, but normal for ${when}` : undefined}>

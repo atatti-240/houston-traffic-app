@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui";
 import { C, ICON } from "@/lib/theme";
 import type { LiveConditions } from "@/lib/types";
 
+import { EXIT_FULL, useFullscreen } from "./fullscreen";
 import { createScene, frame, showsTrain, step, VIEW_H, VIEW_W, type RailCar } from "./scene";
 
 export type LiveCam = LiveConditions["cameras"][number];
@@ -20,15 +21,7 @@ export interface SimBase {
   speed: number;
 }
 
-
-const EXIT_FULL = "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5";
 const LIGHT_OFF = "#3A2A2C";
-
-type FsDoc = Document & {
-  webkitFullscreenElement?: Element | null;
-  webkitExitFullscreen?: () => void;
-};
-type FsEl = HTMLElement & { webkitRequestFullscreen?: () => void };
 
 function fmtClock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], {
@@ -116,14 +109,12 @@ export default function CameraFeed({
   const [paused, setPaused] = useState(false);
   const [frozenAt, setFrozenAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [nativeFull, setNativeFull] = useState(false);
-  const [pseudoFull, setPseudoFull] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
-  const full = nativeFull || pseudoFull;
   // Letterboxed (full screen), an SVG shows what lies outside its viewBox: clip to the frame.
   const clip = `camclip${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   const cardRef = useRef<HTMLDivElement>(null);
+  const { full, pseudoFull, toggle: toggleFull } = useFullscreen(cardRef);
   const bodiesRef = useRef<SVGPathElement>(null);
   const headsRef = useRef<SVGPathElement>(null);
   const tailsRef = useRef<SVGPathElement>(null);
@@ -180,41 +171,6 @@ export default function CameraFeed({
     return () => clearInterval(id);
   }, [paused]);
 
-  // Full screen: the real API where there is one, else cover the window.
-  useEffect(() => {
-    const on = () => {
-      const d = document as FsDoc;
-      setNativeFull(!!cardRef.current && (d.fullscreenElement ?? d.webkitFullscreenElement) === cardRef.current);
-    };
-    document.addEventListener("fullscreenchange", on);
-    document.addEventListener("webkitfullscreenchange", on);
-    return () => {
-      document.removeEventListener("fullscreenchange", on);
-      document.removeEventListener("webkitfullscreenchange", on);
-    };
-  }, []);
-  useEffect(() => {
-    if (!pseudoFull) return;
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setPseudoFull(false);
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [pseudoFull]);
-
-  const toggleFull = () => {
-    const d = document as FsDoc;
-    if (d.fullscreenElement ?? d.webkitFullscreenElement) {
-      if (d.exitFullscreen) d.exitFullscreen().catch(() => {});
-      else d.webkitExitFullscreen?.();
-      return;
-    }
-    if (pseudoFull) return setPseudoFull(false);
-    const el = cardRef.current as FsEl | null;
-    if (!el) return;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => setPseudoFull(true));
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-    else setPseudoFull(true);
-  };
-
   const liveMs = base ? base.sim + (now - base.real) * base.speed : null;
   const shownMs = paused ? frozenAt : liveMs;
   const togglePause = () => {
@@ -233,6 +189,7 @@ export default function CameraFeed({
       className={`overflow-hidden ${pseudoFull ? "fixed inset-0 z-[3000]" : "relative"} ${
         full ? "flex items-center justify-center" : "rounded-2xl border border-line"
       }`}
+      data-theme="dark"
       style={{ background: "#0B0D11" }}
     >
       <svg

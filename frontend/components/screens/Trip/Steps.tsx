@@ -45,7 +45,7 @@ function Step({ step, last }: { step: RouteStep; last: boolean }) {
       <span className="flex flex-col items-center" aria-hidden="true">
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-          style={{ background: arrive ? C.heavy : C.cardHi, color: arrive ? "#11141A" : C.ink }}
+          style={{ background: arrive ? C.heavy : C.cardHi, color: arrive ? C.onDot : C.ink }}
         >
           <Icon d={maneuverIcon(step)} size={18} />
         </span>

@@ -14,10 +14,12 @@ from functools import cache
 
 from app.api.schemas import LatLng, Location, recommendation_json, route_json
 from app.conditions.provider import ConditionsView
+from app.directions import geo
 from app.directions.door import Corridor, DoorPath, Endpoint, door_timing
+from app.directions.ends import street_s
 from app.directions.options import delay_causes, route_id, route_labels, route_options
 from app.recommender import Recommendation
-from app.routing.router import Route
+from app.routing.router import Route, Router
 from app.services import Services
 
 PENDING = {
@@ -28,6 +30,8 @@ PENDING = {
     "note": None,
     "retry_after_s": None,
 }
+
+STREETS_NOTE = "Turn-by-turn directions aren't available right now. The time is a rough guess for city streets."
 
 
 def endpoint(svc: Services, loc: Location, heading: float | None = None) -> Endpoint:
@@ -74,6 +78,32 @@ def door_patch(route: Route, path: DoorPath | None, corr: Corridor, timed: bool)
     return out
 
 
+def street_s_between(o: Endpoint, d: Endpoint) -> float:
+    return street_s(geo.dist_m(o.latlng, d.latlng))
+
+
+def streets_only(route: Route, o: Endpoint, d: Endpoint) -> bool:
+    """Door to door on city streets (no main roads) between two real spots around Houston."""
+    return not route.segment_ids and (o.is_point or d.is_point) and o.near(*d.latlng)
+
+
+def street_patch(route: Route, o: Endpoint, d: Endpoint, drawn: bool) -> dict:
+    """A door-to-door trip on city streets only (the empty route: app/directions/ends.py) with no
+    street directions (not asked for, or OSRM down): a rough time for the straight line instead
+    of 0 min, and with `drawn` that line between the pins, so the trip still shows a way there."""
+    s = street_s_between(o, d)
+    out: dict = {
+        "arrive_at": route.depart_at + timedelta(seconds=s),
+        "total_min": round(s / 60, 1),
+        "breakdown": {"free_flow_min": round(s / 60, 1), "base_travel_min": round(s / 60, 1), "access_min": round(s / 60, 1)},
+    }
+    if drawn:
+        out["geometry"] = [o.latlng, d.latlng]
+        # Asking POST /directions again can't help an empty route: no retry
+        out["directions"] = {**PENDING, "status": "unavailable", "note": STREETS_NOTE}
+    return out
+
+
 def apply_patch(body: dict, patch: dict) -> dict:
     breakdown = {**body.get("breakdown", {}), **patch.get("breakdown", {})}
     return {**body, **patch, "breakdown": breakdown}
@@ -106,6 +136,8 @@ def routes_json(svc: Services, routes: list[Route], o: Endpoint, d: Endpoint, di
         if directions:
             path, corr = directions_for(svc, r, o, d, fetch=i == 0)
             body = apply_patch(body, door_patch(r, path, corr, timed))
+        if streets_only(r, o, d) and (not directions or body["directions"]["status"] == "unavailable"):
+            body = apply_patch(body, street_patch(r, o, d, directions))
         out.append(body)
     return out
 
@@ -127,11 +159,14 @@ def route_response(
     view: ConditionsView,
     directions: bool,
     heading: float | None = None,
+    router: Router | None = None,
 ) -> dict:
     """POST /route: best + alternative (as before) + the routes list. `heading`: the way you're
-    going at the origin (driving), so the directions start that way."""
-    naive = cache(lambda: svc.router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
-    routes = route_options(svc.router, best, alt, view, naive)
+    going at the origin (driving), so the directions start that way. `router` is the one that
+    found `best` (it may stay off tolls or highways: app.routing.avoid); the extra routes use it too."""
+    router = router or svc.router
+    naive = cache(lambda: router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
+    routes = route_options(router, best, alt, view, naive)
     items = routes_json(svc, routes, endpoint(svc, origin, heading), endpoint(svc, destination), directions)
     return {"best": items[0], "alternative": _alternative(alt, items), "routes": items}
 
@@ -144,6 +179,7 @@ def recommend_response(
     arrive_by: datetime,
     view: ConditionsView,
     directions: bool,
+    router: Router | None = None,
 ) -> dict:
     """POST /recommend: the departure (door to door when a point is involved) + the routes list.
     `recommend_by(extra_min)` runs the recommender with that many minutes added to the buffer.
@@ -151,20 +187,28 @@ def recommend_response(
     To or from an arbitrary point the way on and off our roads takes time too: the departure is
     picked again with the difference between the door-to-door trip and our corridor (rounded up
     to a minute) taken from the buffer, so departures stay on the usual 5-minute marks. OSRM is
-    called for the chosen route only, never in the recommender's loop."""
+    called for the chosen route only, never in the recommender's loop. `router` is the one the
+    recommender used (it may stay off tolls or highways); the extra routes use it too."""
+    router = router or svc.router
     o, d = endpoint(svc, origin), endpoint(svc, destination)
     rec = recommend_by(0)
     buffer_min = rec.buffer_min
-    if directions and (o.is_point or d.is_point):
-        path, corr = directions_for(svc, rec.route, o, d, fetch=True)
-        t = door_timing(rec.route, corr, path)
-        extra = math.ceil((t.total_s - rec.route.total_s) / 60) if t is not None else 0
+    if o.is_point or d.is_point:
+        extra_s = 0.0
+        t = None
+        if directions:
+            path, corr = directions_for(svc, rec.route, o, d, fetch=True)
+            t = door_timing(rec.route, corr, path)
+            extra_s = t.total_s - rec.route.total_s if t is not None else 0.0
+        if t is None and streets_only(rec.route, o, d):  # city streets only, no directions: a rough time
+            extra_s = street_s_between(o, d)
+        extra = math.ceil(extra_s / 60)
         if extra:
             rec = recommend_by(extra)
             rec.buffer_min = buffer_min
     r0 = rec.route
-    naive = cache(lambda: svc.router.traffic_only_route(r0.origin, r0.destination, r0.depart_at, view))
-    routes = route_options(svc.router, r0, rec.alternative, view, naive)
+    naive = cache(lambda: router.traffic_only_route(r0.origin, r0.destination, r0.depart_at, view))
+    routes = route_options(router, r0, rec.alternative, view, naive)
     items = routes_json(svc, routes, o, d, directions)
     body = recommendation_json(rec)
     body.update(route=items[0], alternative=_alternative(rec.alternative, items), routes=items)

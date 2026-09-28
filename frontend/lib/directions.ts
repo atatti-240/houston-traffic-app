@@ -14,10 +14,16 @@ export interface RouteChoices {
 
 /** Leave now, with up to 3 routes and door-to-door directions (the first route's right away, the others
  * from the cache or "pending"). */
-export const routeChoices = (body: { origin: Location; destination: Location; depart_at?: string; safe_path?: boolean; safety_weight?: number }) =>
+type AvoidFields = { avoid_tolls?: boolean; avoid_highways?: boolean };
+
+export const routeChoices = (
+  body: { origin: Location; destination: Location; depart_at?: string; safe_path?: boolean; safety_weight?: number } & AvoidFields,
+) =>
   post<RouteChoices>("/route?directions=true", body);
 
-export const recommendChoices = (body: { origin: Location; destination: Location; arrive_by: string; safe_path?: boolean; safety_weight?: number }) =>
+export const recommendChoices = (
+  body: { origin: Location; destination: Location; arrive_by: string; safe_path?: boolean; safety_weight?: number } & AvoidFields,
+) =>
   post<Recommendation>("/recommend?directions=true", body);
 
 /** What a route's directions change in it (for one that came back "pending"). */

@@ -8,10 +8,13 @@ from app.adapters import DataSources, build_sources
 from app.conditions.provider import ConditionsProvider
 from app.clock import SimClock
 from app.config import settings
+from app.cv.bridge import CvBridge, build_bridge
+from app.cv.incidents import CameraAiIncidents
 from app.directions.door import DoorDirections
 from app.graph import Network, load_network
 from app.notifications.scheduler import TripScheduler
 from app.notifications.service import NotificationService, build_notifier
+from app.reports import ReportStore
 from app.routing.router import Router
 from app.scoring import Models, build_models, replay_history
 from app.scoring.store import ScoreStore
@@ -24,16 +27,21 @@ class Services:
         clock: SimClock | None = None,
         sources: DataSources | None = None,
         notifier: NotificationService | None = None,
+        cv: CvBridge | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.clock = clock or SimClock(settings.sim_start, settings.clock_speed)
         self.sources = sources or build_sources(settings.data_source, session_factory, settings.synthetic_seed)
         self.notifier = notifier or build_notifier(settings.notification_channel)
+        # Live AI camera feeds (CV_URL); None when off. Started by the app's lifespan.
+        self.cv = cv if cv is not None else build_bridge(settings, session_factory)
+        self.camera_ai = CameraAiIncidents(self.cv) if self.cv is not None else None
         self.directions = DoorDirections()  # door-to-door directions (OSRM) and their cache
         # One tick at a time: the background loop and request handlers both tick, and two
         # at once would both send the same alert. Lives here, not on the scheduler, because
         # _install() swaps schedulers.
         self._tick_lock = threading.Lock()
+        self.reports = ReportStore(session_factory, lambda: self.network)
         self.reload()
 
     def reload(self) -> None:
@@ -46,7 +54,14 @@ class Services:
     def _install(self, models: Models) -> None:
         # Build the new router/scheduler first, then swap: requests and scheduler ticks
         # running meanwhile keep using the old, complete set of scores.
-        conditions = ConditionsProvider(self.network, models, self.sources, self.clock.now)
+        conditions = ConditionsProvider(
+            self.network,
+            models,
+            self.sources,
+            self.clock.now,
+            camera_ai=self.camera_ai,
+            reports=self.reports.incidents,
+        )
         router = Router(self.network, models, conditions)
         scheduler = TripScheduler(self.session_factory, router, self.notifier)
         self.models, self.router, self.scheduler = models, router, scheduler
