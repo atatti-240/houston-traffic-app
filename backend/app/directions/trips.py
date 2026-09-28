@@ -30,10 +30,12 @@ PENDING = {
 }
 
 
-def endpoint(svc: Services, loc: Location) -> Endpoint:
-    """The real start or end of a trip: the point itself, or a place's own spot."""
+def endpoint(svc: Services, loc: Location, heading: float | None = None) -> Endpoint:
+    """The real start or end of a trip: the point itself, or a place's own spot. `heading`: the way
+    you're going at that point (a re-plan while driving), in compass degrees."""
     if isinstance(loc, LatLng):
-        return Endpoint(loc.lat, loc.lng, True)
+        bearing = None if heading is None else round(heading) % 360
+        return Endpoint(loc.lat, loc.lng, True, bearing)
     node = svc.network.nodes[loc]
     return Endpoint(node.lat, node.lng, False)
 
@@ -124,11 +126,13 @@ def route_response(
     alt: Route | None,
     view: ConditionsView,
     directions: bool,
+    heading: float | None = None,
 ) -> dict:
-    """POST /route: best + alternative (as before) + the routes list."""
+    """POST /route: best + alternative (as before) + the routes list. `heading`: the way you're
+    going at the origin (driving), so the directions start that way."""
     naive = cache(lambda: svc.router.traffic_only_route(best.origin, best.destination, best.depart_at, view))
     routes = route_options(svc.router, best, alt, view, naive)
-    items = routes_json(svc, routes, endpoint(svc, origin), endpoint(svc, destination), directions)
+    items = routes_json(svc, routes, endpoint(svc, origin, heading), endpoint(svc, destination), directions)
     return {"best": items[0], "alternative": _alternative(alt, items), "routes": items}
 
 
