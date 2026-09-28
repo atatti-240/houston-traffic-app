@@ -9,8 +9,9 @@ import { Circle, Marker, Pane, useMap, useMapEvents } from "react-leaflet";
 
 import { drive, useDrive } from "@/components/drive/store";
 
-const DOT = "#6E9BFF"; // as the map's static you-are-here dot
-const HALO = "#3B6FD1";
+// Google's blue dot, the same in both themes (as the map's static you-are-here dot)
+const DOT = "#1a73e8";
+const HALO = "#4285f4";
 const FOLLOW_ZOOM = 16;
 
 function dotIcon(heading: number | null) {
@@ -18,7 +19,7 @@ function dotIcon(heading: number | null) {
     heading === null
       ? ""
       : `<path d="M24 3 L31.5 17.5 L24 14.5 L16.5 17.5 Z" fill="${DOT}" stroke="#FFFFFF" stroke-width="1.6" stroke-linejoin="round"/>`;
-  const html = `<svg width="48" height="48" viewBox="0 0 48 48" style="transform: rotate(${heading ?? 0}deg); filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6))" aria-hidden="true">${arrow}<circle cx="24" cy="24" r="8" fill="${DOT}" stroke="#FFFFFF" stroke-width="3"/></svg>`;
+  const html = `<svg width="48" height="48" viewBox="0 0 48 48" style="transform: rotate(${heading ?? 0}deg); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4))" aria-hidden="true">${arrow}<circle cx="24" cy="24" r="8" fill="${DOT}" stroke="#FFFFFF" stroke-width="3"/></svg>`;
   return L.divIcon({ html, className: "you-here", iconSize: [48, 48], iconAnchor: [24, 24] });
 }
 
@@ -73,7 +74,7 @@ export default function LiveLocation() {
         center={[fix.lat, fix.lng]}
         radius={Math.max(5, Math.min(fix.accuracy, 5000))}
         interactive={false}
-        pathOptions={{ color: HALO, weight: 1, opacity: 0.6, fillColor: HALO, fillOpacity: 0.18 }}
+        pathOptions={{ color: HALO, weight: 1, opacity: 0.5, fillColor: HALO, fillOpacity: 0.2 }}
       />
       <Marker position={[fix.lat, fix.lng]} icon={icon} interactive={false} keyboard={false} />
     </Pane>
