@@ -11,6 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { watchHere } from "@/components/app/liveLocation";
 import type { PoiKind } from "@/components/places/store";
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
@@ -288,7 +289,6 @@ export function useApp(): AppValue {
   return v;
 }
 
-const HOUSTON_BOX = { minLat: 29.4, maxLat: 30.2, minLng: -95.9, maxLng: -94.9 };
 const DEFAULT_HERE = "midtown";
 const RECENTS_KEY = "blindspot.recents";
 const LEVEL_RANK: Record<Level, number> = { light: 0, moderate: 1, heavy: 2 };
@@ -511,16 +511,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ---- where am I -------------------------------------------------------------------------
   useEffect(() => {
     setRecents(readRecents());
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        const b = HOUSTON_BOX;
-        if (lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng) setDevice({ lat, lng });
-      },
-      () => {},
-      { timeout: 5000, maximumAge: 600000 },
-    );
+    // Live GPS (liveLocation.ts): the map's dot follows every fix; `here` only moves on a significant move.
+    return watchHere(setDevice);
   }, []);
 
   const liveLevels = useMemo<Record<string, Level>>(() => {

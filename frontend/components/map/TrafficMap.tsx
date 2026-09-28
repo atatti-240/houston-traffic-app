@@ -12,6 +12,7 @@ import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, use
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
 import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
+import LiveDot from "@/components/map/LiveDot";
 import ModeRouteLayer from "@/components/map/ModeRouteLayer";
 import PinConnectors, { scenePins } from "@/components/map/PinConnectors";
 import VectorBasemap from "@/components/map/VectorBasemap";
@@ -420,13 +421,8 @@ export default function TrafficMap({
         </CircleMarker>
       ))}
 
-      {/* You are here: Google's blue dot, the same in both themes */}
-      {here && (
-        <>
-          <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#4285f4", weight: 0, fillColor: "#4285f4", fillOpacity: 0.2 }} />
-          <CircleMarker center={[here.lat, here.lng]} radius={7} interactive={false} pathOptions={{ color: "#ffffff", weight: 2.5, fillColor: "#1a73e8", fillOpacity: 1 }} />
-        </>
-      )}
+      {/* You are here: the live blue dot (or the default place's, with location off) */}
+      <LiveDot fallback={here ? [here.lat, here.lng] : null} follow={interactive ? "button" : "always"} />
 
       {/* Scene points: start / stops / end (own pane: above the route lines and cause icons) */}
       <Pane name="scene-points" style={{ zIndex: 640 }}>
