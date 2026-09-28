@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { PoiKind } from "@/components/places/store";
 import { api } from "@/lib/api";
 import { addMinutesSim, parseSim } from "@/lib/format";
+import { parseTravel, type ModeRoute, type Travel } from "@/lib/modes";
 import { levelForScore, type Level } from "@/lib/theme";
 import type {
   AppNotification,
@@ -45,6 +46,10 @@ export type Screen =
       safety?: number;
       /** A real place (search result, map dot, saved place): shows its card (hours, phone...) */
       toPlace?: { osm?: string | null; address?: string | null; kind?: string | null };
+      /** "tolls", "highways" or "tolls,highways"; omitted = what this device chose last */
+      avoid?: string;
+      /** Walk / Bike / Transit tab; omitted = Drive */
+      travel?: Travel;
     }
   | { name: "map" }
   /** Gas / EV chargers / parking near you, or along `route` (from a trip to `routeTo`) */
@@ -81,12 +86,24 @@ function screenUrl(s: Screen): string {
   }
   if (s.name === "trip") {
     if (typeof s.to === "string") q.set("to", s.to);
+    else q.set("to", `${s.to.lat},${s.to.lng}`); // a point: to=29.739,-95.463 (+ toName)
+    if (typeof s.to !== "string" && s.toName) q.set("toName", s.toName);
     if (typeof s.from === "string") q.set("from", s.from);
+    else if (s.from) q.set("from", `${s.from.lat},${s.from.lng}`); // a point start too (+ fromName)
+    if (s.from && typeof s.from !== "string" && s.fromName) q.set("fromName", s.fromName);
     if (s.arriveBy) q.set("by", s.arriveBy);
     if (s.safety !== undefined) q.set("safety", String(s.safety));
+    if (s.avoid !== undefined) q.set("avoid", s.avoid);
+    if (s.travel) q.set("travel", s.travel);
   }
   if (s.name === "nearby") q.set("kind", s.kind);
   return `${window.location.pathname}?${q}`;
+}
+
+/** A place id, or "lat,lng" for a point. */
+function toLocation(v: string): Location {
+  const m = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(v);
+  return m ? { lat: Number(m[1]), lng: Number(m[2]) } : v;
 }
 
 // Deep links for testing / sharing: ?screen=map|causes|alerts|cameras|why&id=...&area=...
@@ -104,10 +121,14 @@ function parseScreen(search: string): Screen | null {
   if (name === "trip" && q.get("to"))
     return {
       name,
-      to: q.get("to") as string,
-      from: q.get("from") ?? undefined,
+      to: toLocation(q.get("to") as string),
+      toName: q.get("toName") ?? undefined,
+      from: q.get("from") ? toLocation(q.get("from") as string) : undefined,
+      fromName: q.get("fromName") ?? undefined,
       arriveBy: q.get("by") ?? undefined,
       safety: q.get("safety") ? Number(q.get("safety")) : undefined,
+      avoid: q.get("avoid") ?? undefined,
+      travel: parseTravel(q.get("travel")),
     };
   return null;
 }
@@ -152,6 +173,11 @@ export interface MapScene {
   fitPadding?: { topLeft: [number, number]; bottomRight: [number, number] };
   /** Show cause markers (default true) */
   markers?: boolean;
+  /** Route choices (Trip): the unselected ones dashed with a label bubble; tapping one calls pickRoute */
+  routes?: { id: string; geometry: LatLngTuple[]; label: string; time?: string; selected: boolean }[];
+  pickRoute?: (id: string) => void;
+  /** Walk / bike / transit route (Trip's other tabs) */
+  modeRoute?: ModeRoute;
 }
 
 export interface MapLayers {
@@ -174,6 +200,10 @@ export interface Here {
   level: Level;
   /** true when it came from the device's location */
   fromDevice: boolean;
+  /** Where a trip from here starts: the device's own spot (door to door), or the named place when location is off */
+  start: Location;
+  /** What that start is called: "Your location", or the place's name */
+  startName: string;
 }
 
 export interface Recent {
@@ -519,6 +549,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       street: base.address ?? base.name,
       level,
       fromDevice: !!device,
+      start: device ? { lat: device.lat, lng: device.lng } : base.id,
+      startName: device ? "Your location" : base.name,
     };
   }, [places, segments, liveLevels, device]);
 

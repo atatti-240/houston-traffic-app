@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from app.conditions.live import Confidence, Incident, worst
 from app.conditions.provider import LIVE_WINDOW, ConditionsProvider, ConditionsView
 from app.graph import Network, SegmentInfo
+from app.routing.avoid import AVOID_PENALTY, Avoid, Step, avoid_notes
 from app.scoring import Models
 
 # Seconds of penalty per mile at crash risk 1.0, at the two ends of the safety slider.
@@ -34,6 +35,15 @@ ALT_PENALTY = 1.5  # cost multiplier on the best route's segments when looking f
 
 TRAIN_REASON_P = 0.25
 CRASH_REASON_RISK = 0.45
+# What people see: the 0..1 risk score (the router's weighting) shown as a chance per trip between
+# 1% and 5%, the range real per-trip crash odds sit in. frontend/lib/format.ts crashChance matches it.
+CRASH_CHANCE_MIN = 0.01
+CRASH_CHANCE_MAX = 0.05
+
+
+def crash_chance(risk: float) -> float:
+    """The 0..1 crash-risk score as the chance people see (1% to 5%)."""
+    return CRASH_CHANCE_MIN + (CRASH_CHANCE_MAX - CRASH_CHANCE_MIN) * min(1.0, max(0.0, risk))
 CONGESTION_REASON_SCORE = 0.5
 LIVE_REASON_EXTRA = 0.15  # live congestion this much above the prediction is worth saying
 SAFE_REASON_MIN_DROP = 0.05  # don't brag about a crash-exposure drop smaller than this
@@ -47,6 +57,8 @@ SOURCE_LABELS = {
     "camera_ai": "camera AI",
     "demo": "demo feed",
     "history": "history",
+    "drivers": "drivers",
+    "demo_drivers": "demo drivers",
 }
 # Incident kind -> how a route reason names it ("Heads up: lane closure on ...")
 INCIDENT_NOUNS = {
@@ -59,6 +71,9 @@ INCIDENT_NOUNS = {
     "closure": "closure",
     "event": "event traffic",
     "weather": "bad weather",
+    "flooding": "flooding",
+    "police": "police",
+    "pothole": "pothole",
 }
 
 
@@ -102,6 +117,8 @@ class SegmentOnRoute:
     miles: float
     geometry: list[list[float]]
     crossings: list[CrossingOnRoute] = field(default_factory=list)
+    speed_limit_mph: int | None = None  # posted limit (OpenStreetMap); None = not known
+    toll: bool = False
     predicted_congestion: float = 0.0
     congestion_source: str = "history"
     live_weight: float = 0.0
@@ -213,6 +230,11 @@ def _dedupe_live(reasons: list[str]) -> list[str]:
 
 
 class Router:
+    # Roads to stay off (avoid tolls / highways): set on a copy by app.routing.avoid.avoiding().
+    avoid = Avoid()
+    avoid_ids: frozenset[str] = frozenset()
+    avoid_steps: tuple[Step, ...] = ()  # the searches to try in turn (app.routing.avoid.search_steps)
+
     def __init__(self, network: Network, models: Models, conditions: ConditionsProvider | None = None) -> None:
         self.network = network
         self.models = models
@@ -268,6 +290,8 @@ class Router:
             miles=seg.length_miles,
             geometry=[list(p) for p in seg.geometry],
             crossings=crossings,
+            speed_limit_mph=seg.speed_limit_mph,
+            toll=seg.toll,
             predicted_congestion=sc.predicted_congestion,
             congestion_source=sc.congestion_source,
             live_weight=sc.live_weight,
@@ -301,13 +325,16 @@ class Router:
         view: ConditionsView,
         penalties: dict[str, float] | None = None,
         blind: bool = False,
+        avoid_step: int = 0,
     ) -> list[str]:
         """Returns segment ids. `blind=True` routes on traffic only (live traffic and
         incidents included, trains and crash risk ignored): roughly what a typical nav app
-        picks. Used to explain what we avoided."""
+        picks. Used to explain what we avoided. Avoided roads are left out (self.avoid_steps);
+        with no route without them, the next step allows some, as little as it can."""
         if origin not in self.network.nodes or destination not in self.network.nodes:
             raise NoRouteError(f"unknown node {origin!r} or {destination!r}")
         penalties = penalties or {}
+        skip, heavy = self.avoid_steps[avoid_step] if self.avoid_steps else (frozenset(), frozenset())
         # Label-setting search over (time so far, penalty so far), penalty = cost - time
         # (crash penalty, alternative-route multipliers). One label per node isn't enough
         # once roads can be waited on: reaching a closed road later means waiting less, so
@@ -322,7 +349,7 @@ class Router:
                 return list(path)
             now = depart_at + timedelta(seconds=elapsed)
             for seg in self.network.out_edges.get(node, []):
-                if seg.to_node in visited:
+                if seg.to_node in visited or seg.id in skip:
                     continue
                 s = self._eval_segment(seg, now, view)
                 if s.closed:
@@ -335,6 +362,8 @@ class Router:
                 else:
                     step_time, step_cost = self._time(s), self._cost(s, lam)
                 step_cost *= penalties.get(seg.id, 1.0)
+                if seg.id in heavy:
+                    step_cost *= AVOID_PENALTY
                 new_elapsed, new_cost = elapsed + step_time, cost + step_cost
                 new_penalty = new_cost - new_elapsed
                 front = fronts.setdefault(seg.to_node, [])
@@ -345,6 +374,8 @@ class Router:
                 heapq.heappush(
                     heap, (new_cost, new_elapsed, next(tie), seg.to_node, (*path, seg.id), visited | {seg.to_node})
                 )
+        if avoid_step + 1 < len(self.avoid_steps):  # no way around the avoided roads: the next step
+            return self._search(origin, destination, depart_at, lam, view, penalties, blind, avoid_step + 1)
         raise NoRouteError(f"no open route from {origin} to {destination}")
 
     def evaluate(
@@ -446,9 +477,11 @@ class Router:
 
         naive_ids = self._search(origin, destination, depart_at, lam, view, blind=True)
         naive = self.evaluate(naive_ids, origin, destination, depart_at, w, view)
-        best.reasons = _dedupe_live(
-            self._live_reasons(origin, destination, depart_at, lam, view, best) + self._reasons(best, naive, view)
-        )
+        # What live data changed leads (alerts quote the first reason), then the avoid notes,
+        # which always make the MAX_REASONS cut.
+        live = self._live_reasons(origin, destination, depart_at, lam, view, best)
+        notes = avoid_notes(best, self.avoid)
+        best.reasons = _dedupe_live(live[: MAX_REASONS - len(notes)] + notes + self._reasons(best, naive, view))
 
         alt = None
         alt_ids = self._search(
@@ -456,7 +489,7 @@ class Router:
         )
         if alt_ids != best_ids:
             alt = self.evaluate(alt_ids, origin, destination, depart_at, w, view)
-            alt.reasons = _dedupe_live(self._reasons(alt, naive, view))
+            alt.reasons = _dedupe_live(avoid_notes(alt, self.avoid) + self._reasons(alt, naive, view))
         return best, alt
 
     # --- explanations ---------------------------------------------------------------------
@@ -562,7 +595,7 @@ class Router:
                 risk = max(s.crash_risk for s in stretch)
                 jam = max(stretch, key=lambda s: s.congestion)
                 if chosen.safe_path and risk >= CRASH_REASON_RISK:
-                    reasons.append(f"Avoided {where}: crash risk {risk:.0%} around {_fmt(first.enter_at)}")
+                    reasons.append(f"Avoided {where}: crash risk {crash_chance(risk):.1%} around {_fmt(first.enter_at)}")
                 elif jam.congestion >= CONGESTION_REASON_SCORE:
                     if jam.live_weight >= 0.3:
                         src = _provenance(jam.congestion_source, jam.live_updated_at, now)
@@ -619,7 +652,7 @@ class Router:
             if s.crash_risk >= CRASH_REASON_RISK and s.road_class == "freeway":
                 worst_crash[s.name] = max(worst_crash.get(s.name, 0.0), s.crash_risk)
         for name, risk in worst_crash.items():
-            reasons.append(f"Heads up: elevated crash risk on {name} ({risk:.0%})")
+            reasons.append(f"Heads up: elevated crash risk on {name} ({crash_chance(risk):.1%})")
 
         # Missing live feeds go first so the reason cap never hides them.
         notes = []

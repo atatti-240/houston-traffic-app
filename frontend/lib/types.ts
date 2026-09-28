@@ -22,6 +22,9 @@ export interface Segment {
   to_node: string;
   miles: number;
   free_flow_mph: number;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
+  toll?: boolean;
   geometry: LatLngTuple[];
 }
 
@@ -163,6 +166,9 @@ export interface RouteSegment {
   id: string;
   name: string;
   road_class: string;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
+  toll?: boolean;
   enter_at: string;
   travel_min: number;
   train_delay_min: number;
@@ -186,7 +192,7 @@ export interface RouteSegment {
 export interface Incident {
   id: string;
   title: string;
-  kind: "crash" | "stall" | "roadwork" | "closure" | "hazard" | "other";
+  kind: "crash" | "stall" | "roadwork" | "closure" | "hazard" | "other" | "flooding" | "police" | "pothole";
   segment_id: string | null;
   started_at: string;
   clears_at: string | null;
@@ -219,6 +225,15 @@ export interface RouteCrossing {
   updated_at: string | null;
 }
 
+/** A stretch of a route on one road at one posted limit (null = not known). */
+export interface SpeedLimitRun {
+  road: string;
+  speed_limit_mph: number | null;
+  from_mile: number;
+  miles: number;
+  segment_ids: string[];
+}
+
 export interface Route {
   origin: string;
   destination: string;
@@ -239,12 +254,85 @@ export interface Route {
     crash_exposure: number;
     max_crash_risk: number;
     max_block_probability: number;
+    /** Door to door: minutes on the way to and from our main roads (included above) */
+    access_min?: number;
   };
   reasons: string[];
   hazards: Hazard[];
+  uses_toll?: boolean;
+  toll_roads?: string[];
+  /** The route as stretches of one road at one posted limit, in driving order */
+  speed_limits?: SpeedLimitRun[];
   geometry: LatLngTuple[];
   segments: RouteSegment[];
   crossings: RouteCrossing[];
+  /** Stable id of the route (its road segments) */
+  id?: string;
+  /** "via I-610": the road that sets it apart from the other routes */
+  label?: string;
+  /** The road it spends the most miles on */
+  main_road?: string;
+  /** Its biggest delays vs. empty roads, worst first (at most 3) */
+  delay_causes?: RouteDelayCause[];
+  /** Door-to-door directions (/route and /recommend with ?directions=true) */
+  directions?: RouteDirections;
+}
+
+export interface RouteDelayCause {
+  /** Matches the cause icons (CAUSE in lib/theme) */
+  kind: CauseKind;
+  /** "Rush hour on I-610 West Loop", "Train at Cullen Blvd" */
+  label: string;
+  /** The road, or the street a train crossing is on */
+  road: string;
+  minutes: number;
+}
+
+/**
+ * One turn-by-turn step. Road names come from OpenStreetMap (via OSRM): render them as text.
+ * A voice driving mode can read `instruction` and use `maneuver` + `distance_m` to time it.
+ */
+export interface RouteStep {
+  /** "Turn left onto Westheimer Rd", "Take exit 43A toward St Joseph Pkwy", "Merge onto I-45 Gulf Fwy" */
+  instruction: string;
+  /** From this maneuver to the next one, meters */
+  distance_m: number;
+  /** Typical time for it on OSRM's free-flowing roads (not our traffic-aware time), seconds */
+  duration_s: number;
+  maneuver: {
+    /** OSRM maneuver type: depart | turn | new name | continue | merge | on ramp | off ramp | fork | end of road |
+     * roundabout | rotary | roundabout turn | exit roundabout | exit rotary | notification | arrive */
+    type: string;
+    /** left | slight left | sharp left | right | slight right | sharp right | straight | uturn */
+    modifier: string | null;
+    /** Where it happens */
+    location: LatLngTuple;
+    /** Compass heading into and out of the maneuver, 0-359 */
+    bearing_before: number;
+    bearing_after: number;
+    /** Which exit to take at a roundabout */
+    exit: number | null;
+  };
+  /** The road you're on after it ("I-45 Gulf Fwy", "Westheimer Rd"); "" when it has no name */
+  road: string;
+  /** Lanes at the maneuver, left to right, only where OpenStreetMap maps turn lanes. `valid`: good for this maneuver.
+   * indications: left | slight left | sharp left | straight | right | slight right | sharp right | uturn |
+   * merge to left | merge to right | none */
+  lanes?: { valid: boolean; indications: string[] }[];
+}
+
+export interface RouteDirections {
+  /** ok: all along real roads. partial: real roads on and off our main roads, our roads' names between.
+   * unavailable: no steps (the map line is our own). pending: not fetched yet (POST /directions). */
+  status: "ok" | "partial" | "unavailable" | "pending";
+  steps: RouteStep[];
+  distance_m: number | null;
+  /** Minutes on OSRM's roads before joining and after leaving our main roads, when they count in the times
+   * (trips to or from an arbitrary point) */
+  access_min: { start: number; end: number } | null;
+  note: string | null;
+  /** Unavailable only for now (the router is down or busy): worth asking POST /directions again in that many seconds */
+  retry_after_s?: number | null;
 }
 
 export interface Recommendation {
@@ -261,17 +349,25 @@ export interface Recommendation {
   data_confidence: Confidence;
   route: Route;
   alternative: Route | null;
+  /** Up to 3 routes to pick from (routes[0] is `route`) */
+  routes?: Route[];
 }
 
 export interface Trip {
   id: number;
   name: string;
-  origin: string;
-  destination: string;
+  /** A place id, or a point (a searched address, a business, a dropped pin) */
+  origin: Location;
+  destination: Location;
+  /** A point's own name ("EaDo", a business) */
+  origin_name?: string | null;
+  destination_name?: string | null;
   arrive_by: string;
   days: number[];
   safe_path: boolean;
   safety_weight?: number | null;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
 }
 
 export interface AppNotification {
@@ -382,6 +478,8 @@ export interface TripPlanRequest {
   stops: StopIn[];
   safe_path?: boolean;
   safety_weight?: number;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
   buffer_min?: number;
   watch?: boolean;
 }
@@ -400,6 +498,9 @@ export interface PlanLeg {
   hazards: Hazard[];
   why: string[];
   summary: string;
+  uses_toll?: boolean;
+  toll_roads?: string[];
+  speed_limits?: SpeedLimitRun[];
   window: { start: string | null; end: string | null };
   dwell_min: number;
   wait_min: number;
@@ -426,6 +527,8 @@ export interface PlanResult {
   watch: boolean;
   done?: boolean;
   safety_weight: number;
+  avoid_tolls?: boolean;
+  avoid_highways?: boolean;
   buffer_min: number;
   drive_min: number;
   warnings: string[];
@@ -464,6 +567,8 @@ export interface Slowdown {
   speed_mph: number;
   free_flow_mph: number;
   usual_mph: number;
+  /** Posted limit (OpenStreetMap); null = not known */
+  speed_limit_mph?: number | null;
   /** Marker position (segment middle, offset to the right of travel like the map line) */
   lat: number;
   lng: number;

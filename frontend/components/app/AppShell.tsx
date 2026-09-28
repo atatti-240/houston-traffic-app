@@ -22,12 +22,13 @@ import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
 import LiveMap from "@/components/screens/LiveMap";
 import Trip from "@/components/screens/Trip";
+import ModeTrip from "@/components/screens/Trip/ModeTrip";
 import WhereTo from "@/components/screens/WhereTo";
 import WhySlow from "@/components/screens/WhySlow";
 import { Icon } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDayTime } from "@/lib/format";
-import { C, ICON } from "@/lib/theme";
+import { C, ICON, LEVEL } from "@/lib/theme";
 import type { AppNotification } from "@/lib/types";
 
 function ScreenView({ screen }: { screen: Screen }) {
@@ -36,7 +37,7 @@ function ScreenView({ screen }: { screen: Screen }) {
     case "where":
       return <WhereTo />;
     case "trip":
-      return <Trip key={JSON.stringify(screen.to)} />;
+      return screen.travel ? <ModeTrip key={JSON.stringify(screen.to)} /> : <Trip key={JSON.stringify(screen.to)} />;
     case "map":
       return <LiveMap />;
     case "cameras":
@@ -102,8 +103,7 @@ function DemoBar({ onDemo }: { onDemo: () => void }) {
   };
   return (
     <div
-      className="pointer-events-auto flex items-center gap-1 rounded-[18px] border border-edge py-1 pr-1 pl-3 text-[12px]"
-      style={{ background: "rgba(17,19,24,0.92)" }}
+      className="pointer-events-auto flex items-center gap-1 rounded-[18px] bg-float py-1 pr-1 pl-3 text-[12px] shadow-e1"
     >
       {clock && (
         <span className="font-num mr-1 text-soft" title="Simulated time">
@@ -178,7 +178,7 @@ function Shell() {
     );
   } else if (isSheet) {
     panel = (
-      <div className="absolute inset-x-0 bottom-0 z-[1000] flex max-h-[64dvh] flex-col rounded-t-3xl border-t border-line bg-bg" style={{ boxShadow: "0 -4px 24px rgba(0,0,0,0.5)" }}>
+      <div className="absolute inset-x-0 bottom-0 z-[1000] flex max-h-[64dvh] flex-col rounded-t-3xl bg-bg shadow-up">
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ScreenView screen={screen} />
         </div>
@@ -198,8 +198,8 @@ function Shell() {
   const down = backendDown && (
     <div
       role="alert"
-      className={`absolute left-1/2 z-[1500] w-max max-w-[92vw] -translate-x-1/2 rounded-xl px-4 py-2 text-sm text-white ${isDesktop ? "top-16" : "bottom-[100px]"}`}
-      style={{ background: C.heavy }}
+      className={`absolute left-1/2 z-[1500] w-max max-w-[92vw] -translate-x-1/2 rounded-xl px-4 py-2 text-sm shadow-e2 ${isDesktop ? "top-16" : "bottom-[100px]"}`}
+      style={{ background: LEVEL.heavy.bg, color: LEVEL.heavy.fg }}
     >
       Can&apos;t reach the API. Start it with <code>make backend</code>.{" "}
       <button type="button" className="cursor-pointer underline" onClick={refresh}>

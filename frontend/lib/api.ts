@@ -27,7 +27,7 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000
 /** Absolute URL for an API path (e.g. a camera's video for an <img>). */
 export const apiUrl = (path: string) => `${API_URL}${path}`;
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
@@ -43,7 +43,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
-const post = <T,>(path: string, body?: unknown) =>
+export const post = <T,>(path: string, body?: unknown) =>
   call<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 const at = (when?: string) => (when ? `?at=${encodeURIComponent(when)}` : "");
 

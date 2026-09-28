@@ -1,57 +1,231 @@
 @import "tailwindcss";
 
-/* BlindSpot dark theme (from the design). Use these via Tailwind: bg-bg, bg-card, text-muted,
-   border-line, text-accent, bg-heavy ... or var(--c-*) in inline styles. */
-@theme inline {
-  --font-sans: var(--font-grotesk), system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+/* BlindSpot's colors: Google Maps' light and dark palettes, as CSS variables (--c-*). The theme is
+   System (follows the OS), Light or Dark: a script in app/layout.tsx sets <html data-theme> before the
+   first paint (lib/themeMode.ts). lib/theme.ts `C` points at these variables, and Tailwind gets them
+   as bg-bg, bg-card, text-muted, border-line, text-accent, bg-heavy ... */
 
-  --color-bg: #111318; /* app background */
-  --color-map: #171a21; /* map background */
-  --color-nav: #15181e; /* bottom nav, raised panels */
-  --color-card: #1e222b; /* cards, inputs, chips */
-  --color-card-hi: #232a3a; /* selected card */
-  --color-pop: #232833; /* tooltips, popovers */
-  --color-pop-line: #353b48;
-  --color-line: #2a2f3b; /* dividers, bar tracks */
-  --color-edge: #2e3340; /* floating control borders */
-  --color-edge-strong: #3a404d; /* outline chips/buttons */
-  --color-ink: #ecedef; /* primary text */
-  --color-soft: #c4c8d2; /* secondary text on cards */
-  --color-muted: #9aa0ae; /* muted text */
-  --color-accent: #8fb0ff;
-  --color-accent-hi: #b5ccff;
-  --color-on-accent: #0e1015;
-  --color-heavy: #ff4d4d;
-  --color-heavy-text: #ff7a70;
-  --color-moderate: #f5c518;
-  --color-light: #2fbf6b;
-  --color-marker: #f2f3f5;
+/* ---- light (the default) ------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+  --c-bg: #ffffff;
+  --c-map: #f8f9fa;
+  --c-nav: #ffffff;
+  --c-card: #f1f3f4;
+  --c-card-hi: #e8eaed;
+  --c-float: #ffffff;
+  --c-pop: #ffffff;
+  --c-pop-line: #dadce0;
+  --c-line: #dadce0;
+  --c-edge: #dadce0;
+  --c-edge-strong: #c4c7c5;
+  --c-ink: #202124;
+  --c-on-ink: #ffffff;
+  --c-soft: #3c4043;
+  --c-muted: #5f6368;
+  --c-accent: #1a73e8;
+  --c-accent-hi: #1557b0;
+  --c-on-accent: #ffffff;
+  --c-sel: #e8f0fe;
+  --c-on-sel: #174ea6;
+
+  --c-heavy: #d93025;
+  --c-heavy-text: #c5221f;
+  --c-heavy-bg: #d93025;
+  --c-on-heavy: #ffffff;
+  --c-moderate: #f29900;
+  --c-moderate-text: #9c5700;
+  --c-moderate-bg: #f9ab00;
+  --c-on-moderate: #202124;
+  --c-light: #1e8e3e;
+  --c-light-text: #188038;
+  --c-light-bg: #188038;
+  --c-on-light: #ffffff;
+  --c-stopped: #a50e0e;
+
+  --c-marker: #ffffff;
+  --c-marker-line: #ffffff;
+  --c-on-dot: #ffffff;
+  --c-halo: #ffffff;
+  --c-route: #1a73e8;
+  --c-route-casing: #1557b0;
+  --c-alt: #9aa0a6;
+  --c-scrim: rgba(32, 33, 36, 0.45);
+
+  --c-cause-rush: #1a73e8;
+  --c-cause-event: #9334e6;
+  --c-cause-crash: #d93025;
+  --c-cause-train: #795548;
+  --c-cause-closure: #e8710a;
+  --c-cause-weather: #129eaf;
+  --c-cause-construction: #b06000;
+  --c-cause-volume: #c2185b;
+
+  --c-group-incident: #d93025;
+  --c-group-roadwork: #1a73e8;
+  --c-group-event: #9334e6;
+  --c-group-weather: #129eaf;
+  --c-group-train: #795548;
+  --c-group-volume: #c2185b;
+
+  /* place dots on the street map (components/map/basemapStyle.ts has the same colors for MapLibre) */
+  --c-poi-food: #e8710a;
+  --c-poi-shop: #1a73e8;
+  --c-poi-health: #d93025;
+  --c-poi-park: #188038;
+  --c-poi-fun: #129eaf;
+  --c-poi-hotel: #9334e6;
+  --c-poi-car: #5f6368;
+  --c-poi-other: #70757a;
+  --c-star: #f9ab00;
+
+  --shadow-1: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  --shadow-2: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  --shadow-up: 0 -1px 2px rgba(60, 64, 67, 0.15), 0 -2px 6px 2px rgba(60, 64, 67, 0.1);
+  --shadow-logo: 0 2px 12px rgba(60, 64, 67, 0.3); /* the logo pill over the map */
+}
+
+/* ---- dark ------------------------------------------------------------------------------------ */
+/* Also for a part of the page that is always dark (camera video): give it data-theme="dark". */
+[data-theme="dark"] {
+  color: var(--c-ink);
+  color-scheme: dark;
+  --c-bg: #202124;
+  --c-map: #242424;
+  --c-nav: #202124;
+  --c-card: #303134;
+  --c-card-hi: #3c4043;
+  --c-float: #303134;
+  --c-pop: #303134;
+  --c-pop-line: #3c4043;
+  --c-line: #3c4043;
+  --c-edge: #3c4043;
+  --c-edge-strong: #5f6368;
+  --c-ink: #e8eaed;
+  --c-on-ink: #202124;
+  --c-soft: #bdc1c6;
+  --c-muted: #9aa0a6;
+  --c-accent: #8ab4f8;
+  --c-accent-hi: #aecbfa;
+  --c-on-accent: #202124;
+  --c-sel: #394457;
+  --c-on-sel: #d2e3fc;
+
+  --c-heavy: #ea4335;
+  --c-heavy-text: #f28b82;
+  --c-heavy-bg: #f28b82;
+  --c-on-heavy: #202124;
+  --c-moderate: #fbbc04;
+  --c-moderate-text: #fdd663;
+  --c-moderate-bg: #fdd663;
+  --c-on-moderate: #202124;
+  --c-light: #34a853;
+  --c-light-text: #81c995;
+  --c-light-bg: #81c995;
+  --c-on-light: #202124;
+  --c-stopped: #b3261e;
+
+  --c-marker: #3c4043;
+  --c-marker-line: #5f6368;
+  --c-on-dot: #202124;
+  --c-halo: #1f1f1f;
+  --c-route: #8ab4f8;
+  --c-route-casing: #3b6fc0;
+  --c-alt: #80868b;
+  --c-scrim: rgba(0, 0, 0, 0.6);
+
+  --c-cause-rush: #8ab4f8;
+  --c-cause-event: #c58af9;
+  --c-cause-crash: #f28b82;
+  --c-cause-train: #c9a898;
+  --c-cause-closure: #fa903e;
+  --c-cause-weather: #78d9ec;
+  --c-cause-construction: #fdd663;
+  --c-cause-volume: #f48fb1;
+
+  --c-group-incident: #f28b82;
+  --c-group-roadwork: #8ab4f8;
+  --c-group-event: #c58af9;
+  --c-group-weather: #78d9ec;
+  --c-group-train: #c9a898;
+  --c-group-volume: #f48fb1;
+
+  --c-poi-food: #fcad70;
+  --c-poi-shop: #8ab4f8;
+  --c-poi-health: #f28b82;
+  --c-poi-park: #81c995;
+  --c-poi-fun: #78d9ec;
+  --c-poi-hotel: #d7aefb;
+  --c-poi-car: #9aa0a6;
+  --c-poi-other: #9aa0a6;
+  --c-star: #fdd663;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --shadow-up: 0 -1px 2px rgba(0, 0, 0, 0.3), 0 -2px 6px 2px rgba(0, 0, 0, 0.15);
+  --shadow-logo: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --font-sans: var(--font-figtree), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-bg: var(--c-bg); /* app background, panels */
+  --color-map: var(--c-map); /* map background */
+  --color-nav: var(--c-nav); /* bottom nav */
+  --color-card: var(--c-card); /* inputs, chips, list rows */
+  --color-card-hi: var(--c-card-hi); /* hovered card */
+  --color-float: var(--c-float); /* floating map controls */
+  --color-pop: var(--c-pop); /* tooltips, popovers */
+  --color-pop-line: var(--c-pop-line);
+  --color-line: var(--c-line); /* dividers, bar tracks */
+  --color-edge: var(--c-edge); /* control borders */
+  --color-edge-strong: var(--c-edge-strong); /* outline chips/buttons */
+  --color-ink: var(--c-ink); /* primary text */
+  --color-on-ink: var(--c-on-ink);
+  --color-soft: var(--c-soft); /* secondary text */
+  --color-muted: var(--c-muted); /* muted text */
+  --color-accent: var(--c-accent);
+  --color-accent-hi: var(--c-accent-hi);
+  --color-on-accent: var(--c-on-accent);
+  --color-sel: var(--c-sel);
+  --color-on-sel: var(--c-on-sel);
+  --color-heavy: var(--c-heavy);
+  --color-heavy-text: var(--c-heavy-text);
+  --color-moderate: var(--c-moderate);
+  --color-moderate-text: var(--c-moderate-text);
+  --color-light: var(--c-light);
+  --color-light-text: var(--c-light-text);
+  --color-marker: var(--c-marker);
+
+  --shadow-e1: var(--shadow-1);
+  --shadow-e2: var(--shadow-2);
+  --shadow-up: var(--shadow-up);
 }
 
 html,
 body {
-  background: #111318;
-  color: #ecedef;
-  font-family: var(--font-grotesk), system-ui, sans-serif;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: var(--font-figtree), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 a {
-  color: #8fb0ff;
+  color: var(--c-accent);
 }
 a:hover {
-  color: #b5ccff;
+  color: var(--c-accent-hi);
 }
 
+/* Times, counts and distances: same font, digits of equal width so they line up */
 .font-num {
-  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
 
-/* Thin, dark scrollbars; hide them on horizontal chip rows */
+/* Thin scrollbars; hide them on horizontal chip rows */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2f3b transparent;
+  scrollbar-color: var(--c-line) transparent;
 }
 .no-scrollbar {
   scrollbar-width: none;
@@ -60,53 +234,56 @@ a:hover {
   display: none;
 }
 
-input[type="search"]::-webkit-search-cancel-button {
-  filter: invert(0.7);
-}
+input[type="checkbox"],
+input[type="radio"],
 input[type="range"] {
-  accent-color: #8fb0ff;
+  accent-color: var(--c-accent);
 }
 
-/* ---- Leaflet, dark ------------------------------------------------------------------------ */
+/* ---- Leaflet --------------------------------------------------------------------------------- */
 .leaflet-container.leaflet-container {
-  background: #171a21;
-  font-family: var(--font-grotesk), system-ui, sans-serif;
+  background: var(--c-map);
+  font-family: var(--font-figtree), system-ui, sans-serif;
 }
-/* Raster fallback tiles (no WebGL), nudged toward the design's blue-grey */
-.leaflet-tile-pane .leaflet-tile {
-  filter: saturate(0.6) brightness(0.95) hue-rotate(190deg);
+/* Raster fallback tiles (no WebGL): the light tiles as they are, the dark ones a neutral grey */
+:root[data-theme="dark"] .leaflet-tile-pane .leaflet-tile {
+  filter: saturate(0.3);
 }
-.leaflet-control-attribution {
-  background: rgba(17, 19, 24, 0.7) !important;
-  color: #6b7080 !important;
-  font-size: 9px !important;
+.leaflet-control-attribution.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--c-bg) 80%, transparent);
+  color: var(--c-muted);
+  font-size: 9px;
 }
-.leaflet-control-attribution a {
-  color: #8a91a0 !important;
+.leaflet-control-attribution.leaflet-control-attribution a {
+  color: var(--c-muted);
 }
 .leaflet-tooltip.place-label {
   background: transparent;
   border: none;
   box-shadow: none;
   padding: 0 4px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #9ca3b0;
-  text-shadow: 0 1px 2px #0e1015;
+  color: var(--c-muted);
+  text-shadow:
+    0 0 2px var(--c-halo),
+    0 0 2px var(--c-halo),
+    0 0 3px var(--c-halo);
 }
 .leaflet-tooltip.place-label::before {
   display: none;
 }
 .leaflet-tooltip.dark-tip {
-  background: #232833;
-  border: 1px solid #353b48;
-  border-radius: 10px;
-  color: #ecedef;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  background: var(--c-pop);
+  border: 0;
+  border-radius: 8px;
+  color: var(--c-ink);
+  box-shadow: var(--shadow-2);
   padding: 6px 10px;
   font-size: 12px;
+  font-weight: 500;
 }
 .leaflet-tooltip.dark-tip::before {
   display: none;
@@ -117,7 +294,7 @@ input[type="range"] {
   border: none;
 }
 
-/* ---- motion -------------------------------------------------------------------------------- */
+/* ---- motion ---------------------------------------------------------------------------------- */
 @keyframes toast-in {
   from {
     transform: translateY(-8px);
@@ -132,17 +309,18 @@ input[type="range"] {
   animation: toast-in 0.25s ease-out;
 }
 
-@keyframes pulse-ring {
+/* A blocked rail crossing: its dot swells and settles */
+@keyframes pulse-dot {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7);
+    stroke-width: 2px;
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(255, 77, 77, 0);
+    stroke-width: 7px;
   }
 }
 .pulse {
-  animation: pulse-ring 1.6s ease-in-out infinite;
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }
 
 @keyframes fade-in {
@@ -165,25 +343,25 @@ input[type="range"] {
   }
 }
 
-/* Cause tooltip + popup: the design's dark card */
+/* Cause tooltip + popup: a plain card */
 .leaflet-tooltip.cause-tip,
 .cause-popup .leaflet-popup-content-wrapper {
-  background: #232833;
-  border: 1px solid #353b48;
-  border-radius: 14px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
-  color: #ecedef;
+  background: var(--c-pop);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  color: var(--c-ink);
   padding: 14px;
   white-space: normal;
 }
 .leaflet-tooltip.cause-tip::before {
-  border-top-color: #353b48;
+  border-top-color: var(--c-pop);
 }
 .cause-popup .leaflet-popup-content {
   margin: 0;
   width: auto !important;
 }
 .cause-popup .leaflet-popup-tip {
-  background: #232833;
-  border: 1px solid #353b48;
+  background: var(--c-pop);
+  box-shadow: none;
 }

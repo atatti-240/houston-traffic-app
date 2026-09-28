@@ -2,25 +2,35 @@
 
 /**
  * Trip: when to leave and which way, and why. No design exists for it; it follows the design's
- * language (Why it's slow tiles, dark cards, pill buttons).
+ * language (Why it's slow tiles, cards, pill buttons).
  *  Phone: a bottom sheet (max 64dvh) with the route on the map above it. Desktop: the left panel.
- *  Single trip: leave now (/route) or arrive by (/recommend). With extra stops: /plan (best order).
+ *  Single trip: leave now (/route) or arrive by (/recommend), up to 3 routes to pick from, door to door with
+ *  turn-by-turn steps (Trip/RouteList, Trip/Steps, Trip/useRouteChoices). With extra stops: /plan (best order).
  *  Re-plans when the inputs change and whenever live data is refetched (a train blocking the
  *  route shows up as a reroute).
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useApp, type MapPoint, type MapScene, type Screen } from "@/components/app/AppContext";
 import { GasOnTheWay, TripPlaceCard } from "@/components/places/TripPlace";
 import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
-import { fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
-import { CAUSE, C, ICON } from "@/lib/theme";
+import { recommendChoices, routeChoices } from "@/lib/directions";
+import { crashChance, fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
+import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
+import { CAUSE, C, ICON, LEVEL, SHADOW, tint } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
-import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
+import TripReports from "./Trip/Reports";
+import { AvoidToggles, RouteRules, TollLine, useAvoid } from "./Trip/RoadRules";
+import { Comparisons, RouteList } from "./Trip/RouteList";
+import { dataGeneration, placeName, placePoint, sameLocation, tripLevel } from "./Trip/shared";
+import ShareEta from "./Trip/ShareEta";
+import Steps from "./Trip/Steps";
+import { useRouteChoices } from "./Trip/useRouteChoices";
+import TravelTabs from "./Trip/TravelTabs";
 
 const SAFETY_LABELS = ["Fastest", "Mostly fast", "Balanced", "Mostly safe", "Safest"];
 const MAX_STOPS = 2;
@@ -38,14 +48,17 @@ function initialSafety(v: number | undefined): number {
 }
 
 type Result =
-  | { kind: "route"; key: string; best: Route; alt: Route | null }
+  | { kind: "route"; key: string; best: Route; alt: Route | null; routes: Route[] }
   | { kind: "rec"; key: string; rec: Recommendation }
   | ({ kind: "plan"; key: string } & TimedPlan);
 
 /** How each trip (stack entry) was set, so Back from "Gas on the way" (or a place's trip) returns to
- * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. */
-type Settings = { mode: Mode; by: string; safety: number; stops: string[]; showAlt: boolean };
+ * the same trip. Keyed by the stack entry itself: opening a trip afresh starts from its params. The
+ * picked route is kept by useRouteChoices (in the history entry and the URL). */
+type Settings = { mode: Mode; by: string; safety: number; stops: string[] };
 const memory = new WeakMap<Screen, Settings>();
+
+const NO_ROUTES: Route[] = [];
 
 /** `existing`: saved before (found on the server, not made on this screen), so an edit doesn't replace it. */
 type Watch = { key: string; tripId?: number; planId?: string; existing?: boolean };
@@ -63,6 +76,7 @@ interface Inputs {
   mode: Mode;
   by: string | null;
   safety: number;
+  avoid: Avoid;
   stops: string[];
 }
 
@@ -108,10 +122,10 @@ function inTime(min: number | null | undefined): string | null {
 }
 
 function reasonIcon(reason: string): { d: string; color: string } {
-  if (reason.startsWith("Avoided") || reason.startsWith("Rerouted")) return { d: ICON.check, color: C.light };
+  if (reason.startsWith("Avoided") || reason.startsWith("Rerouted")) return { d: ICON.check, color: C.lightText };
   if (reason.startsWith("Safe Path") || reason.startsWith("Safety setting")) return { d: ICON.shield, color: C.accent };
   if (reason.startsWith("About")) return { d: ICON.clock, color: C.accent };
-  return { d: CAUSE.crash.icon, color: C.moderate };
+  return { d: CAUSE.crash.icon, color: C.moderateText };
 }
 
 function toPlaceIn(loc: Location, name?: string): PlaceIn {
@@ -132,17 +146,18 @@ function findSaved(saved: Saved, k: Inputs): Omit<Watch, "key"> | null {
   const { origin: o, to: d } = k;
   if (o === undefined || d === undefined) return null;
   if (k.stops.length) {
-    const p = saved.plans.find((p) => isSamePlan(p, o, k.stops, d, k.by, k.safety));
+    const p = saved.plans.find((p) => isSamePlan(p, o, k.stops, d, k.by, k.safety) && sameAvoid(p, k.avoid));
     return p ? { planId: p.plan_id } : null;
   }
   if (k.mode !== "by") return null;
   const t = saved.trips.find(
     (t) =>
-      t.origin === o &&
-      t.destination === d &&
+      sameLocation(t.origin, o) &&
+      sameLocation(t.destination, d) &&
       t.arrive_by.slice(0, 5) === k.by &&
       [...t.days].sort().join() === WEEKDAYS.join() &&
-      Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6,
+      Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6 &&
+      sameAvoid(t, k.avoid),
   );
   return t ? { tripId: t.id } : null;
 }
@@ -201,7 +216,7 @@ function Segmented({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(m)}
             className="flex-1 cursor-pointer rounded-[18px] text-[14px] font-semibold whitespace-nowrap"
-            style={on ? { background: C.ink, color: "#11141A" } : { color: C.soft }}
+            style={on ? { background: C.sel, color: C.onSel } : { color: C.soft }}
           >
             {label}
           </button>
@@ -224,26 +239,30 @@ function SafetySlider({ value, onChange }: { value: number; onChange: (v: number
       </div>
       <div className="flex items-center gap-3">
         <span className="text-[12px] text-muted">Faster</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.25}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          aria-label="Faster or safer route"
-          aria-valuetext={label}
-          className="bs-range h-6 min-w-0 flex-1 cursor-pointer appearance-none bg-transparent"
-          style={{ "--fill": `${value * 100}%` } as CSSProperties}
-        />
+        {/* A flat track: the grey rail and the blue part up to the thumb are two bars under a see-through range input
+            (the fill ends at the thumb's center, which travels from 10px to width - 10px). */}
+        <div className="relative flex h-6 min-w-0 flex-1 items-center">
+          <span className="absolute inset-x-0 h-1 rounded-full bg-line" aria-hidden="true" />
+          <span className="absolute left-0 h-1 rounded-full bg-accent" style={{ width: `calc(10px + (100% - 20px) * ${value})` }} aria-hidden="true" />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.25}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+            aria-label="Faster or safer route"
+            aria-valuetext={label}
+            className="bs-range relative h-6 w-full min-w-0 cursor-pointer appearance-none bg-transparent"
+          />
+        </div>
         <span className="text-[12px] text-muted">Safer</span>
       </div>
       <style>{`
-        .bs-range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, ${C.accent} var(--fill), ${C.line} var(--fill)); }
-        .bs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: ${C.ink}; border: 3px solid ${C.bg}; box-shadow: 0 0 0 1px ${C.edgeStrong}; }
-        .bs-range::-moz-range-track { height: 6px; border-radius: 3px; background: ${C.line}; }
-        .bs-range::-moz-range-progress { height: 6px; border-radius: 3px; background: ${C.accent}; }
-        .bs-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: ${C.ink}; border: 3px solid ${C.bg}; }
+        .bs-range::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+        .bs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -8px; border-radius: 50%; background: ${C.accent}; border: 0; box-shadow: ${SHADOW[1]}; }
+        .bs-range::-moz-range-track { height: 4px; background: transparent; }
+        .bs-range::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: ${C.accent}; border: 0; box-shadow: ${SHADOW[1]}; }
         .bs-range:focus-visible { outline: 2px solid ${C.accent}; outline-offset: 4px; border-radius: 4px; }
       `}</style>
     </div>
@@ -266,7 +285,7 @@ function Banner({ children }: { children: ReactNode }) {
   return (
     <div
       className="flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] leading-snug"
-      style={{ background: "rgba(245,197,24,0.10)", color: C.moderate }}
+      style={{ background: tint(C.moderate, 14), color: C.moderateText }}
       role="status"
     >
       <Icon d={CAUSE.crash.icon} size={16} className="mt-px shrink-0" />
@@ -289,29 +308,6 @@ function Reasons({ reasons }: { reasons: string[] }) {
         );
       })}
     </ul>
-  );
-}
-
-function Switch({ on, onChange, children }: { on: boolean; onChange: (v: boolean) => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-[14px] bg-card px-4 py-3 text-left text-[14px] font-medium text-ink"
-    >
-      <span className="flex min-w-0 items-center gap-2.5">
-        <span className="h-0 w-5 shrink-0 border-t-[3px] border-dashed" style={{ borderColor: C.muted }} aria-hidden="true" />
-        {children}
-      </span>
-      <span className="relative h-6 w-10 shrink-0 rounded-full transition-colors" style={{ background: on ? C.accent : C.edgeStrong }}>
-        <span
-          className="absolute top-1 h-4 w-4 rounded-full transition-[left]"
-          style={{ left: on ? 20 : 4, background: on ? C.onAccent : C.ink }}
-        />
-      </span>
-    </button>
   );
 }
 
@@ -347,9 +343,9 @@ export default function Trip() {
   const [mode, setMode] = useState<Mode>(kept?.mode ?? (params?.arriveBy ? "by" : "now"));
   const [by, setBy] = useState(kept?.by ?? params?.arriveBy ?? "");
   const [safety, setSafety] = useState(kept?.safety ?? initialSafety(params?.safety));
+  const [avoid, setAvoid] = useAvoid(params?.avoid, paramsKey);
   const [stops, setStops] = useState<string[]>(kept?.stops ?? []);
   const [picking, setPicking] = useState(false);
-  const [showAlt, setShowAlt] = useState(kept?.showAlt ?? false);
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -367,24 +363,24 @@ export default function Trip() {
     setSafety(kept?.safety ?? initialSafety(params?.safety));
     setStops(kept?.stops ?? []);
     setPicking(false);
-    setShowAlt(kept?.showAlt ?? false);
     setWatch(null);
   }
   useEffect(() => {
-    memory.set(screen, { mode, by, safety, stops, showAlt });
-  }, [screen, mode, by, safety, stops, showAlt]);
+    memory.set(screen, { mode, by, safety, stops });
+  }, [screen, mode, by, safety, stops]);
 
   const to = params?.to;
-  const origin: Location | undefined = params?.from ?? here?.place;
+  // No `from`: where you are (the device's own spot, door to door; or the default place when location is off).
+  const origin: Location | undefined = params?.from ?? here?.start;
   const toName = params?.toName ?? placeName(places, to);
-  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : here?.name) ?? "";
+  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : here?.startName) ?? "";
   const byOk = /^\d{2}:\d{2}$/.test(by);
   const sameSpot = origin !== undefined && to !== undefined && JSON.stringify(origin) === JSON.stringify(to) && !stops.length;
 
   // Everything a result depends on. Debounced so typing a time or dragging the slider asks once.
   const inputs = useMemo(
-    () => JSON.stringify({ origin, to, mode, by: mode === "by" ? by : null, safety, stops } satisfies Inputs),
-    [origin, to, mode, by, safety, stops],
+    () => JSON.stringify({ origin, to, mode, by: mode === "by" ? by : null, safety, avoid, stops } satisfies Inputs),
+    [origin, to, mode, by, safety, avoid, stops],
   );
   const key = useDebounced(inputs, 300);
   const generation = dataGeneration(slowdowns);
@@ -402,6 +398,7 @@ export default function Trip() {
       ],
       safety_weight: k.safety,
       safe_path: k.safety >= 1,
+      ...avoidBody(k.avoid),
       watch: watching,
     };
   };
@@ -419,12 +416,21 @@ export default function Trip() {
     const p: Promise<Result> = body
       ? planTrip(body).then((timed) => ({ kind: "plan", key, ...timed }))
       : k.mode === "by"
-        ? api
-            .recommend({ origin: o, destination: d, arrive_by: k.by as string, safety_weight: k.safety, safe_path: k.safety >= 1 })
-            .then((rec) => ({ kind: "rec", key, rec }))
-        : api
-            .route({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1 })
-            .then((r) => ({ kind: "route", key, best: r.best, alt: r.alternative }));
+        ? recommendChoices({
+            origin: o,
+            destination: d,
+            arrive_by: k.by as string,
+            safety_weight: k.safety,
+            safe_path: k.safety >= 1,
+            ...avoidBody(k.avoid),
+          }).then((rec) => ({ kind: "rec", key, rec }))
+        : routeChoices({ origin: o, destination: d, safety_weight: k.safety, safe_path: k.safety >= 1, ...avoidBody(k.avoid) }).then((r) => ({
+            kind: "route",
+            key,
+            best: r.best,
+            alt: r.alternative,
+            routes: r.routes ?? [r.best],
+          }));
     p.then(
       (r) => {
         if (id !== reqId.current) return;
@@ -442,7 +448,11 @@ export default function Trip() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, generation, retry]);
 
-  // ---- the map: route (+ alternative) or the plan's legs, with start / stops / end ----------
+  // ---- route choices (single trips): the picked one, and directions for the others as they come ----
+  const options = !result || result.kind === "plan" ? NO_ROUTES : result.kind === "rec" ? (result.rec.routes ?? [result.rec.route]) : result.routes;
+  const choices = useRouteChoices(options, origin, to, safety === 0);
+
+  // ---- the map: the routes (picked one solid, others dashed) or the plan's legs, with start / stops / end ----
   const startPt = origin !== undefined ? placePoint(places, origin) : null;
   const endPt = to !== undefined ? placePoint(places, to) : null;
   useEffect(() => {
@@ -465,20 +475,30 @@ export default function Trip() {
       });
       return;
     }
-    const best = result.kind === "rec" ? result.rec.route : result.best;
-    const alt = result.kind === "rec" ? result.rec.alternative : result.alt;
+    const sel = choices.selected;
+    if (!sel) return;
     if (endPt) pts.push({ ...endPt, kind: "end", label: toName });
-    const shownAlt = showAlt && alt ? alt.geometry : undefined;
     setScene({
-      route: best.geometry,
-      alternative: shownAlt,
+      route: sel.geometry,
+      routes:
+        choices.routes.length > 1
+          ? choices.routes.map((r) => ({
+              id: r.id ?? "",
+              geometry: r.geometry,
+              label: r.label ?? r.summary,
+              time: choices.pendingTimes(r) ? undefined : `${Math.max(1, Math.round(r.total_min))} min`,
+              selected: r === sel,
+            }))
+          : undefined,
+      pickRoute: choices.pick,
       points: pts,
-      // With the start and end too: a real place can sit off our road map (or the route be tiny).
-      fit: [...best.geometry, ...(shownAlt ?? []), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
+      // All the routes as they first came (not refitted as their directions arrive, or on a pick), with the
+      // start and end too: a real place can sit off our road map (or the route be tiny).
+      fit: [...options.flatMap((r) => r.geometry), ...pts.map((p) => [p.lat, p.lng] as LatLngTuple)],
       fitPadding: sheetPadding(isDesktop),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, showAlt, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
+  }, [result, choices.routes, choices.selected, isDesktop, startPt?.lat, startPt?.lng, endPt?.lat, endPt?.lng]);
 
   // ---- alerts ---------------------------------------------------------------------------------
   // Alerts saved before (this trip opened from its own alert, or watched on an earlier visit).
@@ -501,7 +521,7 @@ export default function Trip() {
     if (found) setWatch({ key: inputs, ...found, existing: true });
   }
   const watching = watch?.key === inputs;
-  const canWatchTrip = !stops.length && mode === "by" && byOk && typeof origin === "string" && typeof to === "string";
+  const canWatchTrip = !stops.length && mode === "by" && byOk && origin !== undefined && to !== undefined;
   const canWatch = stops.length ? true : canWatchTrip;
 
   async function toggleWatch() {
@@ -539,12 +559,16 @@ export default function Trip() {
       } else if (canWatchTrip) {
         const trip = await api.createTrip({
           name: `${fromName} → ${toName}`,
-          origin: origin as string,
-          destination: to as string,
+          origin: origin as Location,
+          destination: to as Location,
+          // A point keeps its own name for the alerts (a place id has one already).
+          origin_name: typeof origin === "string" ? null : fromName || null,
+          destination_name: typeof to === "string" ? null : toName || null,
           arrive_by: by,
           days: WEEKDAYS,
           safe_path: safety >= 1,
           safety_weight: safety,
+          ...avoidBody(avoid),
         });
         setWatch({ key: inputs, tripId: trip.id });
         setSaved((s) => s && { ...s, trips: [...s.trips.filter((t) => t.id !== trip.id), trip] });
@@ -567,23 +591,28 @@ export default function Trip() {
   // Arrive by with the time cleared: nothing to plan until there is one.
   const needTime = mode === "by" && !byOk;
   const hidden = sameSpot || needTime;
-  // Showing a result for other inputs (debouncing, or the new request is on its way).
-  const stale = result !== null && (loading || result.key !== inputs);
+  // Showing a result for other inputs (debouncing, or the new request is on its way), or the picked route's times
+  // are about to change (its door-to-door directions are on the way).
+  const stale = result !== null && (loading || result.key !== inputs || (!!choices.selected && choices.pendingTimes(choices.selected)));
 
   // ---- result -----------------------------------------------------------------------------------
   let head: ReactNode = null;
   let body: ReactNode = null;
 
-  if (result && (result.kind === "route" || result.kind === "rec")) {
+  if (result && (result.kind === "route" || result.kind === "rec") && choices.selected) {
     const rec = result.kind === "rec" ? result.rec : null;
-    const best = result.kind === "rec" ? result.rec.route : result.best;
-    const alt = result.kind === "rec" ? result.rec.alternative : result.alt;
-    const conf: Confidence = rec ? rec.confidence_label : best.confidence;
+    // The picked route (the best one unless another was picked); arrive-by keeps the recommended departure.
+    const best = choices.selected;
+    const isBest = best === choices.routes[0];
+    const others = choices.routes.filter((r) => r !== best);
+    const conf: Confidence = rec && isBest ? rec.confidence_label : best.confidence;
     const minutes = Math.max(1, Math.round(best.total_min));
+    const eta = best.arrive_at;
+    const onTime = rec ? parseSim(eta).getTime() + rec.buffer_min * 60000 <= parseSim(rec.arrive_by).getTime() : true;
     // Not on time: late when the ETA is past the deadline, else just inside the buffer (tight).
-    const pastDeadline = rec ? parseSim(rec.eta).getTime() > parseSim(rec.arrive_by).getTime() : false;
-    const late = rec && !rec.on_time && pastDeadline ? Math.max(1, minutesBetween(rec.arrive_by, rec.eta)) : 0;
-    const tight = rec !== null && !rec.on_time && !pastDeadline;
+    const pastDeadline = rec ? parseSim(eta).getTime() > parseSim(rec.arrive_by).getTime() : false;
+    const late = rec && !onTime && pastDeadline ? Math.max(1, minutesBetween(rec.arrive_by, eta)) : 0;
+    const tight = rec !== null && !onTime && !pastDeadline;
     const leaveNow = !rec || !rec.on_time || (now ? minutesBetween(now, rec.depart_at) <= 0 : false);
     const b = best.breakdown;
     // Whole minutes that add up to the trip's total (train + closure waits on top of driving).
@@ -592,7 +621,7 @@ export default function Trip() {
     const driveMin = Math.max(1, minutes - trainMin - closureMin);
     const third = closureMin
       ? { label: "Closure wait", value: `+${closureMin} min`, tone: C.heavyText }
-      : { label: "Crash risk", value: `${Math.round(b.max_crash_risk * 100)}%`, tone: b.max_crash_risk >= 0.5 ? C.heavyText : undefined };
+      : { label: "Crash risk", value: crashChance(b.max_crash_risk), tone: b.max_crash_risk >= 0.5 ? C.heavyText : undefined };
 
     head = (
       <Headline
@@ -602,7 +631,7 @@ export default function Trip() {
         lines={
           <>
             <span className="text-[14px] text-soft">
-              Arrive <span className="font-num">{when(rec ? rec.eta : best.arrive_at, rec ? rec.depart_at : best.depart_at)}</span> ·{" "}
+              Arrive <span className="font-num">{when(eta, rec ? rec.depart_at : best.depart_at)}</span> ·{" "}
               <span className="font-num">{minutes} min</span> · <span style={{ color: CONF_COLOR[conf] }}>{conf} confidence</span>
             </span>
             {rec && late > 0 && (
@@ -611,11 +640,11 @@ export default function Trip() {
               </span>
             )}
             {rec && tight && (
-              <span className="text-[14px] font-medium" style={{ color: C.moderate }}>
+              <span className="text-[14px] font-medium" style={{ color: C.moderateText }}>
                 Tight: less than {rec.buffer_min} min to spare for {fmtTime(rec.arrive_by)}
               </span>
             )}
-            {rec && rec.on_time && rec.leave_at_safe !== rec.depart_at && (
+            {rec && isBest && onTime && rec.leave_at_safe !== rec.depart_at && (
               <span className="text-[13px] text-muted">
                 Can&apos;t be late? Leave by <span className="font-num text-soft">{when(rec.leave_at_safe, rec.depart_at)}</span>
                 {rec.data_confidence !== "high" ? " (this route leans on predictions)" : ""}.
@@ -635,6 +664,15 @@ export default function Trip() {
             </span>
           </Banner>
         )}
+        {choices.routes.length > 1 && (
+          <RouteList
+            routes={choices.routes}
+            selected={best}
+            onPick={choices.pick}
+            pendingTimes={choices.pendingTimes}
+            roughTimes={choices.roughTimes}
+          />
+        )}
         <Card>
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between gap-3">
@@ -643,8 +681,10 @@ export default function Trip() {
             </div>
             <h2 className="m-0 text-[16px] leading-snug font-semibold">{best.summary || "Local streets"}</h2>
           </div>
+          <RouteRules route={best} />
           <div className="h-px bg-line" />
           <h3 className="m-0 text-[13px] font-semibold tracking-[0.08em] text-muted uppercase">Why this way</h3>
+          <Comparisons route={best} others={others} roughTimes={choices.roughTimes} />
           <Reasons reasons={best.reasons} />
         </Card>
         <div className="grid grid-cols-3 gap-2">
@@ -656,13 +696,7 @@ export default function Trip() {
             {third.value}
           </Tile>
         </div>
-        {alt && (
-          <Switch on={showAlt} onChange={setShowAlt}>
-            <span className="min-w-0 truncate">
-              Show alternative <span className="font-num text-soft">({Math.max(1, Math.round(alt.total_min))} min)</span>
-            </span>
-          </Switch>
-        )}
+        <Steps directions={best.directions} />
       </>
     );
   } else if (result && result.kind === "plan") {
@@ -731,7 +765,7 @@ export default function Trip() {
                   <span className="flex flex-col items-center" aria-hidden="true">
                     <span
                       className="font-num flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px]"
-                      style={isLast ? { background: C.heavy, color: "#11141A" } : { background: C.accent, color: C.onAccent }}
+                      style={isLast ? { background: LEVEL.heavy.bg, color: LEVEL.heavy.fg } : { background: C.accent, color: C.onAccent }}
                     >
                       {i + 1}
                     </span>
@@ -747,8 +781,9 @@ export default function Trip() {
                       <span className="font-num">{when(l.arrive_at, first.leave_at)}</span>
                       {l.wait_min > 0 ? ` · wait ${l.wait_min} min` : ""}
                     </span>
+                    {l.uses_toll && <TollLine roads={l.toll_roads} small />}
                     {(l.late_min > 0 || l.tight) && (
-                      <span className="text-[12px] font-medium" style={{ color: l.late_min > 0 ? C.heavyText : C.moderate }}>
+                      <span className="text-[12px] font-medium" style={{ color: l.late_min > 0 ? C.heavyText : C.moderateText }}>
                         {l.late_min > 0 ? `${l.late_min} min late` : "Tight: little room for delays"}
                       </span>
                     )}
@@ -776,9 +811,11 @@ export default function Trip() {
   const busy = !result && !error && !hidden;
   // The result on screen is for other inputs (a new one is on its way): don't act on it.
   const outdated = result !== null && result.key !== inputs;
+  // The route on screen for a single trip: the picked one (the best unless another was picked).
+  const picked = result && result.kind !== "plan" ? (choices.selected ?? null) : null;
   // For the destination's card ("closed when you get there") and "Gas on the way".
-  const arriveAt = result?.kind === "rec" ? result.rec.eta : result?.kind === "route" ? result.best.arrive_at : result?.plan.legs.at(-1)?.arrive_at;
-  const routeLine = result?.kind === "rec" ? result.rec.route.geometry : result?.kind === "route" ? result.best.geometry : result?.plan.legs.flatMap((l) => l.geometry);
+  const arriveAt = result?.kind === "plan" ? result.plan.legs.at(-1)?.arrive_at : picked?.arrive_at;
+  const routeLine = result?.kind === "plan" ? result.plan.legs.flatMap((l) => l.geometry) : picked?.geometry;
 
   return (
     <div className="flex flex-col gap-4 px-5 pt-3 pb-8 md:pt-6">
@@ -791,6 +828,7 @@ export default function Trip() {
         }
         right={stale && !hidden ? <span className="font-num text-[12px] text-muted">Updating…</span> : undefined}
       />
+      <TravelTabs drive={{ arriveBy: mode === "by" && byOk ? by : undefined, safety }} />
 
       {sameSpot ? (
         <Headline
@@ -817,6 +855,7 @@ export default function Trip() {
           )}
         </p>
       )}
+      <TripReports result={hidden || !result ? null : result.kind === "plan" ? result : picked ? { best: picked } : null} />
 
       {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
 
@@ -830,11 +869,12 @@ export default function Trip() {
               value={by}
               onChange={(e) => setBy(e.target.value)}
               aria-label="Arrive by"
-              className="font-num h-11 w-[138px] shrink-0 rounded-[22px] border border-edge bg-card px-3.5 text-[15px] text-ink outline-none [color-scheme:dark] focus:border-edge-strong"
+              className="font-num h-11 w-[138px] shrink-0 rounded-[22px] border border-edge bg-card px-3.5 text-[15px] text-ink outline-none focus:border-accent"
             />
           )}
         </div>
         <SafetySlider value={safety} onChange={setSafety} />
+        <AvoidToggles value={avoid} onChange={setAvoid} />
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {stops.map((id) => (
@@ -921,13 +961,22 @@ export default function Trip() {
           <span className="text-center text-[12px] text-muted">
             {!canWatch
               ? mode === "by"
-                ? "Weekday alerts need a named place."
+                ? "Pick a time to arrive by."
                 : "Pick Arrive by to get told when to leave."
               : stops.length
                 ? "We re-check the plan every 5 min and tell you if the order or times change."
                 : "We tell you when to leave each weekday, and if a train or crash changes the route."}
           </span>
         </div>
+      )}
+      {!hidden && result && (
+        <ShareEta
+          route={result.kind === "plan" || outdated ? null : picked}
+          fromName={fromName}
+          toName={toName}
+          toPoint={endPt}
+          hasStops={result.kind === "plan"}
+        />
       )}
     </div>
   );

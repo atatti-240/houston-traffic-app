@@ -5,8 +5,9 @@
 import { useState } from "react";
 
 import { useApp, type AppValue } from "@/components/app/AppContext";
+import { showDemoReport } from "@/components/reports/demo";
 import { api } from "@/lib/api";
-import { C } from "@/lib/theme";
+import { C, SHADOW, tint } from "@/lib/theme";
 
 const CRASH_ROAD = "I45S:gulf_ee>i45_610s";
 
@@ -45,7 +46,7 @@ const STEPS: Step[] = [
     narration:
       "A traffic-only app sends you down Cullen Blvd. A freight train crosses there most weekday mornings around 7:40, so BlindSpot routes around it and tells you exactly when to leave.",
     run: async (a) => {
-      a.go({ name: "trip", from: "eastend", fromName: "East End", to: "medcenter", toName: "Texas Medical Center", arriveBy: "08:00", safety: 0 });
+      a.go({ name: "trip", from: "eastend", fromName: "East End", to: "medcenter", toName: "Texas Medical Center", arriveBy: "08:00", safety: 0, avoid: "" });
     },
   },
   {
@@ -108,11 +109,24 @@ const STEPS: Step[] = [
     },
   },
   {
+    title: "Drivers report what they see",
+    narration:
+      "Crashes, police, hazards, potholes, stalled cars and flooding, reported from the road. Other drivers tap Still there or Not there, so stale reports drop off. Water on Westheimer slows the way into the Galleria.",
+    run: (a) => showDemoReport(a, "flooding"),
+  },
+  {
+    title: "Downtown → Galleria, flooding ahead",
+    narration: "A trip that crosses a flooded road gets a warning. Turn around, don't drown.",
+    run: async (a) => {
+      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "galleria", toName: "Galleria / Uptown" });
+    },
+  },
+  {
     title: "Downtown → Hobby by 5:45",
     narration:
       "The Gulf Freeway is the usual way to Hobby. With the crash on it, BlindSpot goes around and says why. Slide toward Safer and it stays off crash-prone stretches even on a normal day.",
     run: async (a) => {
-      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 0 });
+      a.go({ name: "trip", from: "downtown", fromName: "Downtown", to: "hobby", toName: "Hobby Airport", arriveBy: "17:45", safety: 0, avoid: "" });
     },
   },
   {
@@ -158,7 +172,7 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
   const next = () => (last ? onExit() : go(index + 1));
   const nextLabel = busy ? "…" : index < 0 ? "Start" : last ? "Done" : "Next →";
   const errorBox = error && (
-    <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: "rgba(255,77,77,0.15)", color: C.heavyText }}>
+    <p className="mt-2 rounded-lg p-2 text-[13px]" style={{ background: tint(C.heavy, 12), color: C.heavyText }}>
       Backend error: {error}. Is the API running on :8000?
     </p>
   );
@@ -168,8 +182,8 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
   if (!app.isDesktop) {
     return (
       <div
-        className="fixed inset-x-2 top-2 z-[1300] rounded-[18px] border border-pop-line px-3 py-2 text-ink"
-        style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+        className="fixed inset-x-2 top-2 z-[1300] rounded-[18px] px-3 py-2 text-ink"
+        style={{ background: C.pop, boxShadow: SHADOW[2] }}
       >
         <div className="flex items-center gap-2">
           <button
@@ -213,8 +227,8 @@ export default function DemoRunner({ onExit }: { onExit: () => void }) {
 
   return (
     <div
-      className="fixed bottom-6 left-[calc(420px+(100vw-420px)/2)] z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] border border-pop-line p-4 text-ink"
-      style={{ background: "rgba(17,19,24,0.96)", boxShadow: "0 10px 32px rgba(0,0,0,0.6)" }}
+      className="fixed bottom-6 left-[calc(420px+(100vw-420px)/2)] z-[1300] w-[min(94vw,520px)] -translate-x-1/2 rounded-[18px] p-4 text-ink"
+      style={{ background: C.pop, boxShadow: SHADOW[2] }}
     >
       <div className="flex items-center justify-between text-[12px] text-muted">
         <span>Demo {step ? `· step ${index + 1} of ${STEPS.length}` : ""}</span>

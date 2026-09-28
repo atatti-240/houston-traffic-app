@@ -11,6 +11,9 @@ import type L from "leaflet";
 import type { GeoJSONSource, Map as LibreMap, SymbolLayerSpecification } from "maplibre-gl";
 import { useEffect } from "react";
 
+import { BASEMAP } from "@/components/map/basemapStyle";
+import type { Theme } from "@/lib/themeMode";
+
 import { POI, POI_KINDS, loadTiles, tilesIn, type Poi } from "./pois";
 import { getPoiLayers, setMapZoom, setPoiStatus, subscribePoiLayers, type PoiKind } from "./store";
 
@@ -18,14 +21,12 @@ const SOURCE = "bs-pois";
 /** Leaflet zoom from which the highlights show (about 70 tiles on a laptop screen). */
 export const MIN_ZOOM = 13;
 const MAX_TILES = 120;
-const BG = "#171A21";
-const INK = "#0E1015";
 export const HIGHLIGHT_LAYERS = ["bs-poi-parking", "bs-poi-main"];
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
-/** A colored disc with a dark glyph, drawn once per kind (2x for sharp screens). */
-function iconImage(kind: PoiKind): ImageData {
+/** A colored disc with a white glyph and a ring in the map's halo color, drawn per kind (2x for sharp screens). */
+function iconImage(kind: PoiKind, theme: Theme): ImageData {
   const size = 26;
   const ratio = 2;
   const c = document.createElement("canvas");
@@ -37,12 +38,12 @@ function iconImage(kind: PoiKind): ImageData {
   g.fillStyle = POI[kind].color;
   g.fill();
   g.lineWidth = 2;
-  g.strokeStyle = INK;
+  g.strokeStyle = BASEMAP[theme].halo;
   g.stroke();
   g.save();
   g.translate(size / 2 - 7.5, size / 2 - 7.5);
   g.scale(15 / 24, 15 / 24);
-  g.strokeStyle = INK;
+  g.strokeStyle = "#ffffff";
   g.lineWidth = 2.8;
   g.lineCap = "round";
   g.lineJoin = "round";
@@ -53,7 +54,6 @@ function iconImage(kind: PoiKind): ImageData {
 
 export function installPoiLayers(m: LibreMap) {
   if (m.getSource(SOURCE)) return;
-  for (const k of POI_KINDS) if (!m.hasImage(`bs-poi-${k}`)) m.addImage(`bs-poi-${k}`, iconImage(k), { pixelRatio: 2 });
   m.addSource(SOURCE, { type: "geojson", data: EMPTY });
   // Names from street level (MapLibre zoom 14 = Leaflet 15); unnamed parking lots stay just an icon.
   const label: SymbolLayerSpecification["layout"] = {
@@ -65,14 +65,13 @@ export function installPoiLayers(m: LibreMap) {
     "text-max-width": 8,
     "text-optional": true,
   };
-  const paint: SymbolLayerSpecification["paint"] = { "text-halo-color": BG, "text-halo-width": 1.4 };
   m.addLayer({
     id: "bs-poi-parking",
     type: "symbol",
     source: SOURCE,
     filter: ["==", ["get", "kind"], "parking"],
     layout: { ...label, "icon-image": "bs-poi-parking", "icon-size": 0.85, "icon-padding": 1 },
-    paint: { ...paint, "text-color": POI.parking.color },
+    paint: { "text-halo-width": 1.4 },
   });
   m.addLayer({
     id: "bs-poi-main",
@@ -80,8 +79,23 @@ export function installPoiLayers(m: LibreMap) {
     source: SOURCE,
     filter: ["!=", ["get", "kind"], "parking"],
     layout: { ...label, "icon-image": ["concat", "bs-poi-", ["get", "kind"]], "icon-allow-overlap": true },
-    paint: { ...paint, "text-color": ["match", ["get", "kind"], "ev", POI.ev.color, POI.fuel.color] },
+    paint: { "text-halo-width": 1.4 },
   });
+}
+
+/** Icons and names for a theme (after installPoiLayers, and whenever the theme changes). */
+export function restylePoiLayers(m: LibreMap, theme: Theme) {
+  if (!m.getLayer("bs-poi-main")) return;
+  for (const k of POI_KINDS) {
+    const id = `bs-poi-${k}`;
+    if (m.hasImage(id)) m.updateImage(id, iconImage(k, theme));
+    else m.addImage(id, iconImage(k, theme), { pixelRatio: 2 });
+  }
+  const text = (k: PoiKind) => POI[k].text[theme];
+  const halo = BASEMAP[theme].halo;
+  m.setPaintProperty("bs-poi-parking", "text-color", text("parking"));
+  m.setPaintProperty("bs-poi-main", "text-color", ["match", ["get", "kind"], "ev", text("ev"), text("fuel")]);
+  for (const id of HIGHLIGHT_LAYERS) m.setPaintProperty(id, "text-halo-color", halo);
 }
 
 function geojson(pois: Poi[]): GeoJSON.FeatureCollection {

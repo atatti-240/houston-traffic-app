@@ -7,9 +7,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "@/components/app/AppContext";
 import { Legend, LayersButton, LiveCamsButton, ZoomButtons } from "@/components/app/MapChrome";
+import ReportButton from "@/components/reports/ReportButton";
 import { CauseChip, CauseDot, Icon, LevelDot, Logo, RoundButton, ago } from "@/components/ui";
 import { fmtTime, parseSim, toSimIso } from "@/lib/format";
-import { CAUSE, CAUSE_ORDER, C, ICON, type CauseKind } from "@/lib/theme";
+import { CAUSE, CAUSE_ORDER, C, ICON, SHADOW, type CauseKind } from "@/lib/theme";
 import type { Slowdown } from "@/lib/types";
 
 const LATER = [
@@ -24,8 +25,8 @@ function SearchBar({ onOpen, className = "" }: { onOpen: () => void; className?:
     <button
       type="button"
       onClick={onOpen}
-      className={`flex h-12 min-w-0 cursor-pointer items-center gap-2.5 rounded-3xl border border-edge bg-card px-4 text-left text-[15px] text-muted ${className}`}
-      style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
+      className={`flex h-12 min-w-0 cursor-pointer items-center gap-2.5 rounded-3xl bg-float px-4 text-left text-[15px] text-muted ${className}`}
+      style={{ boxShadow: SHADOW[1] }}
     >
       <Icon d={ICON.search} size={18} color={C.muted} />
       Search Houston
@@ -64,7 +65,7 @@ function TimeChips({ later, laterSel }: { later: (m: number) => void; laterSel: 
             onClick={() => later(o.min)}
             aria-pressed={on}
             className="h-7 cursor-pointer rounded-[14px] px-2.5 text-[12px] font-medium"
-            style={on ? { background: C.ink, color: "#11141A" } : { background: C.card, color: C.soft }}
+            style={on ? { background: C.sel, color: C.onSel } : { background: C.card, color: C.soft }}
           >
             {o.label}
           </button>
@@ -203,13 +204,18 @@ export default function LiveMap() {
       <div className={`pointer-events-auto absolute right-4 ${expanded ? "z-[960]" : "z-[900]"}`} style={{ bottom: 84 + sheetH + (expanded ? -24 : 16) }}>
         <LiveCamsButton />
       </div>
+      {!expanded && (
+        <div className="pointer-events-auto absolute left-4 z-[900]" style={{ bottom: 84 + sheetH + 16 }}>
+          <ReportButton />
+        </div>
+      )}
       <section
         ref={sheetRef}
         aria-label="Houston right now"
-        className="pointer-events-auto absolute right-0 left-0 z-[950] flex flex-col gap-2 rounded-t-3xl border-t border-line bg-bg px-5 pt-2.5 pb-3.5"
+        className="pointer-events-auto absolute right-0 left-0 z-[950] flex flex-col gap-2 rounded-t-3xl bg-bg px-5 pt-2.5 pb-3.5"
         style={{
           bottom: 84,
-          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+          boxShadow: SHADOW.up,
           maxHeight: expanded ? "min(70dvh, calc(100dvh - 273px))" : 156,
           transition: "max-height 200ms ease",
         }}

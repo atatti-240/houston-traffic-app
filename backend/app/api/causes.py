@@ -10,6 +10,7 @@ from app.causes import INCIDENT_CAUSE, CausesEngine, Slowdown, fmt, unusual
 from app.conditions.provider import ConditionsView
 from app.graph import Network
 from app.models import SlowdownWatch
+from app.reports import report_impact
 from app.services import Services
 from app.timeutil import iso
 
@@ -26,6 +27,9 @@ ALERT_GROUP = {
     "closure": "roadwork",
     "event": "event",
     "weather": "weather",
+    "flooding": "weather",
+    "police": "incident",
+    "pothole": "incident",
 }
 LOOKING = {"N": "north", "NE": "northeast", "E": "east", "SE": "southeast", "S": "south", "SW": "southwest",
            "W": "west", "NW": "northwest"}
@@ -59,6 +63,7 @@ def slowdown_json(s: Slowdown) -> dict:
         "speed_mph": round(s.speed_mph),
         "free_flow_mph": round(s.free_flow_mph),
         "usual_mph": round(s.usual_mph),
+        "speed_limit_mph": s.segment.speed_limit_mph,  # posted limit (OpenStreetMap); None = not known
         "lat": s.lat,
         "lng": s.lng,
         "highlight": s.highlight,
@@ -157,6 +162,8 @@ def unwatch(segment_id: str, svc: Services = Depends(get_services)):
 
 
 def _impact(kind: str, inc, end, delay_min: int | None, masked: bool = False) -> str:
+    if (report := report_impact(inc, delay_min, masked)) is not None:
+        return report
     lanes = f"{inc.lanes_blocked} lane{'s' if inc.lanes_blocked != 1 else ''} blocked"
     first = {
         "crash": lanes,
@@ -167,6 +174,9 @@ def _impact(kind: str, inc, end, delay_min: int | None, masked: bool = False) ->
         "closure": f"Closed until about {fmt(end)}",
         "event": f"Crowds until about {fmt(end)}",
         "weather": f"Until about {fmt(end)}",
+        "flooding": "Avoid if you can",
+        "police": "Police on scene",
+        "pothole": "Use caution",
     }.get(inc.kind, "Reported")
     if delay_min:
         return f"{first} · +{delay_min} min"
