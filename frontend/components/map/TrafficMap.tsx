@@ -273,8 +273,9 @@ export default function TrafficMap({
   const app = useApp();
   const { segments, levels, places, here, layers, live, go } = app;
   const scene = interactive ? app.scene : null;
-  // Driving: the live GPS dot (LiveLocation) takes the place of the static one
-  const liveDot = useDrive((s) => s.active && !!s.fix);
+  // Driving: the live GPS dot (LiveLocation) takes the place of the static one, and a tap on the map only moves it
+  // (no leaving the drive for a road's or a camera's screen)
+  const driving = useDrive((s) => s.active);
   return (
     <MapContainer
       center={center ?? HOUSTON_CENTER}
@@ -308,12 +309,13 @@ export default function TrafficMap({
         const w = s.road_class === "freeway" ? 5 : 3.5;
         return (
           <Polyline
-            key={`c-${s.id}`}
+            key={`c-${s.id}${driving ? "-drive" : ""}`}
             positions={geom}
             pathOptions={{ color: LEVEL[lv].color, weight: w, opacity: 0.95 }}
-            eventHandlers={interactive ? { click: () => go({ name: "why", id: s.id }) } : undefined}
+            interactive={interactive && !driving}
+            eventHandlers={interactive && !driving ? { click: () => go({ name: "why", id: s.id }) } : undefined}
           >
-            {interactive && (
+            {interactive && !driving && (
               <Tooltip sticky className="dark-tip">
                 {s.name} ({s.direction}) · {LEVEL[lv].label}
               </Tooltip>
@@ -369,7 +371,7 @@ export default function TrafficMap({
         ))}
 
       {/* Cameras layer */}
-      {interactive && layers.cameras &&
+      {interactive && !driving && layers.cameras &&
         (live?.cameras ?? []).map((cam) => (
           <CircleMarker
             key={`cam-${cam.id}`}
@@ -393,7 +395,7 @@ export default function TrafficMap({
       ))}
 
       {/* You are here */}
-      {here && !(interactive && liveDot) && (
+      {here && !(interactive && driving) && (
         <>
           <CircleMarker center={[here.lat, here.lng]} radius={16} interactive={false} pathOptions={{ color: "#3B6FD1", weight: 0, fillColor: "#3B6FD1", fillOpacity: 0.25 }} />
           <CircleMarker center={[here.lat, here.lng]} radius={6} interactive={false} pathOptions={{ color: "#FFFFFF", weight: 2, fillColor: "#6E9BFF", fillOpacity: 1 }} />
@@ -423,7 +425,7 @@ export default function TrafficMap({
         ))}
       </Pane>
 
-      {interactive && <CauseMarkers />}
+      {interactive && !driving && <CauseMarkers />}
       {interactive && <LiveLocation />}
     </MapContainer>
   );

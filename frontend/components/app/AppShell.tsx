@@ -234,18 +234,21 @@ function Shell() {
           <DemoBar onDemo={() => setDemo(true)} />
         </div>
       )}
-      {!isDesktop && down}
-      <Toasts
-        toasts={toasts}
-        // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable; driving: under the
-        // next-turn banner.
-        top={demo && !isDesktop ? 64 : isDrive && !isDesktop ? 280 : undefined}
-        dismiss={(id) => {
-          clearTimeout(timers.current.get(id));
-          timers.current.delete(id);
-          setToasts((t) => t.filter((x) => x.id !== id));
-        }}
-      />
+      {/* Driving on a phone: the drive shows it among its notes, clear of End; no toasts over the map (they're in
+          Alerts, and the drive's voice and notes cover what's on the route) */}
+      {!isDesktop && !isDrive && down}
+      {!(isDrive && !isDesktop) && (
+        <Toasts
+          toasts={toasts}
+          // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable.
+          top={demo && !isDesktop ? 64 : undefined}
+          dismiss={(id) => {
+            clearTimeout(timers.current.get(id));
+            timers.current.delete(id);
+            setToasts((t) => t.filter((x) => x.id !== id));
+          }}
+        />
+      )}
       {demo && <DemoRunner onExit={() => setDemo(false)} />}
     </main>
   );
