@@ -11,7 +11,7 @@ Google Maps' look: flat colors (no gradients or glows), light elevation shadows,
 
 ```bash
 npm install
-npm run dev   # http://localhost:3000, expects the API at NEXT_PUBLIC_API_URL (default http://localhost:8000)
+npm run dev   # app at http://localhost:3000/home (the landing page is at /), expects the API at NEXT_PUBLIC_API_URL (default http://localhost:8000)
 ```
 
 - `components/HomeClient.tsx`: page state, polling, demo actions

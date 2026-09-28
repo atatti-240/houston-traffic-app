@@ -178,7 +178,7 @@ function Details({ trip, at, error, now, onRefresh, busy }: { trip: Trip; at: nu
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[13px] text-muted">
         <span>{leftMin > 0 ? `Link works for another ${duration(leftMin)}` : "This link is about to expire"}</span>
-        <a href="/" className="font-medium">
+        <a href="/home" className="font-medium">
           Open BlindSpot →
         </a>
       </div>
@@ -266,7 +266,7 @@ export default function SharedTrip({ id }: { id: string }) {
       <Notice
         title="This link expired"
         action={
-          <a href="/" className={pill} style={{ background: C.accent, color: C.onAccent }}>
+          <a href="/home" className={pill} style={{ background: C.accent, color: C.onAccent }}>
             Open BlindSpot
           </a>
         }

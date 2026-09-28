@@ -18,14 +18,15 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// The app is at /home (the landing page is at /): focus an open app window, else open the app.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const c of clients) {
-        if ("focus" in c) return c.focus();
+        if (new URL(c.url).pathname.startsWith("/home") && "focus" in c) return c.focus();
       }
-      return self.clients.openWindow("/");
+      return self.clients.openWindow("/home");
     }),
   );
 });
