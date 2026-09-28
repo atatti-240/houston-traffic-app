@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ARRIVE_M, buildCourse, hazards, locate, timeAt } from "./course.ts";
+import { ARRIVE_M, buildCourse, hazards, locate, sameRoad, timeAt } from "./course.ts";
 import { CORNER, END, START, testRoute } from "./fixture.ts";
 import { bearing, distanceM, measure, offset, pointAt, project } from "./geo.ts";
 
@@ -147,4 +147,55 @@ test("course: speed limits as roadrules sends them (whole mph or null) are read,
   assert.equal(p2.segment?.speedLimitMph, null);
   // Off our roads (on the way to them): no segment, so no limit
   assert.equal(locate(c, offset(offset(START, 90, 500), 180, 200)).segment, null);
+});
+
+test("sameRoad: a freeway by its route number (not its frontage road), a street by its name", () => {
+  assert.equal(sameRoad("I-69 Southwest Fwy", "I-69/US-59 Southwest Fwy"), true);
+  assert.equal(sameRoad("I-69 Southwest Fwy", "Southwest Fwy Frontage Rd"), false);
+  assert.equal(sameRoad("I-69 Southwest Fwy", "Smith St"), false);
+  assert.equal(sameRoad("I-610 West Loop", "I-610 West Loop South Fwy"), true);
+  assert.equal(sameRoad("I-610 West Loop", "West Loop South Frontage Rd"), false);
+  assert.equal(sameRoad("BW-8 Sam Houston Tollway", "BW-8 Sam Houston Tollway"), true);
+  assert.equal(sameRoad("SH-288 South Fwy", "TX-288 South Fwy"), true);
+  assert.equal(sameRoad("Westheimer Rd", "Westheimer Rd"), true);
+  assert.equal(sameRoad("Lawndale / Cullen Blvd", "Cullen Blvd"), true);
+  assert.equal(sameRoad("Lawndale / Cullen Blvd", "Lawndale St"), true);
+  assert.equal(sameRoad("Main St", "Smith St"), false);
+  assert.equal(sameRoad("Westheimer Rd", ""), false); // a ramp
+});
+
+test("locate: a freeway's limit only once the directions have you on it, not on the street beside it or its exit", () => {
+  // Smith St for 1 km under a freeway segment (posted 60) whose shape runs along the whole first leg, then the merge,
+  // the exit ramp at 1600 m, the turn onto North St
+  const r = testRoute();
+  const [depart, turn, arrive] = r.directions!.steps;
+  const at = (m: number) => offset(START, 90, m);
+  const onto = (instruction: string, type: string, m: number, road: string, distance_m: number) => ({
+    ...depart,
+    instruction,
+    road,
+    distance_m,
+    maneuver: { ...depart.maneuver, type, modifier: "slight right", location: at(m) },
+  });
+  r.directions!.steps = [
+    { ...depart, instruction: "Head east on Smith St", road: "Smith St", distance_m: 1000 },
+    onto("Merge onto I-69/US-59 Southwest Fwy", "merge", 1000, "I-69/US-59 Southwest Fwy", 600),
+    onto("Take exit 124", "off ramp", 1600, "", 400),
+    turn,
+    arrive,
+  ];
+  r.segments[0] = { ...r.segments[0], name: "I-69 Southwest Fwy", road_class: "freeway", speed_limit_mph: 60 };
+  const c = buildCourse(r);
+  assert.equal(c.segments[0].onLine, true);
+  const p1 = locate(c, at(500));
+  assert.equal(p1.segment, null); // on Smith St: no 60
+  const p2 = locate(c, at(1300), p1.along);
+  assert.equal(p2.segment?.speedLimitMph, 60);
+  const p3 = locate(c, at(1800), p2.along);
+  assert.equal(p3.segment, null); // on the exit ramp
+  const p4 = locate(c, offset(CORNER, 0, 300), p3.along);
+  assert.equal(p4.segment?.id, "S2");
+  // Without turn-by-turn there's nothing to check the road against: the segment under you
+  const flat = buildCourse({ ...r, directions: testRoute({ withSteps: false }).directions });
+  assert.equal(locate(flat, at(500)).segment?.speedLimitMph, 60);
 });
