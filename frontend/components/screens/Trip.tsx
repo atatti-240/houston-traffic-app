@@ -450,7 +450,7 @@ export default function Trip() {
 
   // ---- route choices (single trips): the picked one, and directions for the others as they come ----
   const options = !result || result.kind === "plan" ? NO_ROUTES : result.kind === "rec" ? (result.rec.routes ?? [result.rec.route]) : result.routes;
-  const choices = useRouteChoices(options, origin, to);
+  const choices = useRouteChoices(options, origin, to, safety === 0);
 
   // ---- the map: the routes (picked one solid, others dashed) or the plan's legs, with start / stops / end ----
   const startPt = origin !== undefined ? placePoint(places, origin) : null;
