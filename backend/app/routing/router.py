@@ -35,6 +35,15 @@ ALT_PENALTY = 1.5  # cost multiplier on the best route's segments when looking f
 
 TRAIN_REASON_P = 0.25
 CRASH_REASON_RISK = 0.45
+# What people see: the 0..1 risk score (the router's weighting) shown as a chance per trip between
+# 1% and 5%, the range real per-trip crash odds sit in. frontend/lib/format.ts crashChance matches it.
+CRASH_CHANCE_MIN = 0.01
+CRASH_CHANCE_MAX = 0.05
+
+
+def crash_chance(risk: float) -> float:
+    """The 0..1 crash-risk score as the chance people see (1% to 5%)."""
+    return CRASH_CHANCE_MIN + (CRASH_CHANCE_MAX - CRASH_CHANCE_MIN) * min(1.0, max(0.0, risk))
 CONGESTION_REASON_SCORE = 0.5
 LIVE_REASON_EXTRA = 0.15  # live congestion this much above the prediction is worth saying
 SAFE_REASON_MIN_DROP = 0.05  # don't brag about a crash-exposure drop smaller than this
@@ -586,7 +595,7 @@ class Router:
                 risk = max(s.crash_risk for s in stretch)
                 jam = max(stretch, key=lambda s: s.congestion)
                 if chosen.safe_path and risk >= CRASH_REASON_RISK:
-                    reasons.append(f"Avoided {where}: crash risk {risk:.0%} around {_fmt(first.enter_at)}")
+                    reasons.append(f"Avoided {where}: crash risk {crash_chance(risk):.1%} around {_fmt(first.enter_at)}")
                 elif jam.congestion >= CONGESTION_REASON_SCORE:
                     if jam.live_weight >= 0.3:
                         src = _provenance(jam.congestion_source, jam.live_updated_at, now)
@@ -643,7 +652,7 @@ class Router:
             if s.crash_risk >= CRASH_REASON_RISK and s.road_class == "freeway":
                 worst_crash[s.name] = max(worst_crash.get(s.name, 0.0), s.crash_risk)
         for name, risk in worst_crash.items():
-            reasons.append(f"Heads up: elevated crash risk on {name} ({risk:.0%})")
+            reasons.append(f"Heads up: elevated crash risk on {name} ({crash_chance(risk):.1%})")
 
         # Missing live feeds go first so the reason cap never hides them.
         notes = []
