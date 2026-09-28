@@ -134,6 +134,10 @@ export function turnCalls(
     const text = arrive
       ? `In ${spokenDistance(d)}, ${place} is ${arriveSide(cur.step)}`
       : `In ${spokenDistance(d)}, ${lower(cur.step.instruction)}`;
+    // An exit that comes up already about a quarter mile off: this is its quarter-mile call (not the same words again
+    // a few seconds later)
+    if (highway && far > QUARTER_M && spokenDistance(d) === spokenDistance(QUARTER_M))
+      return [{ key: key(n, "quarter"), text, group: "turn", covers: [key(n, "soon")] }];
     return [{ key: key(n, "soon"), text, group: "turn" }];
   }
   // A long stretch right after a turn: say how long ("Continue on I-69 for 5 miles")
