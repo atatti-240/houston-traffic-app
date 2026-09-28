@@ -51,6 +51,7 @@ UTURN_NEAR_VIA_M = 300  # a U-turn this close to a via point means the via snapp
 ON_ROAD_M = 25  # OSRM's line this close to our traced road is on it (frontage roads are farther)
 VIA_BEARING_RANGE = 45
 ACCESS_BEARING_RANGE = 60
+START_BEARING_RANGE = 90  # a re-plan while driving starts the way you're heading (GPS headings wobble)
 MAX_VIAS = 25
 SIMPLIFY_M = 4
 CACHE_SIZE = 256
@@ -78,6 +79,12 @@ class Endpoint:
     lat: float
     lng: float
     is_point: bool  # an arbitrary point (a shop, a dropped pin), not one of our places
+    bearing: int | None = None  # the way you're heading there (a re-plan while driving): the route starts that way
+
+    @property
+    def start_bearing(self) -> tuple[int, int] | None:
+        """OSRM's bearing for this point as the start: snap to the side of the road going this way."""
+        return None if self.bearing is None else (self.bearing, START_BEARING_RANGE)
 
     @property
     def latlng(self) -> list[float]:
@@ -262,7 +269,7 @@ class DoorDirections:
     @staticmethod
     def key(segment_ids: list[str], origin: Endpoint, destination: Endpoint) -> tuple:
         r = lambda x: round(x, 4)  # noqa: E731  (~10 m)
-        return (r(origin.lat), r(origin.lng), r(destination.lat), r(destination.lng), tuple(segment_ids))
+        return (r(origin.lat), r(origin.lng), origin.bearing, r(destination.lat), r(destination.lng), tuple(segment_ids))
 
     def cached(self, segments: list[SegmentInfo], origin: Endpoint, destination: Endpoint) -> DoorPath | None:
         with self._lock:
@@ -380,7 +387,7 @@ class DoorDirections:
     def _along(self, corr: Corridor, vias: list[Via], o: Endpoint, d: Endpoint) -> DoorPath:
         """OSRM through via points along our roads, one leg."""
         pts = [o.latlng, *[list(v.point) for v in vias], d.latlng]
-        bearings = [None, *[(v.bearing, VIA_BEARING_RANGE) for v in vias], None]
+        bearings = [o.start_bearing, *[(v.bearing, VIA_BEARING_RANGE) for v in vias], None]
         radiuses = [None, *[VIA_RADIUS_M] * len(vias), None]
         r = self.client.route(pts, bearings, radiuses, via_only=True, annotations=True)
         geom = _line(r["geometry"]["coordinates"])
@@ -440,7 +447,7 @@ class DoorDirections:
         on, off = vias[0], vias[-1]
         mids = [on] if on == off else [on, off]
         pts = [o.latlng, *[list(v.point) for v in mids], d.latlng]
-        bearings = [None, *[(v.bearing, ACCESS_BEARING_RANGE) for v in mids], None]
+        bearings = [o.start_bearing, *[(v.bearing, ACCESS_BEARING_RANGE) for v in mids], None]
         radiuses = [None, *[VIA_RADIUS_M * 2] * len(mids), None]
         r = self.client.route(pts, bearings, radiuses)
         legs = r["legs"]
@@ -474,7 +481,7 @@ class DoorDirections:
 
     def _direct(self, corr: Corridor, o: Endpoint, d: Endpoint, at: float) -> DoorPath:
         """Too short to follow our roads: OSRM from door to door."""
-        r = self.client.route([o.latlng, d.latlng])
+        r = self.client.route([o.latlng, d.latlng], [o.start_bearing, None] if o.start_bearing else None)
         limit = 2 * geo.dist_m(o.latlng, d.latlng) + 2000
         if r.get("distance", 0.0) > limit:
             raise Rejected(f"{r.get('distance', 0):.0f} m for a {geo.dist_m(o.latlng, d.latlng):.0f} m hop")

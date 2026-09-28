@@ -20,6 +20,7 @@ import Nearby from "@/components/places/Nearby";
 import Alerts from "@/components/screens/Alerts";
 import Cameras from "@/components/screens/Cameras";
 import Causes from "@/components/screens/Causes";
+import Drive from "@/components/screens/Drive";
 import LiveMap from "@/components/screens/LiveMap";
 import Trip from "@/components/screens/Trip";
 import ModeTrip from "@/components/screens/Trip/ModeTrip";
@@ -38,6 +39,8 @@ function ScreenView({ screen }: { screen: Screen }) {
       return <WhereTo />;
     case "trip":
       return screen.travel ? <ModeTrip key={JSON.stringify(screen.to)} /> : <Trip key={JSON.stringify(screen.to)} />;
+    case "drive":
+      return <Drive />;
     case "map":
       return <LiveMap />;
     case "cameras":
@@ -154,10 +157,12 @@ function Shell() {
 
   const tabScreen = tabOf(screen) !== null;
   const isMap = screen.name === "map";
+  const isDrive = screen.name === "drive";
   // Screens shown as a sheet over the lower part of the map on a phone (the route or places above it).
   const isSheet = screen.name === "trip" || screen.name === "nearby";
   // Phone screens that cover the whole map: take the map out of the tab order and the a11y tree.
-  const mapHidden = !isDesktop && !isMap && !isSheet;
+  // Driving draws its banner and controls straight over the map, so the map stays live.
+  const mapHidden = !isDesktop && !isMap && !isSheet && !isDrive;
 
   let panel: ReactNode;
   if (isDesktop) {
@@ -174,6 +179,13 @@ function Shell() {
       <div className="pointer-events-none absolute inset-0 z-[1000] flex flex-col justify-end">
         <ScreenView screen={screen} />
         <BottomNav />
+      </div>
+    );
+  } else if (isDrive) {
+    // Phone driving: no sheet; the drive screen places its own cards over the map.
+    panel = (
+      <div className="pointer-events-none absolute inset-0 z-[1000] text-ink">
+        <ScreenView screen={screen} />
       </div>
     );
   } else if (isSheet) {
@@ -228,17 +240,21 @@ function Shell() {
           <DemoBar onDemo={() => setDemo(true)} />
         </div>
       )}
-      {!isDesktop && down}
-      <Toasts
-        toasts={toasts}
-        // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable.
-        top={demo && !isDesktop ? 64 : undefined}
-        dismiss={(id) => {
-          clearTimeout(timers.current.get(id));
-          timers.current.delete(id);
-          setToasts((t) => t.filter((x) => x.id !== id));
-        }}
-      />
+      {/* Driving on a phone: the drive shows it among its notes, clear of End; no toasts over the map (they're in
+          Alerts, and the drive's voice and notes cover what's on the route) */}
+      {!isDesktop && !isDrive && down}
+      {!(isDrive && !isDesktop) && (
+        <Toasts
+          toasts={toasts}
+          // Phone: under the demo bar (fixed at the top), so its Next and Exit buttons stay tappable.
+          top={demo && !isDesktop ? 64 : undefined}
+          dismiss={(id) => {
+            clearTimeout(timers.current.get(id));
+            timers.current.delete(id);
+            setToasts((t) => t.filter((x) => x.id !== id));
+          }}
+        />
+      )}
       {demo && <DemoRunner onExit={() => setDemo(false)} />}
     </main>
   );

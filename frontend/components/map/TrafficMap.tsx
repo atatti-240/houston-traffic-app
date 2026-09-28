@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CircleMarker, MapContainer, Marker, Pane, Polyline, Popup, Tooltip, useMap, useMapEvents } from "react-leaflet";
 
 import { useApp, type MapHandle, type MapScene } from "@/components/app/AppContext";
+import { useDrive } from "@/components/drive/store";
+import LiveLocation from "@/components/map/LiveLocation";
 import Reports from "@/components/map/Reports";
 import RouteOptions from "@/components/map/RouteOptions";
 import LiveDot from "@/components/map/LiveDot";
@@ -296,6 +298,11 @@ export default function TrafficMap({
   const app = useApp();
   const { segments, levels, places, here, layers, live, go } = app;
   const scene = interactive ? app.scene : null;
+  // Driving: the live GPS dot (LiveLocation) takes the place of the static one, and a tap on the map only moves it
+  // (no leaving the drive for a road's or a camera's screen)
+  const driving = useDrive((s) => s.active);
+  // The live dot shows only once driving has a fix: until then the static one stays
+  const liveDot = useDrive((s) => s.active && s.fix !== null);
   return (
     <MapContainer
       center={center ?? HOUSTON_CENTER}
@@ -328,12 +335,13 @@ export default function TrafficMap({
         const w = s.road_class === "freeway" ? 5 : 3.5;
         return (
           <Polyline
-            key={`c-${s.id}`}
+            key={`c-${s.id}${driving ? "-drive" : ""}`}
             positions={geom}
             pathOptions={{ color: LEVEL[lv].color, weight: w, opacity: 0.95 }}
-            eventHandlers={interactive ? { click: () => go({ name: "why", id: s.id }) } : undefined}
+            interactive={interactive && !driving}
+            eventHandlers={interactive && !driving ? { click: () => go({ name: "why", id: s.id }) } : undefined}
           >
-            {interactive && (
+            {interactive && !driving && (
               <Tooltip sticky className="dark-tip">
                 {s.name} ({s.direction}) · {LEVEL[lv].label}
               </Tooltip>
@@ -394,7 +402,7 @@ export default function TrafficMap({
         ))}
 
       {/* Cameras layer */}
-      {interactive && layers.cameras &&
+      {interactive && !driving && layers.cameras &&
         (live?.cameras ?? []).map((cam) => (
           <CircleMarker
             key={`cam-${cam.id}`}
@@ -421,8 +429,11 @@ export default function TrafficMap({
         </CircleMarker>
       ))}
 
-      {/* You are here: the live blue dot (or the default place's, with location off) */}
-      <LiveDot fallback={here ? [here.lat, here.lng] : null} follow={interactive ? "button" : "always"} />
+      {/* You are here: the live blue dot (or the default place's, with location off). While driving with a fix,
+          LiveLocation draws it instead and does the following (so there's always exactly one dot, one follow) */}
+      {!(interactive && liveDot) && (
+        <LiveDot fallback={here ? [here.lat, here.lng] : null} follow={!interactive ? "always" : driving ? "none" : "button"} />
+      )}
 
       {/* Scene points: start / stops / end (own pane: above the route lines and cause icons) */}
       <Pane name="scene-points" style={{ zIndex: 640 }}>
@@ -447,10 +458,13 @@ export default function TrafficMap({
         ))}
       </Pane>
 
-      {interactive && <CauseMarkers />}
-      {/* Home, Work, favorites, the nearby list, and the card of any place you tap */}
-      {interactive && <PlacesLayer />}
+      {interactive && !driving && <CauseMarkers />}
+      {/* Home, Work, favorites, the nearby list, and the card of any place you tap (not while driving: its card
+          would leave the drive for a trip) */}
+      {interactive && !driving && <PlacesLayer />}
+      {/* Driver reports stay on while driving: hazards ahead, and their card doesn't leave the drive */}
       {interactive && <Reports />}
+      {interactive && <LiveLocation />}
     </MapContainer>
   );
 }

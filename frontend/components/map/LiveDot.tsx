@@ -6,7 +6,8 @@
  * (the app's default place), so there's always exactly one dot.
  *
  * Follow: the locate button centers on you and keeps you in view until you drag the map away
- * (`follow="button"`). The small Where to map always follows (`follow="always"`).
+ * (`follow="button"`). The small Where to map always follows (`follow="always"`). While driving mode waits
+ * for its first fix, the dot stays put and driving does the following (`follow="none"`).
  *
  * Leaflet layers are made once and moved in place, so a fix never re-creates (or flickers) the dot.
  */
@@ -49,7 +50,7 @@ function ensurePane(map: L.Map, name: string, z: number) {
 
 const ease = (t: number) => 1 - (1 - t) ** 3;
 
-export default function LiveDot({ fallback, follow }: { fallback: LatLngTuple | null; follow: "button" | "always" }) {
+export default function LiveDot({ fallback, follow }: { fallback: LatLngTuple | null; follow: "button" | "always" | "none" }) {
   const map = useMap();
   const fix = useLiveFix();
   const { on: followOn, seq } = useFollow();
@@ -57,7 +58,7 @@ export default function LiveDot({ fallback, follow }: { fallback: LatLngTuple | 
   const target: LatLngTuple | null = live ? [live.lat, live.lng] : fallback;
   const radius = live ? Math.min(live.accuracy, MAX_ACCURACY_M) : 0;
   const heading = live?.heading ?? null;
-  const following = follow === "always" || followOn;
+  const following = follow === "always" || (follow === "button" && followOn);
 
   const layers = useRef<{ marker: L.Marker; circle: L.Circle } | null>(null);
   const shown = useRef<{ pos: LatLngTuple; radius: number } | null>(null);

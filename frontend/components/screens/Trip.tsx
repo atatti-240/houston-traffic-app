@@ -19,10 +19,11 @@ import { BackHeader, Card, Icon, LevelPill, PillButton } from "@/components/ui";
 import { api } from "@/lib/api";
 import { recommendChoices, routeChoices } from "@/lib/directions";
 import { crashChance, fmtDayTime, fmtTime, parseSim, toSimIso } from "@/lib/format";
-import { avoidBody, sameAvoid, type Avoid } from "@/lib/roadrules";
+import { avoidBody, avoidParam, sameAvoid, type Avoid } from "@/lib/roadrules";
 import { CAUSE, C, ICON, LEVEL, SHADOW, tint } from "@/lib/theme";
 import type { Confidence, LatLngTuple, Location, PlaceIn, Recommendation, Route, Trip as SavedTrip, TripPlanRequest } from "@/lib/types";
 
+import StartDrive from "./Drive/StartDrive";
 import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type TimedPlan } from "./Trip/plan";
 import TripReports from "./Trip/Reports";
 import { AvoidToggles, RouteRules, TollLine, useAvoid } from "./Trip/RoadRules";
@@ -861,6 +862,17 @@ export default function Trip() {
       <TripReports result={hidden || !result ? null : result.kind === "plan" ? result : picked ? { best: picked } : null} />
 
       {!sameSpot && <TripPlaceCard trip={params} arriveAt={outdated ? null : arriveAt} />}
+
+      {!hidden && result && result.kind !== "plan" && choices.selected && to !== undefined && (
+        <StartDrive
+          route={choices.selected}
+          // Without its own start it drives from where you are (the live GPS, else the app's "Your location"), with
+          // the same Avoid choices for its re-plans
+          trip={{ to, toName, from: params?.from, fromName: params?.from !== undefined ? fromName : undefined, safety, avoid: avoidParam(avoidBody(avoid)) }}
+          busy={stale}
+          advisedAt={result.kind === "rec" && result.rec.on_time && now && minutesBetween(now, result.rec.depart_at) > 0 ? result.rec.depart_at : null}
+        />
+      )}
 
       {/* When, and how */}
       <div className="flex flex-col gap-4">
