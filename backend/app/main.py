@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
-from app.api import causes, cv, demo, directions, geo, network, planning, plans, reports, shares, travel
+from app.api import causes, cv, demo, directions, geo, hazards, network, planning, plans, reports, shares, travel
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import RoadSegment, ScoreEntry
@@ -123,6 +123,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.include_router(reports.router)
     app.include_router(directions.router)
     app.include_router(travel.router)
+    app.include_router(hazards.router)
     return app
 
 
