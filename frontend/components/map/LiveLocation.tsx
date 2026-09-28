@@ -34,7 +34,9 @@ export default function LiveLocation() {
     const { active: on, follow: following, fix: f } = drive.get();
     if (!on || !following || !f) return;
     const zoom = reached.current ? map.getZoom() : Math.max(map.getZoom(), FOLLOW_ZOOM);
-    map.setView([f.lat, f.lng], zoom, { animate: true });
+    // Every fix pans the map: no gliding for people who asked for less motion
+    const still = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    map.setView([f.lat, f.lng], zoom, { animate: !still });
   }, [map]);
 
   useMapEvents({

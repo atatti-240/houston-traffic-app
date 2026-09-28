@@ -4,7 +4,8 @@
  * Driving mode's shared bits outside the app context (they change every second, and only the map's you-are-here
  * layer and the driving screen care):
  *  - where you are (the latest fix) and whether the map follows you,
- *  - the route handed from Trip's Start button to the driving screen.
+ *  - the route handed from Trip's Start button to the driving screen (kept for the tab's session, so a reload goes on
+ *    with the route you picked, not whichever is fastest now).
  */
 
 import { useSyncExternalStore } from "react";
@@ -20,6 +21,9 @@ export interface Fix {
   heading: number | null;
   /** m/s, when known */
   speed: number | null;
+  /** The demo's simulated drive: the speed it stands for (its `speed` is sped up), so turns are called at the
+   * distances a real drive would get */
+  realSpeed?: number;
   /** When it was taken (ms) */
   at: number;
   /** Real GPS, the demo's simulated drive, or the trip's start (no location) */
@@ -83,14 +87,26 @@ export interface DriveTrip {
 
 export const tripKey = (t: DriveTrip) => JSON.stringify([t.to, t.from ?? null, t.safety ?? 0]);
 
-let handed: { key: string; route: Route } | null = null;
+type Handed = { key: string; route: Route };
+let handed: Handed | null = null;
+const HANDED_KEY = "blindspot.drive";
 
-/** Trip's Start: the picked route, for the driving screen that's about to open. */
+/** Trip's Start (and each new route while driving): the route to drive, for the driving screen. */
 export function handOff(trip: DriveTrip, route: Route) {
   handed = { key: tripKey(trip), route };
+  try {
+    sessionStorage.setItem(HANDED_KEY, JSON.stringify(handed));
+  } catch {}
 }
 
-/** The route Start handed over for this trip (still there for Forward after End), or null after a reload. */
+/** The route handed over for this trip (still there for Forward after End, and after a reload), or null. */
 export function handedRoute(trip: DriveTrip): Route | null {
+  if (!handed) {
+    try {
+      const raw = sessionStorage.getItem(HANDED_KEY);
+      const saved = raw ? (JSON.parse(raw) as Handed | null) : null;
+      if (saved && typeof saved.key === "string" && Array.isArray(saved.route?.geometry)) handed = saved;
+    } catch {}
+  }
   return handed && handed.key === tripKey(trip) ? handed.route : null;
 }

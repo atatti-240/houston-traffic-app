@@ -74,6 +74,7 @@ export function useGps(onFix: (f: Fix) => void): { state: GpsState; allow: () =>
       navigator.permissions
         .query({ name: "geolocation" as PermissionName })
         .then((st) => {
+          if (!alive) return; // gone before the browser answered: nothing to listen for
           status = st;
           st.addEventListener("change", onChange);
           apply(st.state);

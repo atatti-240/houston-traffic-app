@@ -35,16 +35,19 @@ function Lanes({ lanes }: { lanes: NonNullable<RouteStep["lanes"]> }) {
   );
 }
 
-/** The next turn, big: arrow, live distance, what to do and the road, lanes when the map has them. */
+/** The next turn, big: arrow, live distance, what to do and the road, lanes when the map has them. `live`: a screen
+ * reader announces each new instruction (off while the voice says it anyway). */
 export function TurnBanner({
   step,
   distance,
   then,
+  live = true,
 }: {
   step: RouteStep;
   distance: number;
   /** The turn right after it, when it comes quickly */
   then: RouteStep | null;
+  live?: boolean;
 }) {
   const arrive = step.maneuver.type === "arrive";
   const showRoad = step.road && !step.instruction.includes(step.road);
@@ -62,7 +65,7 @@ export function TurnBanner({
           <span className="font-num text-[34px] leading-none tracking-[-0.02em] text-ink" data-testid="drive-distance">
             {fmtDistance(distance)}
           </span>
-          <span className="text-[19px] leading-snug font-semibold text-ink" aria-live="polite" data-testid="drive-instruction">
+          <span className="text-[19px] leading-snug font-semibold text-ink" aria-live={live ? "polite" : "off"} data-testid="drive-instruction">
             {step.instruction}
           </span>
           {showRoad && <span className="truncate text-[14px] text-soft">{step.road}</span>}
@@ -91,8 +94,11 @@ export function PlainBanner({ icon, title, sub, tone }: { icon: string; title: R
       <span className="flex h-[56px] w-[56px] shrink-0 items-center justify-center rounded-[16px]" style={{ background: tone ?? C.card, color: tone ? C.onAccent : C.ink }} aria-hidden="true">
         <Icon d={icon} size={32} width={2.2} />
       </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-1" aria-live="polite">
-        <span className="text-[21px] leading-tight font-semibold text-ink">{title}</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Only the title is announced: the rest (a distance) changes every second */}
+        <span className="text-[21px] leading-tight font-semibold text-ink" aria-live="polite">
+          {title}
+        </span>
         {sub && <span className="text-[14px] leading-snug text-soft">{sub}</span>}
       </div>
     </div>
@@ -116,13 +122,14 @@ export function SpeedLimit({ mph }: { mph: number }) {
   );
 }
 
-/** One status line under the banner (a hazard ahead, re-planning, location). */
-export function Note({ icon, tone, children, testId }: { icon: string; tone: string; children: ReactNode; testId?: string }) {
+/** One status line under the banner (a hazard ahead, re-planning, location). `live`: announced by screen readers
+ * when it changes (keep its text steady: a distance counting down would be read out every second). */
+export function Note({ icon, tone, children, testId, live = false }: { icon: string; tone: string; children: ReactNode; testId?: string; live?: boolean }) {
   return (
     <div
       className="flex items-start gap-2.5 rounded-[14px] border border-edge px-3.5 py-2.5 text-[14px] leading-snug"
       style={{ background: "rgba(30,34,43,0.96)", color: C.ink, boxShadow: "0 2px 12px rgba(0,0,0,0.45)" }}
-      role="status"
+      role={live ? "status" : undefined}
       data-testid={testId}
     >
       <Icon d={icon} size={18} color={tone} className="mt-px shrink-0" />
@@ -131,15 +138,27 @@ export function Note({ icon, tone, children, testId }: { icon: string; tone: str
   );
 }
 
+/** A button inside a note's text, still big enough to tap while driving. */
+export function InlineAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} className="-my-2.5 inline-flex h-11 cursor-pointer items-center px-1 align-middle font-medium text-accent">
+      {children}
+    </button>
+  );
+}
+
 /** Round floating button (mute, recenter). */
 export function FloatButton({
   label,
+  title,
   onClick,
   children,
   pressed,
   disabled,
 }: {
   label: string;
+  /** The tooltip, when it should say more than the label */
+  title?: string;
   onClick: () => void;
   children: ReactNode;
   pressed?: boolean;
@@ -149,7 +168,7 @@ export function FloatButton({
     <button
       type="button"
       aria-label={label}
-      title={label}
+      title={title ?? label}
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
