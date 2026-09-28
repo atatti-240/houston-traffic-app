@@ -370,9 +370,10 @@ export default function Trip() {
   }, [screen, mode, by, safety, stops]);
 
   const to = params?.to;
-  const origin: Location | undefined = params?.from ?? here?.place;
+  // No `from`: where you are (the device's own spot, door to door; or the default place when location is off).
+  const origin: Location | undefined = params?.from ?? here?.start;
   const toName = params?.toName ?? placeName(places, to);
-  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : here?.name) ?? "";
+  const fromName = params?.fromName ?? (params?.from ? placeName(places, params.from) : here?.startName) ?? "";
   const byOk = /^\d{2}:\d{2}$/.test(by);
   const sameSpot = origin !== undefined && to !== undefined && JSON.stringify(origin) === JSON.stringify(to) && !stops.length;
 
