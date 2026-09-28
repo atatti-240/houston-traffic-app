@@ -48,6 +48,37 @@ const LOGO_RED = "#E8322F";
 const LOGO_FILL = "#131418";
 const LOGO_GRADIENT = `linear-gradient(90deg, ${LOGO_RED}, #7A3FA8 50%, #2F5BE0)`;
 
+/** The app icon, as on the landing page (public/home): a lens with a red spot on a dark tile. */
+export function LogoMark({ size = 24 }: { size?: number }) {
+  // Gradient ids must be unique per instance: a hidden copy's ids would blank the visible one.
+  const id = useId().replace(/[^\w-]/g, "");
+  return (
+    <svg width={size} height={size} viewBox="0 0 180 180" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}ring`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#E8322F" />
+          <stop offset=".5" stopColor="#7A3FA8" />
+          <stop offset="1" stopColor="#2F5BE0" />
+        </linearGradient>
+        <radialGradient id={`${id}red`} cx=".1" cy=".5" r=".6">
+          <stop offset="0" stopColor="#E8322F" stopOpacity=".35" />
+          <stop offset="1" stopColor="#E8322F" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={`${id}blue`} cx=".95" cy=".6" r=".6">
+          <stop offset="0" stopColor="#2F5BE0" stopOpacity=".38" />
+          <stop offset="1" stopColor="#2F5BE0" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <rect width="180" height="180" rx="40" fill="#0B0D18" />
+      <rect width="180" height="180" rx="40" fill={`url(#${id}red)`} />
+      <rect width="180" height="180" rx="40" fill={`url(#${id}blue)`} />
+      <rect x="16" y="16" width="148" height="148" rx="30" fill="none" stroke={`url(#${id}ring)`} strokeWidth="7" />
+      <circle cx="90" cy="92" r="36" fill="none" stroke="#FFFFFF" strokeWidth="22" />
+      <circle cx="90" cy="92" r="12" fill="#E8322F" />
+    </svg>
+  );
+}
+
 /**
  * The "BlindSpot" wordmark (Figtree 900) in a pill with a gradient outline, and a red spot in the "o".
  * A white wordmark on the dark fill in both themes, like the app icon (`pill`: floating over the map, with a
