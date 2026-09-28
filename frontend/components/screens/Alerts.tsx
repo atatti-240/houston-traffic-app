@@ -172,7 +172,9 @@ function NoteRow({ n }: { n: AppNotification }) {
       go({
         name: "trip",
         to: trip.destination,
+        toName: trip.destination_name ?? undefined,
         from: trip.origin,
+        fromName: trip.origin_name ?? undefined,
         arriveBy: trip.arrive_by.slice(0, 5),
         safety: trip.safety_weight ?? (trip.safe_path ? 1 : 0),
         avoid: avoidParam(trip),

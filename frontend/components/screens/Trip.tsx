@@ -26,7 +26,7 @@ import { isSamePlan, planTrip, watchedPlans, withDeadline, type SavedPlan, type 
 import TripReports from "./Trip/Reports";
 import { AvoidToggles, RouteRules, TollLine, useAvoid } from "./Trip/RoadRules";
 import { Comparisons, RouteList } from "./Trip/RouteList";
-import { dataGeneration, placeName, placePoint, tripLevel } from "./Trip/shared";
+import { dataGeneration, placeName, placePoint, sameLocation, tripLevel } from "./Trip/shared";
 import ShareEta from "./Trip/ShareEta";
 import Steps from "./Trip/Steps";
 import { useRouteChoices } from "./Trip/useRouteChoices";
@@ -152,8 +152,8 @@ function findSaved(saved: Saved, k: Inputs): Omit<Watch, "key"> | null {
   if (k.mode !== "by") return null;
   const t = saved.trips.find(
     (t) =>
-      t.origin === o &&
-      t.destination === d &&
+      sameLocation(t.origin, o) &&
+      sameLocation(t.destination, d) &&
       t.arrive_by.slice(0, 5) === k.by &&
       [...t.days].sort().join() === WEEKDAYS.join() &&
       Math.abs((t.safety_weight ?? (t.safe_path ? 1 : 0)) - k.safety) < 1e-6 &&
@@ -520,7 +520,7 @@ export default function Trip() {
     if (found) setWatch({ key: inputs, ...found, existing: true });
   }
   const watching = watch?.key === inputs;
-  const canWatchTrip = !stops.length && mode === "by" && byOk && typeof origin === "string" && typeof to === "string";
+  const canWatchTrip = !stops.length && mode === "by" && byOk && origin !== undefined && to !== undefined;
   const canWatch = stops.length ? true : canWatchTrip;
 
   async function toggleWatch() {
@@ -558,8 +558,11 @@ export default function Trip() {
       } else if (canWatchTrip) {
         const trip = await api.createTrip({
           name: `${fromName} → ${toName}`,
-          origin: origin as string,
-          destination: to as string,
+          origin: origin as Location,
+          destination: to as Location,
+          // A point keeps its own name for the alerts (a place id has one already).
+          origin_name: typeof origin === "string" ? null : fromName || null,
+          destination_name: typeof to === "string" ? null : toName || null,
           arrive_by: by,
           days: WEEKDAYS,
           safe_path: safety >= 1,
@@ -957,7 +960,7 @@ export default function Trip() {
           <span className="text-center text-[12px] text-muted">
             {!canWatch
               ? mode === "by"
-                ? "Weekday alerts need a named place."
+                ? "Pick a time to arrive by."
                 : "Pick Arrive by to get told when to leave."
               : stops.length
                 ? "We re-check the plan every 5 min and tell you if the order or times change."
