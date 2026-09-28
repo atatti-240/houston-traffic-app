@@ -42,28 +42,63 @@ export function Icon({
   );
 }
 
-/** The BlindSpot mark: a ring with a yellow "spot" (flat colors). */
-export function LogoMark({ size = 24 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke={C.ink} strokeWidth="2.2" />
-      <circle cx="15.5" cy="9.5" r="3.5" fill="#fbbc04" />
-    </svg>
-  );
-}
+/** The brand gradient (red to purple to blue) and the red of the spot. Brand colors: the same in both themes. */
+const LOGO_RED = "#E8322F";
+const LOGO_GRADIENT = `linear-gradient(90deg, ${LOGO_RED}, #7A3FA8 50%, #2F5BE0)`;
 
-/** The "BlindSpot" wordmark (Figtree 800). `pill`: on a floating white / grey pill over the map. */
+/**
+ * The "BlindSpot" wordmark (Figtree 900) in a pill with a gradient outline, and a red spot in the "o".
+ * The pill is filled with the surface it sits on (the panel, or the floating surface when `pill`: over
+ * the map, with a shadow), so it reads in both themes. It hugs its text, even in a stretching flex column.
+ */
 export function Logo({ size = 18, pill = false }: { size?: number; pill?: boolean }) {
-  const inner = (
-    <>
-      <LogoMark size={size + 6} />
-      <span style={{ fontSize: size, fontWeight: 800, letterSpacing: "-0.02em" }}>BlindSpot</span>
-    </>
+  const surface = pill ? C.float : C.bg;
+  const mark = (
+    <span
+      role="img"
+      aria-label="BlindSpot"
+      style={{
+        fontFamily: "var(--font-figtree), system-ui, sans-serif",
+        display: "inline-flex",
+        alignItems: "center",
+        flexShrink: 0,
+        width: "fit-content",
+        padding: "0.22em 0.6em 0.26em",
+        borderRadius: 999,
+        border: "0.09em solid transparent",
+        background: `linear-gradient(${surface}, ${surface}) padding-box, ${LOGO_GRADIENT} border-box`,
+        color: C.ink,
+        fontSize: size,
+        fontWeight: 900,
+        letterSpacing: "-0.02em",
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      BlindSp
+      <span style={{ position: "relative", display: "inline-block" }}>
+        o
+        <span
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "0.52em",
+            width: "0.17em",
+            height: "0.17em",
+            marginLeft: "-0.085em",
+            borderRadius: "50%",
+            background: LOGO_RED,
+          }}
+        />
+      </span>
+      t
+    </span>
   );
-  if (!pill) return <div className="flex items-center gap-2 text-ink">{inner}</div>;
+  if (!pill) return mark;
+  // As tall as the other floating controls (36 px), so it lines up with them
   return (
-    <div className="flex h-9 items-center gap-2 rounded-[18px] bg-float pr-3.5 pl-2 text-ink shadow-e1">
-      {inner}
+    <div className="flex h-9 w-fit items-center">
+      <div className="flex rounded-full shadow-[var(--shadow-logo)]">{mark}</div>
     </div>
   );
 }

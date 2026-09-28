@@ -5,7 +5,7 @@ import { ThemeWatcher } from "@/lib/themeMode";
 import { THEME_BAR, THEME_SCRIPT } from "@/lib/themeScript";
 import "./globals.css";
 
-// Figtree for everything: body 400/500, labels 600, headings and the logo 700-800 (a variable font: every weight).
+// Figtree for everything: body 400/500, labels 600, headings 700-800, the logo 900 (a variable font: every weight).
 const figtree = Figtree({
   variable: "--font-figtree",
   subsets: ["latin"],
