@@ -16,11 +16,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.causes import CausesEngine, unusual
 from app.conditions.provider import FEEDS
-from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState
+from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState, parse_point
 from app.notifications.service import NotificationService
 from app.plan_io import plan_to_json, request_from_json
 from app.planner import Plan, plan_trip
 from app.recommender import Recommendation, recommend_departure, route_summary
+from app.routing.avoid import Avoid, avoiding
 from app.routing.router import Router
 
 LOOKAHEAD = timedelta(hours=3)  # start watching a trip this long before its arrive-by time
@@ -196,7 +197,7 @@ class TripScheduler:
 
                 def replan(earliest: datetime):
                     return plan_trip(
-                        self.router, start, stops, earliest, now, weight,
+                        avoiding(self.router, Avoid.from_json(sp.request_json)), start, stops, earliest, now, weight,
                         buffer_min=buffer_min, view=view, prefer_order=_current_order(result, stops),
                     )
 
@@ -297,6 +298,11 @@ class TripScheduler:
                 return arrive_by
         return None
 
+    def _node(self, loc: str) -> str:
+        """A trip's place id, or its point snapped to the road map (like resolve_location)."""
+        pt = parse_point(loc)
+        return self.router.network.nearest_node(*pt).id if pt else loc
+
     def _check_trip(self, session: Session, trip: Trip, now: datetime) -> Notification | None:
         arrive_by = self._watched_arrival(trip, now) or self._deferred_arrival(session, trip, now)
         if arrive_by is None:
@@ -312,7 +318,8 @@ class TripScheduler:
 
         # Never recommend a departure that has already passed.
         rec = recommend_departure(
-            self.router, trip.origin, trip.destination, arrive_by, earliest=now, safety_weight=trip.weight
+            avoiding(self.router, trip.avoid), self._node(trip.origin), self._node(trip.destination), arrive_by, earliest=now,
+            safety_weight=trip.weight,
         )
         reason = _top_reason(rec)
         summary = route_summary(rec.route)

@@ -1,37 +1,44 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { Figtree } from "next/font/google";
+
+import { ThemeWatcher } from "@/lib/themeMode";
+import { THEME_BAR, THEME_SCRIPT } from "@/lib/themeScript";
 import "./globals.css";
 
-const grotesk = Space_Grotesk({
-  variable: "--font-grotesk",
+// Figtree for everything: body 400/500, labels 600, headings 700-800, the logo 900 (a variable font: every weight).
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
   title: "BlindSpot",
   description: "Maps show you traffic. BlindSpot shows you why, and when to leave.",
-  // "black", not "black-translucent": the page must not run under the iOS status bar (no safe-area offsets).
-  appleWebApp: { capable: true, title: "BlindSpot", statusBarStyle: "black" },
+  // "default", not "black-translucent": the page must not run under the iOS status bar (no safe-area offsets).
+  appleWebApp: { capable: true, title: "BlindSpot", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#111318",
-  colorScheme: "dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_BAR.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_BAR.dark },
+  ],
+  colorScheme: "light dark",
   width: "device-width",
   initialScale: 1,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${grotesk.variable} ${plexMono.variable} h-full antialiased`}>
-      <body className="min-h-full bg-bg text-ink">{children}</body>
+    // The theme script sets data-theme before the first paint, so the server's html differs from the DOM on purpose.
+    <html lang="en" className={`${figtree.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className="min-h-full bg-bg text-ink">
+        <ThemeWatcher />
+        {children}
+      </body>
     </html>
   );
 }

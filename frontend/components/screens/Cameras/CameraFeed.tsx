@@ -189,6 +189,7 @@ export default function CameraFeed({
       className={`overflow-hidden ${pseudoFull ? "fixed inset-0 z-[3000]" : "relative"} ${
         full ? "flex items-center justify-center" : "rounded-2xl border border-line"
       }`}
+      data-theme="dark"
       style={{ background: "#0B0D11" }}
     >
       <svg

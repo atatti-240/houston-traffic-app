@@ -32,6 +32,12 @@ export function placeName(places: Place[], loc: Location | undefined): string {
   return "Dropped pin";
 }
 
+/** Same place id, or the same point. */
+export function sameLocation(a: Location, b: Location): boolean {
+  if (typeof a === "string" || typeof b === "string") return a === b;
+  return Math.abs(a.lat - b.lat) < 1e-6 && Math.abs(a.lng - b.lng) < 1e-6;
+}
+
 export function placePoint(places: Place[], loc: Location): { lat: number; lng: number } | null {
   if (typeof loc !== "string") return loc;
   const p = places.find((x) => x.id === loc);

@@ -7,23 +7,24 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useApp } from "@/components/app/AppContext";
+import RoadReports from "@/components/reports/RoadReports";
 import { BackHeader, Card, PillButton, Title } from "@/components/ui";
+import { SpeedLimitSign } from "@/components/ui/SpeedLimitSign";
 import { api } from "@/lib/api";
 import { parseSim } from "@/lib/format";
-import { CAUSE, C, LEVEL, type Level } from "@/lib/theme";
+import { CAUSE, CLOSED, C, LEVEL, type Level } from "@/lib/theme";
 import type { SlowdownCause, SlowdownDetail } from "@/lib/types";
 
-/** Label color on the colored Status tile (a dark shade of the level color, like the design). */
-const STATUS_LABEL: Record<Level, string> = { heavy: "#3A0D0D", moderate: "#4A3A00", light: "#0B3A1E" };
-const DELAY_COLOR: Record<Level, string> = { heavy: C.heavyText, moderate: C.moderate, light: C.ink };
+const DELAY_COLOR: Record<Level, string> = { heavy: C.heavyText, moderate: C.moderateText, light: C.ink };
 
 // ---- speed chart -----------------------------------------------------------------------------
 
 const W = 318;
 const PLOT_TOP = 6;
 const PLOT_BOTTOM = 82;
-const MONO = "var(--font-plex-mono), IBM Plex Mono, monospace";
-/** IBM Plex Mono advance width is 0.6em: 6px per character at 10px. */
+/** Chart labels: the app's font with digits of equal width. */
+const NUM = { fontVariantNumeric: "tabular-nums" } as const;
+/** A label's width, a little on the wide side (Figtree at 10px averages under 6px a character). */
 const textW = (s: string) => s.length * 6;
 
 function clockLabel(iso: string): string {
@@ -89,7 +90,7 @@ function SpeedChart({ h }: { h: SlowdownDetail["history"] }) {
   const above = yUsual - 5;
   const below = yUsual + 12;
   const uy = !clash(above) ? above : !clash(below) ? below : yUsual < 40 ? below : above;
-  const halo = { stroke: C.card, strokeWidth: 3, strokeLinejoin: "round" as const, paintOrder: "stroke" };
+  const halo = { stroke: C.bg, strokeWidth: 3, strokeLinejoin: "round" as const, paintOrder: "stroke" };
 
   const first = pts[0];
   const last = pts[pts.length - 1];
@@ -104,18 +105,18 @@ function SpeedChart({ h }: { h: SlowdownDetail["history"] }) {
       {markers.map((m, i) => (
         <line key={`l-${m.t}-${i}`} x1={m.mx} y1={8} x2={m.mx} y2={PLOT_BOTTOM + 2} stroke={C.ink} strokeWidth={1} />
       ))}
-      <text x={0} y={uy} fontFamily={MONO} fontSize={10} fontWeight={500} fill={C.muted} {...halo}>
+      <text x={0} y={uy} style={NUM} fontSize={10} fontWeight={500} fill={C.muted} {...halo}>
         {usualText}
       </text>
       {markers.map((m, i) => (
-        <text key={`t-${m.t}-${i}`} x={m.tx} y={m.ty} textAnchor={m.anchor} fontFamily={MONO} fontSize={10} fontWeight={500} fill={C.ink} {...halo}>
+        <text key={`t-${m.t}-${i}`} x={m.tx} y={m.ty} textAnchor={m.anchor} style={NUM} fontSize={10} fontWeight={500} fill={C.ink} {...halo}>
           {m.label}
         </text>
       ))}
-      <text x={0} y={94} fontFamily={MONO} fontSize={10} fontWeight={500} fill={C.muted}>
+      <text x={0} y={94} style={NUM} fontSize={10} fontWeight={500} fill={C.muted}>
         {clockLabel(first.t)}
       </text>
-      <text x={W} y={94} textAnchor="end" fontFamily={MONO} fontSize={10} fontWeight={500} fill={C.muted}>
+      <text x={W} y={94} textAnchor="end" style={NUM} fontSize={10} fontWeight={500} fill={C.muted}>
         now
       </text>
     </svg>
@@ -127,7 +128,7 @@ function SpeedChart({ h }: { h: SlowdownDetail["history"] }) {
 function Tile({ label, children, bg, labelColor, fg }: { label: string; children: ReactNode; bg?: string; labelColor?: string; fg?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-[14px] p-3" style={{ background: bg ?? C.card, color: fg ?? C.ink }}>
-      <span className="text-[12px]" style={{ color: labelColor ?? C.muted }}>
+      <span className="text-[12px]" style={{ color: labelColor ?? (fg ? "inherit" : C.muted), opacity: fg && !labelColor ? 0.8 : undefined }}>
         {label}
       </span>
       {children}
@@ -155,6 +156,16 @@ function CauseBar({ c }: { c: SlowdownCause }) {
         <div className="h-2.5 rounded-[5px]" style={{ width: `${Math.max(0, Math.min(100, c.pct))}%`, background: CAUSE[c.kind]?.color ?? C.accent }} />
       </div>
       <span className="text-[12px] text-muted">{causeDetail(c)}</span>
+    </div>
+  );
+}
+
+/** The road's posted limit (OpenStreetMap), or plainly that we don't know it. Floats right of the title. */
+function PostedLimit({ mph }: { mph: number | null }) {
+  return (
+    <div className="float-right mb-1 ml-3 flex flex-col items-center gap-1">
+      <SpeedLimitSign mph={mph} size={40} />
+      {mph === null && <span className="text-[11px] leading-none text-muted">Not known</span>}
     </div>
   );
 }
@@ -263,9 +274,9 @@ export default function WhySlow() {
           <Bone h={18} w="52%" r={6} />
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <Bone h={66} r={14} />
-          <Bone h={66} r={14} />
-          <Bone h={66} r={14} />
+          <Bone h={86} r={14} />
+          <Bone h={86} r={14} />
+          <Bone h={86} r={14} />
         </div>
         <Bone h={160} r={18} />
         <Bone h={230} r={18} />
@@ -284,15 +295,16 @@ export default function WhySlow() {
     <div className={PAGE}>
       <BackHeader onBack={back} label="Selected road" />
 
-      <div className="flex flex-col gap-1.5">
+      <div className="flow-root">
+        {d.speed_limit_mph !== undefined && <PostedLimit mph={d.speed_limit_mph} />}
         <Title>{d.road}</Title>
-        <span className="text-[14px] text-muted">
+        <span className="mt-1.5 block text-[14px] text-muted">
           {d.place} · {d.miles} mi
         </span>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <Tile label="Status" bg={LEVEL[statusLevel].color} fg={LEVEL[statusLevel].fg} labelColor={STATUS_LABEL[statusLevel]}>
+        <Tile label="Status" bg={d.closed ? CLOSED.bg : LEVEL[statusLevel].bg} fg={d.closed ? CLOSED.fg : LEVEL[statusLevel].fg}>
           <span className="text-[17px] font-semibold">{status}</span>
         </Tile>
         <Tile label="Delay">
@@ -303,7 +315,11 @@ export default function WhySlow() {
         <Tile label="Speed">
           <span className="font-num text-[17px] whitespace-nowrap">
             {d.speed_mph}
-            <span className="text-[12px] text-muted"> / {d.free_flow_mph} mph</span>
+            <span className="text-[12px] text-muted"> mph</span>
+          </span>
+          {/* Free-flow speed, labelled so it doesn't read as the posted limit on the sign. */}
+          <span className="text-[12px] text-muted">
+            <span className="font-num">{d.free_flow_mph}</span> when clear
           </span>
         </Tile>
       </div>
@@ -332,6 +348,7 @@ export default function WhySlow() {
           d.causes.map((c, i) => <CauseBar key={`${c.kind}-${i}`} c={c} />)
         )}
       </Card>
+      <RoadReports segmentId={d.id} />
 
       {showNotify && (
         <PillButton variant={watching ? "outline" : "primary"} aria-busy={busy} onClick={toggleWatch}>

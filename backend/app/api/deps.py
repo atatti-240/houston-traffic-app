@@ -4,7 +4,10 @@ from datetime import date, datetime, time, timedelta
 from fastapi import HTTPException, Request
 
 from app.api.schemas import LatLng, Location, PlaceIn
+from app.conditions.provider import ConditionsView
+from app.directions.ends import End, candidates, choose_ends
 from app.planner import Place
+from app.routing.router import Router, resolve_safety
 from app.services import Services
 from app.timeutil import to_local_naive
 
@@ -19,6 +22,31 @@ def resolve_location(svc: Services, loc: Location) -> str:
     if loc not in svc.network.nodes:
         raise HTTPException(404, f"Unknown place {loc!r}. See GET /places.")
     return loc
+
+
+def _end(svc: Services, loc: Location) -> End:
+    return (loc.lat, loc.lng) if isinstance(loc, LatLng) else resolve_location(svc, loc)
+
+
+def resolve_ends(
+    svc: Services,
+    origin: Location,
+    destination: Location,
+    depart_at: datetime,
+    router: Router,
+    safe_path: bool | None = None,
+    safety_weight: float | None = None,
+    view: ConditionsView | None = None,
+) -> tuple[str, str]:
+    """The nodes a trip runs between. A point's is picked with the other end in mind
+    (app/directions/ends.py); places are their own node, as before."""
+    o, d = _end(svc, origin), _end(svc, destination)
+    return choose_ends(svc.network, router, o, d, depart_at, resolve_safety(safe_path, safety_weight), view)
+
+
+def joins_at(svc: Services, loc: Location, node: str) -> bool:
+    """Whether a route for this trip end may start or end at `node` (see resolve_ends)."""
+    return node in candidates(svc.network, _end(svc, loc))
 
 
 def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:

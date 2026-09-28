@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
-from app.api import causes, cv, demo, geo, hazards, network, planning, plans
+from app.api import causes, cv, demo, directions, geo, hazards, network, planning, plans, reports, shares, travel
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.models import RoadSegment, ScoreEntry
@@ -22,6 +22,7 @@ log = logging.getLogger("houston")
 def bootstrap() -> Services:
     """Make sure the DB has a network and trained scores, then build the services."""
     from app.seed.network import refresh_shapes, seed_network
+    from app.seed.road_rules import refresh_road_rules
 
     init_db()
     with SessionLocal() as s:
@@ -30,6 +31,8 @@ def bootstrap() -> Services:
             seed_network(s)
         elif n := refresh_shapes(s):
             log.warning("Updated %s road shapes, crossings and cameras to the traced roads", n)
+        if n := refresh_road_rules(s):
+            log.warning("Updated speed limits and toll roads on %s segments", n)
         has_scores = bool(s.scalar(select(func.count()).select_from(ScoreEntry)))
     svc = Services(SessionLocal)
     if not has_scores:
@@ -112,10 +115,14 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.include_router(network.router)
     app.include_router(planning.router)
     app.include_router(plans.router)
+    app.include_router(shares.router)
     app.include_router(causes.router)
     app.include_router(demo.router)
     app.include_router(geo.router)
     app.include_router(cv.router)
+    app.include_router(reports.router)
+    app.include_router(directions.router)
+    app.include_router(travel.router)
     app.include_router(hazards.router)
     return app
 

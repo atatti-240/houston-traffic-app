@@ -1,71 +1,115 @@
-/** Design tokens and the shared vocabulary of causes, levels and alert groups (from the design). */
+/** Design tokens and the shared vocabulary of causes, levels and alert groups. */
 
+/**
+ * Colors are CSS variables with a light and a dark value (app/globals.css), so anything drawn with
+ * `C` follows the theme (System / Light / Dark) by itself. They work wherever the browser resolves
+ * CSS: inline styles, SVG attributes, Leaflet lines and divIcons. Canvas and MapLibre paint need real
+ * values: use `cssColor()` or the palettes in components/map/basemapStyle.ts.
+ * For a see-through tint use `tint(C.heavy, 12)` (color-mix), never a hex alpha suffix.
+ */
 export const C = {
-  bg: "#111318",
-  map: "#171A21",
-  nav: "#15181E",
-  card: "#1E222B",
-  cardHi: "#232A3A",
-  pop: "#232833",
-  popLine: "#353B48",
-  line: "#2A2F3B",
-  edge: "#2E3340",
-  edgeStrong: "#3A404D",
-  ink: "#ECEDEF",
-  soft: "#C4C8D2",
-  muted: "#9AA0AE",
-  accent: "#8FB0FF",
-  accentHi: "#B5CCFF",
-  onAccent: "#0E1015",
-  heavy: "#FF4D4D",
-  heavyText: "#FF7A70",
-  moderate: "#F5C518",
-  light: "#2FBF6B",
-  marker: "#F2F3F5",
+  bg: "var(--c-bg)", // app background, panels
+  map: "var(--c-map)", // map background
+  nav: "var(--c-nav)", // bottom nav
+  card: "var(--c-card)", // inputs, chips, list rows (the secondary surface)
+  cardHi: "var(--c-card-hi)", // hovered / pressed card
+  float: "var(--c-float)", // floating controls over the map (with SHADOW[1])
+  pop: "var(--c-pop)", // tooltips, popovers, menus (with SHADOW[2])
+  popLine: "var(--c-pop-line)",
+  line: "var(--c-line)", // dividers, bar tracks
+  edge: "var(--c-edge)", // control borders
+  edgeStrong: "var(--c-edge-strong)", // outline chips and buttons
+  ink: "var(--c-ink)", // primary text
+  onInk: "var(--c-on-ink)", // text on an ink background
+  soft: "var(--c-soft)", // secondary text
+  muted: "var(--c-muted)", // muted text
+  accent: "var(--c-accent)", // links, primary buttons
+  accentHi: "var(--c-accent-hi)",
+  onAccent: "var(--c-on-accent)",
+  sel: "var(--c-sel)", // selected chip / segment
+  onSel: "var(--c-on-sel)", // its text
+  heavy: "var(--c-heavy)", // heavy traffic: lines, dots, swatches
+  heavyText: "var(--c-heavy-text)", // red text on a surface (AA)
+  moderate: "var(--c-moderate)",
+  moderateText: "var(--c-moderate-text)",
+  light: "var(--c-light)",
+  lightText: "var(--c-light-text)",
+  stopped: "var(--c-stopped)", // closed / stopped road
+  marker: "var(--c-marker)", // icon discs on the map
+  markerLine: "var(--c-marker-line)",
+  onDot: "var(--c-on-dot)", // an icon on a colored dot (alert groups)
+  halo: "var(--c-halo)", // outline around dots and lines on the map
+  route: "var(--c-route)",
+  routeCasing: "var(--c-route-casing)",
+  alt: "var(--c-alt)", // alternative route
+  scrim: "var(--c-scrim)",
 } as const;
+
+/** Google-style elevation (box-shadow values). */
+export const SHADOW = {
+  1: "var(--shadow-1)", // cards, floating buttons
+  2: "var(--shadow-2)", // menus, popovers, toasts
+  up: "var(--shadow-up)", // bottom sheets
+} as const;
+
+/** `color` at `pct`% over transparent, for tinted backgrounds. */
+export function tint(color: string, pct: number): string {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
+
+/** The current value of a `C` color, for canvas and other APIs that can't read CSS variables (client only). */
+export function cssColor(color: string): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(color);
+  if (!m || typeof document === "undefined") return color;
+  return getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || color;
+}
 
 export type Level = "heavy" | "moderate" | "light";
 
-export const LEVEL: Record<Level, { label: string; color: string; fg: string }> = {
-  heavy: { label: "Heavy", color: C.heavy, fg: "#11141A" },
-  moderate: { label: "Moderate", color: C.moderate, fg: "#11141A" },
-  light: { label: "Light", color: C.light, fg: "#11141A" },
+/** `color`: lines, dots and swatches. `bg` with `fg`: a filled pill (AA contrast). `text`: colored text on a surface. */
+export const LEVEL: Record<Level, { label: string; color: string; bg: string; fg: string; text: string }> = {
+  heavy: { label: "Heavy", color: C.heavy, bg: "var(--c-heavy-bg)", fg: "var(--c-on-heavy)", text: C.heavyText },
+  moderate: { label: "Moderate", color: C.moderate, bg: "var(--c-moderate-bg)", fg: "var(--c-on-moderate)", text: C.moderateText },
+  light: { label: "Light", color: C.light, bg: "var(--c-light-bg)", fg: "var(--c-on-light)", text: C.lightText },
 };
+
+/** A closed road's pill. */
+export const CLOSED = { bg: C.stopped, fg: "#ffffff" } as const;
 
 /** What's causing a slowdown. `icon` is a 24x24 stroke path (draw with <Icon d=...>). */
 export type CauseKind = "rush" | "event" | "crash" | "train" | "closure" | "weather" | "construction" | "volume";
 
 export const CAUSE: Record<CauseKind, { label: string; icon: string; color: string }> = {
-  rush: { label: "Rush hour", icon: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 8v4l3 2", color: C.accent },
+  rush: { label: "Rush hour", icon: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 8v4l3 2", color: "var(--c-cause-rush)" },
   event: {
     label: "Event",
     icon: "M9 18V6l10-2v12M9 18a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0zM19 16a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0z",
-    color: "#B07CE8",
+    color: "var(--c-cause-event)",
   },
   crash: {
     label: "Crash",
     icon: "M10.3 3.9L2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 16.5v.5",
-    color: C.heavy,
+    color: "var(--c-cause-crash)",
   },
   train: {
     label: "Train",
     icon: "M7 3h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM5 10h14M8 20l-1.5 2M16 20l1.5 2M9 13v.01M15 13v.01",
-    color: "#E0A04A",
+    color: "var(--c-cause-train)",
   },
-  closure: { label: "Road closure", icon: "M3 8h18v6H3zM8 8l-3 6M14 8l-3 6M20 8l-3 6M6 14v6M18 14v6", color: "#FF8A3D" },
+  closure: { label: "Road closure", icon: "M3 8h18v6H3zM8 8l-3 6M14 8l-3 6M20 8l-3 6M6 14v6M18 14v6", color: "var(--c-cause-closure)" },
   weather: {
     label: "Weather",
     icon: "M7 15a4 4 0 0 1-.5-7.97A6 6 0 0 1 18 8a3.5 3.5 0 0 1 0 7zM8 18l-1 3M12 18l-1 3M16 18l-1 3",
-    color: "#6FA8C4",
+    color: "var(--c-cause-weather)",
   },
-  construction: { label: "Construction", icon: "M4 20h16M9 20l3-15 3 15M10.2 12h3.6M9.4 16h5.2", color: C.moderate },
-  volume: { label: "Heavier than usual", icon: "M4 17l5-5 4 4 7-8", color: "#E5963A" },
+  construction: { label: "Construction", icon: "M4 20h16M9 20l3-15 3 15M10.2 12h3.6M9.4 16h5.2", color: "var(--c-cause-construction)" },
+  volume: { label: "Heavier than usual", icon: "M4 17l5-5 4 4 7-8", color: "var(--c-cause-volume)" },
 };
 
 /** Order of the cause chips on the map sheet (as in the design). */
 export const CAUSE_ORDER: CauseKind[] = ["rush", "event", "crash", "train", "closure", "weather", "construction", "volume"];
 
-/** Alert groups (the Alerts screen's filters) and their icon dot colors. */
+/** Alert groups (the Alerts screen's filters) and their icon dot colors (draw the icon on it in `C.onDot`). */
 export type AlertGroup = "incident" | "roadwork" | "event" | "weather" | "train" | "volume";
 
 export const ALERT_GROUP: Record<AlertGroup, { label: string; filter: string; icon: string; color: string }> = {
@@ -73,28 +117,29 @@ export const ALERT_GROUP: Record<AlertGroup, { label: string; filter: string; ic
     label: "Incident",
     filter: "Incidents",
     icon: "M12 8v5M12 16.5v.5M10.3 3.9L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z",
-    color: "#D93D3D",
+    color: "var(--c-group-incident)",
   },
-  roadwork: { label: "Roadwork", filter: "Roadwork", icon: "M4 20h16M7 20l4-14h2l4 14M8.5 14h7", color: "#3E63DD" },
-  event: { label: "Event", filter: "Events", icon: "M8 3v4M16 3v4M4 9h16M5 5h14v15H5z", color: "#8E4EC6" },
-  weather: { label: "Weather", filter: "Weather", icon: CAUSE.weather.icon, color: "#2B7BA8" },
-  train: { label: "Train", filter: "Trains", icon: CAUSE.train.icon, color: "#9A6A1E" },
-  volume: { label: "Heavier than usual", filter: "Busier", icon: "M4 17l5-5 4 4 7-8", color: "#B86E0B" },
+  roadwork: { label: "Roadwork", filter: "Roadwork", icon: "M4 20h16M7 20l4-14h2l4 14M8.5 14h7", color: "var(--c-group-roadwork)" },
+  event: { label: "Event", filter: "Events", icon: "M8 3v4M16 3v4M4 9h16M5 5h14v15H5z", color: "var(--c-group-event)" },
+  weather: { label: "Weather", filter: "Weather", icon: CAUSE.weather.icon, color: "var(--c-group-weather)" },
+  train: { label: "Train", filter: "Trains", icon: CAUSE.train.icon, color: "var(--c-group-train)" },
+  volume: { label: "Heavier than usual", filter: "Busier", icon: "M4 17l5-5 4 4 7-8", color: "var(--c-group-volume)" },
 };
 
-/** Vehicle boxes the camera AI draws, by class (the legend under a live camera). */
+/** Vehicle boxes the camera AI draws, by class (the legend under a live camera). Drawn over video, so the
+ * same bright colors in both themes. */
 export const VEHICLE: Record<string, { label: string; color: string }> = {
-  car: { label: "Cars", color: C.accent },
-  truck: { label: "Trucks", color: C.moderate },
-  bus: { label: "Buses", color: "#B07CE8" },
-  motorcycle: { label: "Motorcycles", color: C.light },
+  car: { label: "Cars", color: "#8ab4f8" },
+  truck: { label: "Trucks", color: "#fdd663" },
+  bus: { label: "Buses", color: "#d7aefb" },
+  motorcycle: { label: "Motorcycles", color: "#81c995" },
 };
 
 /** Traffic on a live camera, from its rough speeds. */
-export const FLOW: Record<"flowing" | "slow" | "stopped", { label: string; color: string }> = {
-  flowing: { label: "Flowing", color: C.light },
-  slow: { label: "Slow", color: C.moderate },
-  stopped: { label: "Stopped", color: C.heavy },
+export const FLOW: Record<"flowing" | "slow" | "stopped", { label: string; color: string; text: string }> = {
+  flowing: { label: "Flowing", color: C.light, text: C.lightText },
+  slow: { label: "Slow", color: C.moderate, text: C.moderateText },
+  stopped: { label: "Stopped", color: C.heavy, text: C.heavyText },
 };
 
 /** Common UI icons (24x24 stroke paths from the design). */
