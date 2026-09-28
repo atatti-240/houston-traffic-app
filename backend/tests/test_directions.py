@@ -1106,3 +1106,29 @@ def test_route_and_recommend_list_only_toll_free_routes_when_avoiding_tolls(clie
         "/recommend", json={"origin": "energy", "destination": "downtown", "arrive_by": "08:30", "avoid_tolls": True}
     ).json()
     assert len(rec["routes"]) >= 2 and not any(r["uses_toll"] for r in rec["routes"])
+
+
+def test_a_replan_while_driving_keeps_heading_and_avoid_tolls_together(client, services):
+    """Driving from a point with Avoid tolls on: the re-plan (POST /route?directions=true with the
+    current spot, `heading` and `avoid_tolls`) stays off toll roads on every route, and OSRM gets
+    the heading for the start."""
+    fake = FakeOsrm()
+    services.directions = DoorDirections(client_with(fake))
+    here = {"lat": 29.7835, "lng": -95.6290}  # by the Energy Corridor, heading east
+    door = {"lat": 29.7600, "lng": -95.3690}  # downtown
+    trip = {"origin": here, "destination": door, "depart_at": MON(7, 30).isoformat(), "heading": 88.4}
+
+    res = client.post("/route?directions=true", json={**trip, "avoid_tolls": True})
+    assert res.status_code == 200
+    body = res.json()
+    best = body["best"]
+    assert len(fake.urls) == 1 and _parse(fake.urls[0])[1]["bearings"].startswith("88,90;")
+    assert best["directions"]["status"] == "ok" and best["directions"]["steps"][-1]["instruction"].startswith("Arrive")
+    assert best["geometry"][-1] == pytest.approx([door["lat"], door["lng"]], abs=1e-5)
+    assert len(body["routes"]) >= 2 and not any(r["uses_toll"] for r in body["routes"])
+    assert not any(s["id"].startswith("BW8:") for r in body["routes"] for s in r["segments"])
+
+    # The same drive without Avoid tolls does offer the tollway
+    plain = client.post("/route?directions=true", json=trip)
+    assert plain.status_code == 200 and any(r["uses_toll"] for r in plain.json()["routes"])
+    assert all(_parse(u)[1]["bearings"].startswith("88,90;") for u in fake.urls)
