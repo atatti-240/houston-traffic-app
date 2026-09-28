@@ -3,13 +3,15 @@
 /** Live cameras (design "Live cameras"): pick an area, watch a camera's live view and see what it
  * shows; the note links to "Why it's slow" for that road. The map marks the selected camera.
  * Cameras with a live AI feed (the team's camera AI on a Baton Rouge camera standing in for ours)
- * come first and show the real video with vehicle boxes; the rest show a drawn view. */
+ * come first and show the real video with vehicle boxes; the rest show live video from a Baton Rouge
+ * camera standing in (labeled so), or a simulated view when that won't load. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp, type MapScene, type Screen } from "@/components/app/AppContext";
-import CameraFeed, { type LiveCam, type SimBase } from "@/components/screens/Cameras/CameraFeed";
-import LiveFeedPanel, { FeedOffline } from "@/components/screens/Cameras/LiveFeedPanel";
+import type { LiveCam, SimBase } from "@/components/screens/Cameras/CameraFeed";
+import HlsVideo from "@/components/screens/Cameras/HlsVideo";
+import LiveFeedPanel from "@/components/screens/Cameras/LiveFeedPanel";
 import LiveVideo from "@/components/screens/Cameras/LiveVideo";
 import { useLiveFeed } from "@/components/screens/Cameras/liveFeed";
 import { BackHeader, Card, FilterChip, Icon, LevelDot, LevelPill } from "@/components/ui";
@@ -303,10 +305,7 @@ export default function Cameras() {
             delayMs={detail?.video_delay_ms ?? 2500}
           />
         ) : (
-          <>
-            <CameraFeed key={cam.id} cam={cam} name={name} base={base} />
-            <FeedOffline feed={feed} />
-          </>
+          <HlsVideo key={cam.id} cam={cam} name={name} base={base} feed={feed} />
         )}
       </div>
 
