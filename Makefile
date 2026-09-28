@@ -40,6 +40,8 @@ cv-fake:
 dev-cv:
 	CV_URL=http://localhost:8500 $(MAKE) -j3 cv-fake backend frontend
 
+# The frontend's unit tests run TypeScript directly: Node 22.18+ (it strips the types itself).
 test:
 	cd backend && uv run pytest -q
 	cd frontend && npx next typegen && npx tsc --noEmit
+	cd frontend && npm test
