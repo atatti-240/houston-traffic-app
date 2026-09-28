@@ -47,8 +47,11 @@ class RecommendRequest(AvoidIn):
 
 class TripIn(AvoidIn):
     name: str = "My commute"
-    origin: str
-    destination: str
+    origin: Location
+    destination: Location
+    # A point's own name ("EaDo", a business), shown instead of the nearest place's.
+    origin_name: str | None = None
+    destination_name: str | None = None
     arrive_by: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$", description="24h HH:MM")
     days: list[Annotated[int, Field(ge=0, le=6)]] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4], min_length=1, description="Weekdays, Mon=0 .. Sun=6"

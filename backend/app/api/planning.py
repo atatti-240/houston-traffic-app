@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 
 from app.api.deps import get_services, is_clock_time, resolve_ends, resolve_location, resolve_time
-from app.api.schemas import RecommendRequest, RouteRequest, TripIn
+from app.api.schemas import LatLng, Location, RecommendRequest, RouteRequest, TripIn
 from app.directions.trips import recommend_response, route_response
-from app.models import Notification, Trip, TripState
+from app.models import Notification, Trip, TripState, parse_point, point_key
 from app.recommender import recommend_departure
 from app.routing.avoid import avoiding
 from app.routing.router import NoRouteError
@@ -65,12 +65,24 @@ def recommend(req: RecommendRequest, directions: bool = False, svc: Services = D
         raise HTTPException(404, str(e)) from e
 
 
+def _stored(loc: Location) -> str:
+    return point_key(loc.lat, loc.lng) if isinstance(loc, LatLng) else loc
+
+
+def _location_json(value: str) -> str | dict:
+    """A place id as is, a point back as {lat, lng} (what was saved)."""
+    pt = parse_point(value)
+    return {"lat": pt[0], "lng": pt[1]} if pt else value
+
+
 def _trip_json(t: Trip) -> dict:
     return {
         "id": t.id,
         "name": t.name,
-        "origin": t.origin,
-        "destination": t.destination,
+        "origin": _location_json(t.origin),
+        "destination": _location_json(t.destination),
+        "origin_name": t.origin_name,
+        "destination_name": t.destination_name,
         "arrive_by": t.arrive_by,
         "days": t.day_list,
         "safe_path": t.safe_path,
@@ -82,15 +94,18 @@ def _trip_json(t: Trip) -> dict:
 
 @router.post("/trips", status_code=201)
 def create_trip(body: TripIn, response: Response, svc: Services = Depends(get_services)):
-    """Save a trip. The same trip saved again (same device, places, arrive-by, days and safety)
-    returns the one already saved (200) instead of a second copy that would alert twice."""
+    """Save a trip. Its places are place ids or points ({lat, lng}, with origin_name / destination_name).
+    The same trip saved again (same device, places, arrive-by, days and safety) returns the one
+    already saved (200) instead of a second copy that would alert twice."""
     for loc in (body.origin, body.destination):
         resolve_location(svc, loc)
     with svc.session_factory() as s:
         trip = Trip(
             name=body.name,
-            origin=body.origin,
-            destination=body.destination,
+            origin=_stored(body.origin),
+            destination=_stored(body.destination),
+            origin_name=body.origin_name,
+            destination_name=body.destination_name,
             arrive_by=body.arrive_by,
             days=",".join(str(d) for d in sorted(set(body.days))),
             safe_path=body.safe_path,

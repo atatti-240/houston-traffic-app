@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.causes import CausesEngine, unusual
 from app.conditions.provider import FEEDS
-from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState
+from app.models import Notification, SavedPlan, SlowdownWatch, Trip, TripState, parse_point
 from app.notifications.service import NotificationService
 from app.plan_io import plan_to_json, request_from_json
 from app.planner import Plan, plan_trip
@@ -298,6 +298,11 @@ class TripScheduler:
                 return arrive_by
         return None
 
+    def _node(self, loc: str) -> str:
+        """A trip's place id, or its point snapped to the road map (like resolve_location)."""
+        pt = parse_point(loc)
+        return self.router.network.nearest_node(*pt).id if pt else loc
+
     def _check_trip(self, session: Session, trip: Trip, now: datetime) -> Notification | None:
         arrive_by = self._watched_arrival(trip, now) or self._deferred_arrival(session, trip, now)
         if arrive_by is None:
@@ -313,7 +318,7 @@ class TripScheduler:
 
         # Never recommend a departure that has already passed.
         rec = recommend_departure(
-            avoiding(self.router, trip.avoid), trip.origin, trip.destination, arrive_by, earliest=now,
+            avoiding(self.router, trip.avoid), self._node(trip.origin), self._node(trip.destination), arrive_by, earliest=now,
             safety_weight=trip.weight,
         )
         reason = _top_reason(rec)
