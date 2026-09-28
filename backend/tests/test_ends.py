@@ -163,3 +163,25 @@ def test_a_point_tries_a_few_nearby_nodes_and_a_place_only_its_own(services):
     assert {"midtown", "gulf_ee"} <= set(eado) and len(eado) <= CANDIDATES
     # Far from our roads (another city): its nearest node only, as before.
     assert candidates(net, (40.7128, -74.0060)) == [net.nearest_node(40.7128, -74.0060).id]
+
+
+def _down(n, url, body):
+    raise OSError("OSRM is down")
+
+
+def test_a_streets_only_trip_keeps_a_time_and_a_line_when_osrm_is_down(client, services):
+    """Midtown -> EaDo is door to door on city streets (no main roads). With OSRM down it used to
+    say 0 min with no line at all, and "leave" at the arrive-by time."""
+    body = {"origin": "midtown", "destination": EADO}
+    best = ask(client, services, "/route?directions=true", body, FakeOsrm(_down))["best"]
+    assert best["segments"] == []
+    assert best["directions"]["status"] == "unavailable" and best["directions"]["retry_after_s"] is None
+    assert 3 < best["total_min"] < 10
+    mid = services.network.nodes["midtown"]
+    assert best["geometry"] == [[mid.lat, mid.lng], [EADO["lat"], EADO["lng"]]]
+    rec = ask(client, services, "/recommend?directions=true", {**body, "arrive_by": "08:30"}, FakeOsrm(_down))
+    assert rec["route"]["total_min"] == best["total_min"]
+    assert rec["depart_at"] <= "2026-09-28T08:20:00" and rec["on_time"]
+    # Without directions (the Where to list) it isn't 0 min either
+    plain = client.post("/route", json=body).json()["best"]
+    assert plain["total_min"] == best["total_min"]
